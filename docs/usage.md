@@ -86,6 +86,9 @@ the account can see something under it.
 The account menu, named after your username, shows who you are signed in as, then
 **Change password**, **Date and time**, **Report an issue** and **Sign out**.
 **Report an issue** opens a new issue on the project's GitHub page in a new tab.
+**Sign out** opens the sign-in page. When the panel
+[signs in through a reverse proxy](#sign-in-with-single-sign-on), it opens the SSO gateway's
+logout page if the operator set one, and otherwise the gateway signs you straight back in.
 
 ### After a panel upgrade
 
@@ -1092,6 +1095,15 @@ and is signed in.
 **Invite history** lists every invite with who issued it and whether it is pending,
 redeemed, revoked or expired, with a filter for each. **Revoke invite** cancels a
 pending one.
+
+### Sign in with single sign-on
+
+When the operator has set up [reverse proxy sign-in](configuration.md#sign-in-through-a-reverse-proxy),
+a member who is signed in to the group's SSO gateway opens the panel already signed in,
+with no password prompt. Every account's panel username, administrators included, must
+match its SSO username exactly. Create the account on **Users** with that name; someone
+redeeming an invite has to type their exact SSO username themselves. Administrators always
+sign in with their password, under that same name.
 
 ### See which servers a user reaches
 

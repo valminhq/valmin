@@ -19,6 +19,9 @@ class Session {
 	/** True once the permission set is known or the load that would supply it has finished. A
 	 * boolean derived, so a screen reading it re-runs once rather than on every re-read. */
 	ready = $derived(this.permissions !== null || !this.loading);
+	/** Set when a session ends in this tab. The sign-in page then asks once more who is signed
+	 * in, since a reverse proxy may sign the browser straight back in. */
+	ended = false;
 
 	async load(): Promise<void> {
 		this.loading = true;
@@ -75,6 +78,7 @@ class Session {
 	signedOut(): void {
 		this.user = null;
 		this.permissions = null;
+		this.ended = true;
 	}
 }
 

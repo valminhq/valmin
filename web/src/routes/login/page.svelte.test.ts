@@ -45,6 +45,7 @@ beforeEach(() => {
 	daemon.on('POST', '/auth/login', () => Response.json(ada));
 	vi.mocked(goto).mockReset();
 	vi.mocked(leave).mockReset();
+	session.ended = false;
 });
 
 afterEach(() => {
@@ -67,5 +68,24 @@ describe('signing in', () => {
 
 		await vi.waitFor(() => expect(leave).toHaveBeenCalledWith('/typo'));
 		expect(screen.queryByText(/could not complete/i)).toBeNull();
+	});
+});
+
+describe('arriving after a session ended', () => {
+	it('asks who is signed in again, so a reverse proxy can sign the browser back in', async () => {
+		daemon.on('GET', '/auth/me', () => Response.json(ada));
+		session.signedOut();
+		app.page.url = new URL('http://localhost/login');
+		render(Page);
+
+		await vi.waitFor(() => expect(session.user?.username).toBe('ada'));
+		expect(daemon.requests('GET', '/auth/me')).toHaveLength(1);
+	});
+
+	it('does not ask again when no session ended in this tab', () => {
+		app.page.url = new URL('http://localhost/login');
+		render(Page);
+
+		expect(daemon.requests('GET', '/auth/me')).toHaveLength(0);
 	});
 });

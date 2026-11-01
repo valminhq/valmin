@@ -43,6 +43,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | See which names a player has used, on any server | [Names](usage.md#names), [Players across servers](usage.md#players-across-servers)         |
 | Show server status to people without an account | [Public status page](usage.md#public-status-page)                                          |
 | Give friends access                             | [Share access](usage.md#share-access)                                                      |
+| Sign in with our SSO (Authelia, Authentik)      | [Sign in through a reverse proxy](configuration.md#sign-in-through-a-reverse-proxy)        |
 | Back up, restart or update on a timetable       | [Schedule maintenance](operations.md#schedule-maintenance)                                 |
 | Stop servers nobody is playing on               | [Stop a server when nobody plays](operations.md#stop-a-server-when-nobody-plays)           |
 | Reset or upgrade the world with mods            | [Reset or upgrade the world with mods](operations.md#reset-or-upgrade-the-world-with-mods) |

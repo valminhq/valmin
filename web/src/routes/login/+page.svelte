@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api } from '#lib/api/client.js';
@@ -16,6 +17,14 @@
 	let password = $state('');
 	let busy = $state(false);
 	let failure = $state<unknown>(null);
+
+	// Arriving here after a session ended in this tab, ask once more: a reverse proxy that signs
+	// people in opens a new session on that read, and the layout then leaves this page.
+	onMount(() => {
+		if (!session.ended) return;
+		session.ended = false;
+		void session.load();
+	});
 
 	async function submit(event: SubmitEvent) {
 		event.preventDefault();

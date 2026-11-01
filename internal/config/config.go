@@ -51,6 +51,11 @@ type Server struct {
 	ShutdownGrace  Duration `yaml:"shutdown_grace"`
 	// ExternalURL is required. Invite URLs are handed to humans (04 §3).
 	ExternalURL string `yaml:"external_url"`
+	// ProxyAuthHeader names the header a trusted proxy sets to the signed-in username. Empty
+	// turns sign-in through a reverse proxy off; set, it requires TrustedProxies.
+	ProxyAuthHeader string `yaml:"proxy_auth_header"`
+	// ProxyLogoutURL is where sign-out sends the browser when the proxy owns the sign-in.
+	ProxyLogoutURL string `yaml:"proxy_logout_url"`
 }
 
 type Jobs struct {

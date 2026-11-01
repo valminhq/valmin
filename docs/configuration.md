@@ -37,6 +37,8 @@ mounts, ports, and the browser address.
 | `VALMIN_GAME_IMAGE`         | Game runtime image; `ghcr.io/valminhq/valheim@sha256:…` from the installer, `valmin/valheim:dev` after a local build. |
 | `VALMIN_STEAMCMD_IMAGE`     | Download helper; defaults to `steamcmd/steamcmd:latest`, pinned by digest.                         |
 | `VALMIN_SOCKET_PROXY_IMAGE` | Defaults to `tecnativa/docker-socket-proxy:v0.5.0`, pinned by digest.                              |
+| `VALMIN_PROXY_AUTH_HEADER`  | Turns on [reverse proxy sign-in](#sign-in-through-a-reverse-proxy) with this header; unset (off).  |
+| `VALMIN_PROXY_LOGOUT_URL`   | The SSO gateway's logout page, opened on sign-out; unset.                                          |
 | `VALMIN_CADDY_IMAGE`        | Defaults to `caddy:2-alpine`, pinned by digest.                                                    |
 | `VALMIN_HTTP_PORT`          | Host TCP port for HTTP redirects; defaults to `80`.                                                |
 | `VALMIN_HTTPS_PORT`         | Host TCP and UDP port for HTTPS; defaults to `443`. Also requires an origin override when changed. |
@@ -54,6 +56,8 @@ override should name a digest too.
 | `VALMIN_SERVER_EXTERNAL_URL`                | Required browser origin: `http`/`https`, host, any nonstandard port, no path.      |
 | `VALMIN_SERVER_LISTEN`                      | HTTP listen address; `:8080`.                                                      |
 | `VALMIN_SERVER_TRUSTED_PROXIES`             | Trusted proxy CIDRs; empty by default. Compose sets Caddy's address.               |
+| `VALMIN_SERVER_PROXY_AUTH_HEADER`           | Header a trusted proxy sets to the signed-in username; empty (off). See [reverse proxy sign-in](#sign-in-through-a-reverse-proxy). |
+| `VALMIN_SERVER_PROXY_LOGOUT_URL`            | Absolute URL that sign-out opens when the proxy owns sign-in; empty.               |
 | `VALMIN_DATA_ROOT`                          | Data path visible to the daemon; `/srv/valmin`.                                    |
 | `VALMIN_DATA_HOST_ROOT`                     | Required absolute path to that same directory on the Docker host.                  |
 | `VALMIN_DATA_FREE_SPACE_FLOOR_BYTES`        | Free space below which disk-heavy jobs are refused; `2147483648` (2 GiB).          |
@@ -185,6 +189,104 @@ expecting port 443 and causes origin checks to fail. Do not append `:8443` to
 Use the HTTPS URL directly. Caddy's default HTTP redirect does not know about the
 host port remapping. Public certificate validation still requires the CA's standard
 challenge ports to reach Caddy, or a separate DNS-validation setup.
+
+## Sign in through a reverse proxy
+
+If your group already signs in somewhere with single sign-on, Caddy can ask that SSO
+gateway who the visitor is and pass the username to the panel in a header. The panel then
+signs the person in without a password.
+
+Valmin does not provide or set up the SSO gateway. Run one yourself and connect it to
+Caddy with its [`forward_auth`](https://caddyserver.com/docs/caddyfile/directives/forward_auth)
+directive. Each gateway's Caddy guide names the header that carries the username:
+
+| Gateway                                                                                  | Username header        |
+| ---------------------------------------------------------------------------------------- | ---------------------- |
+| [Authelia](https://www.authelia.com/integration/proxies/caddy/)                          | `Remote-User`          |
+| [Authentik](https://docs.goauthentik.io/docs/add-secure-apps/providers/proxy/server_caddy) | `X-Authentik-Username` |
+| [oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/configuration/integrations/caddy), with `--set-xauthrequest` | `X-Auth-Request-User`  |
+
+How the panel treats the header:
+
+- It reads the header only on connections from an address in
+  `VALMIN_SERVER_TRUSTED_PROXIES`, and ignores it on any other connection. Compose sets that
+  to Caddy's address. The daemon refuses to start if the header is set and the list is empty.
+- Every panel account, administrators included, must use exactly its gateway username.
+  Usernames are case-sensitive. Create accounts with that name on **Users**. An invite does
+  not fix the username: the person redeeming it must type their exact gateway username, and
+  could instead claim another gateway user's name that has no account yet, so prefer
+  creating accounts yourself.
+- The header decides who is signed in. A session cookie for any other username is ignored,
+  so a password sign-in as a different name lasts only until the next request. Only API
+  reads (`GET` and `HEAD`) open a session from the header; a write without a matching
+  session is treated as signed out.
+- A name with no panel account, a disabled account or an administrator gets the normal
+  sign-in page. Administrators never sign in through the header: they sign in with their
+  password, and the session holds because the header names the same account.
+- Whoever the gateway signs in as a name becomes that panel account. Only use a gateway whose
+  usernames you control, not one where people pick or change their own.
+- Each sign-in through the header is written to the daemon log with the username and address.
+  Refused names are logged at `debug` level.
+
+To turn it on, set these in `deploy/.env`, using your gateway's header:
+
+```dotenv
+VALMIN_PROXY_AUTH_HEADER=Remote-User
+VALMIN_PROXY_LOGOUT_URL=https://auth.example.com/logout
+```
+
+The bundled [Caddyfile](../deploy/Caddyfile) removes this header from every client request
+before anything else in its `route` block runs. Add `forward_auth` where the Caddyfile marks
+its place, so that only the gateway can set the header. An Authelia example, where
+`copy_headers` names the same header as `VALMIN_PROXY_AUTH_HEADER`:
+
+```caddy
+route {
+	request_header -{$VALMIN_PROXY_AUTH_HEADER:Remote-User}
+
+	@sso not path /status/* /public/status/* /_app/*
+	forward_auth @sso authelia:9091 {
+		uri /api/authz/forward-auth
+		copy_headers Remote-User
+	}
+
+	reverse_proxy valmind:8080 {
+		header_up X-Forwarded-For {remote_host}
+	}
+}
+```
+
+The `@sso` matcher leaves [public status pages](usage.md#public-status-page) and the files
+they load open to people without an SSO account.
+
+Caddy has to reach the gateway. Keep the gateway on a Docker network of its own and add that
+network to the `caddy` service in `deploy/compose.override.yaml`, for example for an Authelia
+Compose project whose network is `authelia_default`:
+
+```yaml
+services:
+  caddy:
+    networks:
+      sso: {}
+networks:
+  sso:
+    external: true
+    name: authelia_default
+```
+
+Do not attach the gateway to the `valmin` network: a container that starts there before
+Caddy can take Caddy's address, which the panel trusts for the sign-in header. Apply the
+changes with `docker compose up -d`.
+
+Without `forward_auth` in that block, the header never reaches the panel, so nobody is
+signed in by it. With `VALMIN_PROXY_LOGOUT_URL` set, **Sign out** ends the panel session and
+then opens the gateway's logout page. Without it, the gateway signs the browser straight
+back in.
+
+While the gateway is down, Caddy answers every request `forward_auth` covers with `502`.
+To get back in with a password, remove the `forward_auth` block, run
+`docker compose restart caddy`, and sign in. Caddy still removes the header, so nobody is
+signed in by it while the block is gone.
 
 ## Override log patterns
 

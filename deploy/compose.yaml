@@ -17,6 +17,9 @@ services:
       VALMIN_SERVER_EXTERNAL_URL: https://${VALMIN_DOMAIN:?}
       # Caddy's address alone, so no other container can set forwarded headers.
       VALMIN_SERVER_TRUSTED_PROXIES: ${VALMIN_SUBNET_PREFIX:-10.89}.13.2/32
+      # Sign-in through an SSO gateway in the Caddyfile. Empty turns it off.
+      VALMIN_SERVER_PROXY_AUTH_HEADER: ${VALMIN_PROXY_AUTH_HEADER:-}
+      VALMIN_SERVER_PROXY_LOGOUT_URL: ${VALMIN_PROXY_LOGOUT_URL:-}
       # The data root inside the container and on the host. The panel checks they match at
       # startup.
       VALMIN_DATA_ROOT: /srv/valmin
@@ -73,6 +76,8 @@ services:
       VALMIN_DOMAIN: ${VALMIN_DOMAIN:?}
       VALMIN_TLS: ${VALMIN_TLS:-}
       VALMIN_HSTS: ${VALMIN_HSTS:-max-age=31536000}
+      # The sign-in header Caddy removes from every client request.
+      VALMIN_PROXY_AUTH_HEADER: ${VALMIN_PROXY_AUTH_HEADER:-Remote-User}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

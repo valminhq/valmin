@@ -47,6 +47,8 @@ type Config struct {
 	// without a Sessions type (tests, early wiring) simply authenticates
 	// nobody.
 	Auth SessionAuthenticator
+	// Proxy signs in the user a trusted reverse proxy names. Nil turns that off.
+	Proxy *ProxyAuth
 }
 
 // Chain is 11 §5.1, outermost first. The order is a correctness property: the client IP is
@@ -70,7 +72,7 @@ func Chain(cfg *Config) []Layer {
 	}
 	chain = append(chain, RateLimit(cfg.PerIP))
 	if cfg.Auth != nil {
-		chain = append(chain, SessionAuth(cfg.Auth))
+		chain = append(chain, SessionAuth(cfg.Auth, cfg.Proxy))
 	}
 	chain = append(chain, CSRF(cfg.Keeper), AuthRateLimit(cfg.PerUser))
 	return chain

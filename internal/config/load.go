@@ -431,7 +431,7 @@ func validateGame(cfg *Config) []error {
 			cfg.Game.Network, dockerNetworkName)
 	}
 	if raw := cfg.Game.PublicIPURL; raw != "" {
-		if u, err := url.Parse(raw); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		if !isWebURL(raw) {
 			c.failf("game.public_ip_url must be an absolute http or https URL, got %q", raw)
 		}
 	}
@@ -457,8 +457,31 @@ func validateNetwork(cfg *Config) []error {
 			c.failf("server.trusted_proxies: %q is not a CIDR prefix", cidr)
 		}
 	}
+	if h := cfg.Server.ProxyAuthHeader; h != "" {
+		if !headerName.MatchString(h) {
+			c.failf("server.proxy_auth_header: %q is not a header name", h)
+		}
+		if len(cfg.Server.TrustedProxies) == 0 {
+			c.failf("server.proxy_auth_header needs server.trusted_proxies: " +
+				"without it any client could name the user it signs in as")
+		}
+	}
+	if raw := cfg.Server.ProxyLogoutURL; raw != "" {
+		if !isWebURL(raw) {
+			c.failf("server.proxy_logout_url: %q is not an absolute http or https URL", raw)
+		}
+	}
 	return c
 }
+
+// isWebURL reports whether raw is an absolute http or https URL with a host.
+func isWebURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
+}
+
+// headerName is what the panel accepts as server.proxy_auth_header.
+var headerName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]*$`)
 
 func validateStore(cfg *Config) []error {
 	var c collector

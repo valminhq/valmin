@@ -444,6 +444,46 @@ func TestTrustedProxiesValidation(t *testing.T) {
 	})
 }
 
+// TestProxyAuthValidation covers the proxy sign-in settings: the header needs trusted proxies
+// and a plain name, and the logout URL must be absolute.
+func TestProxyAuthValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		env     map[string]string
+		wantErr string
+	}{
+		{"off by default", nil, ""},
+		{"header with trusted proxies", map[string]string{
+			"VALMIN_SERVER_PROXY_AUTH_HEADER": "Remote-User",
+			"VALMIN_SERVER_TRUSTED_PROXIES":   "10.89.13.2/32",
+		}, ""},
+		{"header without trusted proxies", map[string]string{
+			"VALMIN_SERVER_PROXY_AUTH_HEADER": "Remote-User",
+		}, "needs server.trusted_proxies"},
+		{"malformed header", map[string]string{
+			"VALMIN_SERVER_PROXY_AUTH_HEADER": "Remote User:",
+			"VALMIN_SERVER_TRUSTED_PROXIES":   "10.89.13.2/32",
+		}, "not a header name"},
+		{"absolute logout URL", map[string]string{
+			"VALMIN_SERVER_PROXY_LOGOUT_URL": "https://auth.example.com/logout",
+		}, ""},
+		{"relative logout URL", map[string]string{
+			"VALMIN_SERVER_PROXY_LOGOUT_URL": "/logout",
+		}, "not an absolute http or https URL"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := loadWith(t, minimalYAML, tt.env)
+			switch {
+			case tt.wantErr == "" && err != nil:
+				t.Errorf("Load: %v, want no error", err)
+			case tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)):
+				t.Errorf("Load error = %v, want it to contain %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 // TestDefaultsEnableHexium asserts the second mod registry ships enabled, pointed at the
 // host 03 §6.1 records.
 func TestDefaultsEnableHexium(t *testing.T) {

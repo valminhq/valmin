@@ -264,3 +264,38 @@ func TestChangePasswordKeepsOneSessionAndAnnouncesTheRest(t *testing.T) {
 		t.Errorf("the new password does not work: %v", err)
 	}
 }
+
+// TestLoginTrusted asserts a proxy sign-in opens a session for an active member and refuses an
+// unknown name, a disabled account and an admin.
+func TestLoginTrusted(t *testing.T) {
+	db := testDB(t)
+	useFastArgon2Params(t, db)
+	seedLoginUser(t, db, "u1", "root", "a-fine-password")
+	seedLoginUser(t, db, "u2", "ada", "a-fine-password")
+	seedLoginUser(t, db, "u3", "bob", "a-fine-password")
+	if err := db.UpdateUserRoleAndDisabled(t.Context(), "u2", store.RoleMember, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateUserRoleAndDisabled(t.Context(), "u3", store.RoleMember, true); err != nil {
+		t.Fatal(err)
+	}
+	sessions := NewSessions(db, time.Hour, 24*time.Hour)
+
+	logged, err := sessions.LoginTrusted(t.Context(), "ada", "203.0.113.7", "test-agent")
+	if err != nil {
+		t.Fatalf("LoginTrusted(ada) = %v", err)
+	}
+	if got, _, err := sessions.Authenticate(t.Context(), logged.Cookie); err != nil || got == nil || got.ID != "u2" {
+		t.Errorf("Authenticate after LoginTrusted = %+v, %v, want ada", got, err)
+	}
+
+	for name, want := range map[string]error{
+		"nobody": ErrInvalidCredentials,
+		"bob":    ErrAccountDisabled,
+		"root":   ErrProxyAdmin,
+	} {
+		if _, err := sessions.LoginTrusted(t.Context(), name, "", ""); !errors.Is(err, want) {
+			t.Errorf("LoginTrusted(%q) = %v, want %v", name, err, want)
+		}
+	}
+}
