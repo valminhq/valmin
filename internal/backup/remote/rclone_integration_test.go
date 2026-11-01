@@ -115,7 +115,8 @@ func TestRcloneReadsAddedRemoteBackUnchanged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	revealed, err := exec.Command(binary, "reveal", obscured).Output()
+	// The obscured value can start with "-", which rclone would read as a flag.
+	revealed, err := exec.Command(binary, "reveal", "--", obscured).Output()
 	if err != nil {
 		t.Fatal(err)
 	}
