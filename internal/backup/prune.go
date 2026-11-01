@@ -19,6 +19,8 @@ type Entry struct {
 	Snapshot bool
 	// Pinned archives are linked to saved setups. Retention neither counts nor removes them.
 	Pinned bool
+	// Flagged archives hold a world the world check asked the operator to look at.
+	Flagged bool
 }
 
 // Policy is one instance's retention, in archives kept per class. Zero keeps everything in
@@ -35,30 +37,45 @@ type Policy struct {
 // Cold, hot and snapshot are counted independently. Sharing one count would let a burst of
 // cheap hot copies, or the snapshots restores and updates take, evict the quiesced archives
 // the operator chose to keep.
+//
+// The newest unflagged cold and hot archive is kept even past its class's limit: a world that
+// broke and keeps being archived must not push out the last archive whose world passed.
 func Prune(archives []Entry, policy Policy) []Entry {
 	var doomed []Entry
-	cold, hot, snapshots := 0, 0, 0
+	var cold, hot, snapshots classCount
 	for _, a := range archives {
 		if a.Pinned {
 			continue
 		}
-		kept, limit := &cold, policy.KeepCold
+		class, limit := &cold, policy.KeepCold
 		switch {
 		case a.Snapshot:
-			kept = &snapshots
+			class = &snapshots
 		case !a.Consistent:
-			kept, limit = &hot, policy.KeepHot
+			class, limit = &hot, policy.KeepHot
+		}
+		lastGood := !a.Snapshot && !a.Flagged && !class.sawUnflagged
+		if lastGood {
+			class.sawUnflagged = true
 		}
 		if limit <= 0 {
 			continue
 		}
-		if *kept < limit {
-			*kept++
+		if class.kept < limit {
+			class.kept++
 			continue
 		}
-		doomed = append(doomed, a)
+		if !lastGood {
+			doomed = append(doomed, a)
+		}
 	}
 	return doomed
+}
+
+// classCount is one retention class's tally during a Prune walk.
+type classCount struct {
+	kept         int
+	sawUnflagged bool
 }
 
 // Remove unlinks one pruned archive. An already-absent file is not an error: the row is what

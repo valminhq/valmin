@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/backup"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -175,7 +176,7 @@ func TestStaleBackupIsScheduleAware(t *testing.T) {
 		return BackupSchedule{InstanceID: "a", Interval: time.Hour, LastRunAt: lastRun, Missed: missed}
 	}
 	ran := now.Add(-3 * time.Hour)
-	backup := new(now.Add(-150 * time.Minute))
+	backedUp := new(now.Add(-150 * time.Minute))
 
 	for _, tc := range []struct {
 		name       string
@@ -185,8 +186,8 @@ func TestStaleBackupIsScheduleAware(t *testing.T) {
 	}{
 		{"no schedule at all", nil, new(now.Add(-72 * time.Hour)), false},
 		{"schedule has never ticked", []BackupSchedule{hourly(nil, 0)}, nil, false},
-		{"one run missed", []BackupSchedule{hourly(&ran, 1)}, backup, false},
-		{"two runs missed", []BackupSchedule{hourly(&ran, 2)}, backup, true},
+		{"one run missed", []BackupSchedule{hourly(&ran, 1)}, backedUp, false},
+		{"two runs missed", []BackupSchedule{hourly(&ran, 2)}, backedUp, true},
 		{"a long gap with no run due", []BackupSchedule{hourly(&ran, 0)}, new(now.Add(-72 * time.Hour)), false},
 		{"schedule ticking but no backup ever", []BackupSchedule{hourly(&ran, 0)}, nil, true},
 	} {
@@ -315,5 +316,34 @@ func TestAFailedDeliveryRaisesNoJobAlert(t *testing.T) {
 	s.LatestTerminalJobs = []store.Job{{Kind: jobs.KindWebhookDeliver.String(), Status: jobs.StatusFailed}}
 	if _, ok := has(t, Evaluate(&s, nil), KindJobFailed, ""); ok {
 		t.Error("a failed webhook delivery opened job_failed")
+	}
+}
+
+// TestBackupAttentionCarriesWhatWasFound asserts a flagged newest archive opens the condition
+// with its findings, and that a server whose newest archive passed has none.
+func TestBackupAttentionCarriesWhatWasFound(t *testing.T) {
+	t.Parallel()
+	s := base()
+	s.FlaggedBackups = map[string]store.Backup{"i1": {
+		ID: "b1", InstanceID: "i1", CreatedAt: now.Add(-time.Hour),
+		WorldAttention: []backup.Attention{
+			{Code: backup.AttentionWorldShrunk, Message: "the world shrank"},
+			{Code: backup.AttentionChunkMissing, Message: "a chunk is missing"},
+		},
+	}}
+	got := Evaluate(&s, nil)
+
+	c, ok := has(t, got, KindBackupAttention, "i1")
+	if !ok {
+		t.Fatal("a flagged newest archive raised no condition")
+	}
+	if c.Detail[DetailReason] != "the world shrank; a chunk is missing" {
+		t.Errorf("Reason = %q, want both findings", c.Detail[DetailReason])
+	}
+	if c.Detail[DetailBackup] != now.Add(-time.Hour).Format(time.RFC3339) {
+		t.Errorf("Backup = %q, want the archive's time", c.Detail[DetailBackup])
+	}
+	if _, ok := has(t, got, KindBackupAttention, "i2"); ok {
+		t.Error("a server with no flagged archive raised the condition")
 	}
 }

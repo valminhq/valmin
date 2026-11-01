@@ -110,6 +110,10 @@ func (s *Scanner) snapshot(ctx context.Context) (*alerts.Snapshot, alerts.Resolv
 	if err != nil {
 		return nil, nil, fmt.Errorf("read last backup times: %w", err)
 	}
+	flagged, err := s.DB.FlaggedLatest(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read flagged backups: %w", err)
+	}
 	schedules, err := s.DB.ListSchedules(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read schedules: %w", err)
@@ -141,6 +145,7 @@ func (s *Scanner) snapshot(ctx context.Context) (*alerts.Snapshot, alerts.Resolv
 		RunningJobs:        running,
 		BackupSchedules:    backupCadences(ctx, schedules, instances, latest, lastBackups, now),
 		LastBackups:        lastBackups,
+		FlaggedBackups:     flagged,
 		Incidents:          incidents,
 		InstalledBuilds:    instance.InstalledBuilds(instances),
 		BranchBuilds:       observedBuild.BranchBuilds(),

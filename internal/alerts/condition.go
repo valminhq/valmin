@@ -46,6 +46,9 @@ var (
 	// KindJobStuck is a job running longer than its threshold. It reports only; the lease is
 	// the engine's business (12 §6).
 	KindJobStuck = Kind{"job_stuck"}
+	// KindBackupAttention is a server whose newest archive the world check flagged. It clears
+	// once a newer archive passes or the operator acknowledges the flagged one.
+	KindBackupAttention = Kind{"backup_attention"}
 )
 
 // Event kinds are one-off events a rule can route rather than conditions a scan evaluates. They
@@ -75,7 +78,7 @@ var (
 
 var all = []Kind{
 	KindJobFailed, KindLowDisk, KindStaleBackup, KindUncleanStop, KindRestartRequired,
-	KindUpdateAvailable, KindInstanceError, KindCrashLoop, KindJobStuck,
+	KindUpdateAvailable, KindInstanceError, KindCrashLoop, KindJobStuck, KindBackupAttention,
 }
 
 var gameEvents = []Kind{
@@ -126,6 +129,7 @@ const (
 	DetailEvery     = "Every"
 	DetailLast      = "Last"
 	DetailRunning   = "Running"
+	DetailBackup    = "Backup"
 )
 
 // Params are a kind's thresholds. Zero fields read as the defaults, so a rule written before a

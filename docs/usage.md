@@ -1251,6 +1251,7 @@ Select **Add rule** and choose the event:
 | Problems               | **Unclean stop**                      | A server stopped before its world finished saving.                   |
 | Problems               | **Job failed**                        | A job failed and nothing has retried it.                             |
 | Problems               | **Job stuck**                         | A job has been running unusually long.                               |
+| Problems               | **Backup needs a look**               | The [world check](operations.md#world-check) flagged the newest backup. |
 | Maintenance            | **Update available**                  | A new game build is available.                                       |
 | Maintenance            | **Restart required**                  | A change is waiting for a restart.                                   |
 | Maintenance            | **Backups stale**                     | Scheduled backups are not producing archives.                        |

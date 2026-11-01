@@ -22,7 +22,9 @@ var defaultTemplates = map[alerts.Kind]string{
 	alerts.KindInstanceError: "**What to do:** {what_to_do}",
 	alerts.KindCrashLoop:     "**Unexpected stops:** {stops}\n**What to do:** {what_to_do}",
 	alerts.KindJobStuck:      "**Running for:** {running}\n**What to do:** {what_to_do}",
-	alerts.KindPowerCut:      "**Power goes off:** {power_off}\n**Servers stop:** {stop_at}\n**Running servers:** {servers}",
+	alerts.KindBackupAttention: "**Backup:** {backup}\n**Found:** {findings}\n" +
+		"**What to do:** {what_to_do}",
+	alerts.KindPowerCut: "**Power goes off:** {power_off}\n**Servers stop:** {stop_at}\n**Running servers:** {servers}",
 	alerts.KindServerStarted: "**Server name:** {server_name}\n**World:** {world}\n**Join code:** {join_code}\n" +
 		"**Port:** {port}\n**Started:** {time}",
 	alerts.KindServerStopped: "**Reason:** {reason}\n**Server name:** {server_name}\n**World:** {world}\n" +

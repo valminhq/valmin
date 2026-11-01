@@ -173,6 +173,8 @@ func summarize(c *store.AlertCondition, edge string) string {
 		sentence = "The server keeps crashing"
 	case alerts.KindJobStuck.String():
 		sentence = job + " is taking unusually long"
+	case alerts.KindBackupAttention.String():
+		sentence = "The newest backup's world needs a look"
 	default:
 		sentence = upperFirst(strings.ReplaceAll(c.Kind, "_", " "))
 	}
@@ -239,6 +241,14 @@ func conditionDetail(c *store.AlertCondition, edge string, loc *time.Location) [
 	case alerts.KindJobStuck.String():
 		fields = []notify.Field{{Key: "running", Name: "Running for", Value: formatDuration(d[alerts.DetailRunning])}}
 		next = "Check the job's progress in Valmin, and cancel it if it is not moving."
+	case alerts.KindBackupAttention.String():
+		fields = []notify.Field{
+			{Key: "backup", Name: "Backup", Value: formatTime(d[alerts.DetailBackup], loc)},
+			{Key: "findings", Name: "Found", Value: d[alerts.DetailReason]},
+		}
+		next = "Check the server log around the time of that backup. If the world is damaged, " +
+			"restore the newest backup without a warning; if the change was intended, " +
+			"acknowledge the warning on the Backups page."
 	}
 	if edge != store.EdgeResolved && next != "" {
 		fields = append(fields, notify.Field{Key: "what_to_do", Name: "What to do", Value: next})

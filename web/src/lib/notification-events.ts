@@ -130,6 +130,21 @@ export const PANEL_EVENTS: PanelEvent[] = [
 		'Open the server’s job history for the full log, then try the job again.'
 	),
 	condition(
+		'backup_attention',
+		'Problems',
+		'Backup needs a look',
+		'The newest backup’s world needs a look',
+		[
+			['backup', 'Backup', '1 Nov 2026, 18:44 UTC'],
+			[
+				'findings',
+				'Found',
+				'the world is 4.0 MiB, under half of the 17.2 MiB in the archive of 2026-10-21 19:24 UTC'
+			]
+		],
+		'Check the server log around the time of that backup. If the world is damaged, restore the newest backup without a warning; if the change was intended, acknowledge the warning on the Backups page.'
+	),
+	condition(
 		'job_stuck',
 		'Problems',
 		'Job stuck',
@@ -218,7 +233,13 @@ export const GROUPS: { name: string; note: string; game?: boolean }[] = [
 /** Kinds that never concern one server, so their rules cover every server. */
 export const HOST_WIDE: RuleKind[] = ['low_disk', 'power_cut'];
 /** Kinds whose messages show a time, so a rule can choose the zone. */
-export const TIMED: RuleKind[] = ['power_cut', 'server_started', 'server_stopped', 'stale_backup'];
+export const TIMED: RuleKind[] = [
+	'power_cut',
+	'server_started',
+	'server_stopped',
+	'stale_backup',
+	'backup_attention'
+];
 /** Whether a kind is a condition, sent when it opens and edited when it clears, rather than a
  * one-off event. */
 export const isCondition = (kind: RuleKind) =>

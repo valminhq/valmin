@@ -15,7 +15,8 @@ export const CONDITION_LABEL: Record<InboxKind, string> = {
 	update_available: 'update available',
 	instance_error: 'error',
 	crash_loop: 'crash loop',
-	job_stuck: 'job stuck'
+	job_stuck: 'job stuck',
+	backup_attention: 'backup needs a look'
 };
 
 /** Full copy, for the host band and for a chip's tooltip. */
@@ -28,7 +29,8 @@ export const CONDITION_SENTENCE: Record<InboxKind, string> = {
 	update_available: 'A game update is available',
 	instance_error: 'A server is in an error state',
 	crash_loop: 'A server is crashing repeatedly',
-	job_stuck: 'A job has been running unusually long'
+	job_stuck: 'A job has been running unusually long',
+	backup_attention: 'The newest backup’s world needs a look before it is relied on'
 };
 
 /**
@@ -86,6 +88,9 @@ export function conditionDetail(item: InboxItem): string {
 	}
 	if (item.kind === 'crash_loop') {
 		return `${item.detail?.Stops} stops in ${item.detail?.Window}`;
+	}
+	if (item.kind === 'backup_attention') {
+		return item.detail?.Reason ?? '';
 	}
 	if (item.kind === 'stale_backup') {
 		return item.detail?.Last

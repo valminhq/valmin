@@ -3,9 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/valminhq/valmin/internal/backup"
 )
 
 // Backup is one row of the archive catalogue (04 §2). A row exists only once the archive
@@ -21,6 +24,11 @@ type Backup struct {
 	Trigger    string    `json:"trigger"`
 	Consistent bool      `json:"consistent"`
 	CreatedAt  time.Time `json:"created_at"`
+	// WorldBytes is the size of the world inside the archive, nil when it was never measured.
+	WorldBytes *int64 `json:"world_bytes"`
+	// WorldAttention is what the world check asked the operator to look at. Empty when the world
+	// passed, was acknowledged, or was never checked.
+	WorldAttention []backup.Attention `json:"world_attention"`
 }
 
 // Backup trigger values, matching the CHECK constraint in migration 0001.
@@ -41,9 +49,13 @@ func SnapshotTrigger(trigger string) bool {
 	return trigger == TriggerPreUpdate || trigger == TriggerPreRestore || trigger == TriggerPreImport
 }
 
+// snapshotTriggers is SnapshotTrigger's set as an SQL list.
+const snapshotTriggers = `('pre_update','pre_restore','pre_import')`
+
 const insertBackup = `
-	INSERT INTO backups (id, instance_id, path, size_bytes, sha256, world_name, trigger, consistent, created_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	INSERT INTO backups (id, instance_id, path, size_bytes, sha256, world_name, trigger, consistent,
+		world_bytes, world_attention, created_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 // CreateBackup records a finished archive.
 func (db *DB) CreateBackup(ctx context.Context, b *Backup) error {
@@ -69,8 +81,13 @@ func TxCreateBackup(ctx context.Context, tx *sql.Tx, b *Backup) error {
 }
 
 func createBackup(ctx context.Context, ex execer, b *Backup) error {
+	attention, err := encodeAttention(b.WorldAttention)
+	if err != nil {
+		return fmt.Errorf("record backup for instance %s: %w", b.InstanceID, err)
+	}
 	if _, err := ex.ExecContext(ctx, insertBackup,
-		b.ID, b.InstanceID, b.Path, b.SizeBytes, b.SHA256, b.WorldName, b.Trigger, b.Consistent, Now(),
+		b.ID, b.InstanceID, b.Path, b.SizeBytes, b.SHA256, b.WorldName, b.Trigger, b.Consistent,
+		b.WorldBytes, attention, Now(),
 	); err != nil {
 		return fmt.Errorf("record backup for instance %s: %w", b.InstanceID, err)
 	}
@@ -79,21 +96,134 @@ func createBackup(ctx context.Context, ex execer, b *Backup) error {
 
 // backupColumns is the row, in the order scanBackup reads it.
 const backupColumns = `id, instance_id, path, size_bytes, sha256, world_name, trigger,
-	consistent, created_at`
+	consistent, created_at, world_bytes, world_attention`
 
 // scanBackup reads one row in backupColumns order.
 func scanBackup(s scanner) (Backup, error) {
 	var b Backup
 	var createdAt string
+	var worldBytes sql.NullInt64
+	var attention sql.NullString
 	if err := s.Scan(&b.ID, &b.InstanceID, &b.Path, &b.SizeBytes, &b.SHA256,
-		&b.WorldName, &b.Trigger, &b.Consistent, &createdAt); err != nil {
+		&b.WorldName, &b.Trigger, &b.Consistent, &createdAt, &worldBytes, &attention); err != nil {
 		return Backup{}, fmt.Errorf("scan backup row: %w", err)
 	}
 	var err error
 	if b.CreatedAt, err = ParseTime(createdAt); err != nil {
 		return Backup{}, fmt.Errorf("backup created_at: %w", err)
 	}
+	if worldBytes.Valid {
+		b.WorldBytes = &worldBytes.Int64
+	}
+	if attention.Valid {
+		if err := json.Unmarshal([]byte(attention.String), &b.WorldAttention); err != nil {
+			return Backup{}, fmt.Errorf("backup %s world_attention: %w", b.ID, err)
+		}
+	}
 	return b, nil
+}
+
+// encodeAttention renders findings for the world_attention column, NULL for none.
+func encodeAttention(found []backup.Attention) (any, error) {
+	if len(found) == 0 {
+		return nil, nil
+	}
+	raw, err := json.Marshal(found)
+	if err != nil {
+		return nil, fmt.Errorf("encode world attention: %w", err)
+	}
+	return string(raw), nil
+}
+
+// WorldBaseline is the archive a new one's world size is compared against: the newest of
+// instanceID's archives of worldName that was measured, passed the world check and is not a
+// snapshot, taken after the instance's newest snapshot. A snapshot marks the panel changing the
+// world on purpose, so the comparison starts again after one. ok is false when there is none.
+func (db *DB) WorldBaseline(
+	ctx context.Context, instanceID, worldName string,
+) (bytes int64, at time.Time, ok bool, err error) {
+	var createdAt string
+	err = db.Reader.QueryRowContext(ctx, `SELECT world_bytes, created_at FROM backups
+		WHERE instance_id = ? AND world_name = ? AND world_bytes IS NOT NULL
+		AND world_attention IS NULL AND trigger NOT IN `+snapshotTriggers+`
+		AND created_at > COALESCE((SELECT MAX(created_at) FROM backups
+			WHERE instance_id = ? AND trigger IN `+snapshotTriggers+`), '')
+		ORDER BY created_at DESC, id DESC LIMIT 1`,
+		instanceID, worldName, instanceID).Scan(&bytes, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, time.Time{}, false, nil
+	}
+	if err != nil {
+		return 0, time.Time{}, false, fmt.Errorf("read the world baseline of instance %s: %w", instanceID, err)
+	}
+	if at, err = ParseTime(createdAt); err != nil {
+		return 0, time.Time{}, false, fmt.Errorf("world baseline created_at: %w", err)
+	}
+	return bytes, at, true, nil
+}
+
+// AcknowledgeWorld clears the world check's findings on one archive and its remote copies,
+// which makes it the size baseline later archives are compared against, and records audit
+// with it when given. It
+// reports whether the archive exists.
+func (db *DB) AcknowledgeWorld(ctx context.Context, instanceID, id string, audit *AuditEntry) (bool, error) {
+	tx, err := db.Writer.BeginTx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin world acknowledgement: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx,
+		`UPDATE backups SET world_attention = NULL WHERE id = ? AND instance_id = ?`, id, instanceID)
+	if err != nil {
+		return false, fmt.Errorf("acknowledge the world of backup %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("acknowledge the world of backup %s: %w", id, err)
+	}
+	if n == 0 {
+		return false, nil
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE remote_copies SET world_flagged = FALSE
+		WHERE backup_id = ? AND instance_id = ?`, id, instanceID); err != nil {
+		return false, fmt.Errorf("acknowledge the remote copies of backup %s: %w", id, err)
+	}
+	if audit != nil {
+		if err := writeAuditLog(ctx, tx, audit, time.Now().UTC()); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit world acknowledgement: %w", err)
+	}
+	return true, nil
+}
+
+// FlaggedLatest is, for each instance whose newest archive other than a snapshot was flagged by
+// the world check, that archive. An instance whose newest archive passed is absent.
+func (db *DB) FlaggedLatest(ctx context.Context) (map[string]Backup, error) {
+	rows, err := db.Reader.QueryContext(ctx, fmt.Sprintf(`SELECT %s FROM backups b
+		WHERE world_attention IS NOT NULL AND trigger NOT IN %s
+		AND NOT EXISTS (SELECT 1 FROM backups n WHERE n.instance_id = b.instance_id
+			AND n.trigger NOT IN %s
+			AND (n.created_at > b.created_at OR (n.created_at = b.created_at AND n.id > b.id)))`,
+		backupColumns, snapshotTriggers, snapshotTriggers))
+	if err != nil {
+		return nil, fmt.Errorf("read flagged backups: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]Backup{}
+	for rows.Next() {
+		b, err := scanBackup(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[b.InstanceID] = b
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read flagged backups: %w", err)
+	}
+	return out, nil
 }
 
 // BackupByID reads one archive belonging to instanceID, or (nil, nil) when there is no such

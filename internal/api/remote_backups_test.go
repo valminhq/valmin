@@ -438,6 +438,56 @@ func TestRaisingAKeepCountTakesBackItsMarks(t *testing.T) {
 	}
 }
 
+// TestRemoteRetentionKeepsTheLastCopyWhoseWorldPassed asserts that flagged copies past the
+// count cannot push out the newest copy whose world passed the world check, even once its local
+// archive is gone.
+func TestRemoteRetentionKeepsTheLastCopyWhoseWorldPassed(t *testing.T) {
+	t.Parallel()
+	rt, db, root, _, _ := backupsWorld(t)
+	saveRemoteDestination(t, db)
+	seed(t, db, `UPDATE instances SET remote_keep_cold=1 WHERE id='inst-a'`)
+	now := time.Now().UTC()
+	for i, id := range []string{"older", "good", "bad1", "bad2"} {
+		at := now.Add(time.Duration(i-4) * time.Hour)
+		seedArchive(t, db, root, id, store.TriggerScheduled, true, at)
+		queued, err := db.QueueRemoteCopy(t.Context(), "inst-a", id, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seed(t, db, `UPDATE remote_copies SET status='succeeded',archive_created_at=? WHERE id=?`,
+			store.FormatTime(at), queued.ID)
+	}
+	seed(t, db, `UPDATE remote_copies SET world_flagged=TRUE WHERE backup_id IN ('bad1','bad2')`)
+	// Local retention may already have removed the good archive; its copy is still the one
+	// worth keeping.
+	seed(t, db, `DELETE FROM backups WHERE id='good'`)
+
+	if err := rt.remoteBackups.worker.MarkRetention(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Reader.QueryContext(t.Context(),
+		`SELECT backup_id FROM remote_copies WHERE cleanup_pending ORDER BY backup_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var marked []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		marked = append(marked, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(marked, ",") != "bad1,older" {
+		t.Errorf("marked for cleanup %v, want bad1 and older: the newest flagged copy by count and "+
+			"the good copy kept past it", marked)
+	}
+}
+
 // TestAFailedCopyThatUploadedIsCleanedUpByItsArchiveKey asserts that a failed copy which
 // recorded an uploaded archive is marked for cleanup, and that cleanup deletes only that key.
 func TestAFailedCopyThatUploadedIsCleanedUpByItsArchiveKey(t *testing.T) {
@@ -499,5 +549,33 @@ func TestUploadNowRefusesAnArchiveRetentionWouldDelete(t *testing.T) {
 		"/api/v1/instances/inst-a/backups/b-old/remote-copy", http.NoBody))
 	if rec.Code != http.StatusConflict {
 		t.Errorf("upload of an archive retention would prune = %d (%s), want 409", rec.Code, rec.Body)
+	}
+}
+
+// TestUploadNowAcceptsTheLastArchiveWhoseWorldPassed asserts that the archive retention would
+// keep past the count, as its class's newest unflagged copy, is not refused as pruned on arrival.
+func TestUploadNowAcceptsTheLastArchiveWhoseWorldPassed(t *testing.T) {
+	t.Parallel()
+	rt, db, root, admin, _ := backupsWorld(t)
+	saveRemoteDestination(t, db)
+	seed(t, db, `UPDATE instances SET remote_keep_cold=1 WHERE id='inst-a'`)
+	now := time.Now().UTC()
+	seedArchive(t, db, root, "good", store.TriggerScheduled, true, now.Add(-2*time.Hour))
+	seedArchive(t, db, root, "bad", store.TriggerScheduled, true, now.Add(-time.Hour))
+	seed(t, db, `UPDATE backups SET world_attention='[{"code":"world_shrunk","message":"m"}]' WHERE id='bad'`)
+	queued, err := db.QueueRemoteCopy(t.Context(), "inst-a", "bad", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !queued.WorldFlagged {
+		t.Fatal("a copy of a flagged archive was queued unflagged")
+	}
+	seed(t, db, `UPDATE remote_copies SET status='succeeded',archive_created_at=? WHERE id=?`,
+		store.FormatTime(now.Add(-time.Hour)), queued.ID)
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost,
+		"/api/v1/instances/inst-a/backups/good/remote-copy", http.NoBody))
+	if rec.Code == http.StatusConflict {
+		t.Errorf("upload of the last archive whose world passed = %d (%s), want it accepted", rec.Code, rec.Body)
 	}
 }

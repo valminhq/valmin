@@ -19,7 +19,8 @@ export type InboxKind =
 	| 'update_available'
 	| 'instance_error'
 	| 'crash_loop'
-	| 'job_stuck';
+	| 'job_stuck'
+	| 'backup_attention';
 
 interface Page<T> {
 	items: T[];

@@ -72,6 +72,7 @@ B- PATCH /api/v1/instances/{id}/alert-rules/{rid}
 B- GET /api/v1/instances/{id}/backups
 B- POST /api/v1/instances/{id}/backups
 B- DELETE /api/v1/instances/{id}/backups/{bid}
+B- POST /api/v1/instances/{id}/backups/{bid}/acknowledge
 S- GET /api/v1/instances/{id}/backups/{bid}/download
 B- POST /api/v1/instances/{id}/backups/{bid}/remote-copy
 B- POST /api/v1/instances/{id}/backups/{bid}/restore

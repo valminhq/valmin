@@ -159,6 +159,9 @@ func keepLimit(inst *store.Instance, class retentionClass) int {
 	return inst.RemoteKeepCold
 }
 
+// markInstanceRetention marks inst's copies past their class's limit for cleanup. The newest
+// unflagged copy of each class is kept past the limit, so a world that broke and keeps being
+// uploaded cannot push out the last copy worth restoring.
 func (w *Worker) markInstanceRetention(ctx context.Context, inst *store.Instance, destinationID string) error {
 	if err := w.DB.MarkAbandonedRemoteUploads(ctx, inst.ID, destinationID); err != nil {
 		return fmt.Errorf("remote operation: %w", err)
@@ -168,13 +171,18 @@ func (w *Worker) markInstanceRetention(ctx context.Context, inst *store.Instance
 		return fmt.Errorf("remote operation: %w", err)
 	}
 	counts := map[retentionClass]int{}
+	sawUnflagged := map[retentionClass]bool{}
 	for j := range copies {
 		c := &copies[j]
 		class := classOf(c.Trigger, c.Consistent)
 		counts[class]++
+		lastGood := class != classSnapshot && !c.WorldFlagged && !sawUnflagged[class]
+		if lastGood {
+			sawUnflagged[class] = true
+		}
 		limit := keepLimit(inst, class)
 		switch {
-		case limit > 0 && counts[class] > limit:
+		case limit > 0 && counts[class] > limit && !lastGood:
 			err = w.DB.MarkRemoteCleanup(ctx, c.ID)
 		case c.CleanupPending:
 			err = w.DB.UnmarkRemoteCleanup(ctx, c.ID)
@@ -188,7 +196,8 @@ func (w *Worker) markInstanceRetention(ctx context.Context, inst *store.Instance
 
 // PrunedOnArrival reports whether a copy of b would be removed by retention as soon as it
 // arrived, because the destination already keeps as many newer copies of its class as the
-// instance allows.
+// instance allows. A copy that would be its class's newest unflagged one is kept past the
+// count, so it is never pruned on arrival.
 func PrunedOnArrival(ctx context.Context, db *store.DB, inst *store.Instance, b *store.Backup) (bool, error) {
 	class := classOf(b.Trigger, b.Consistent)
 	limit := keepLimit(inst, class)
@@ -206,14 +215,20 @@ func PrunedOnArrival(ctx context.Context, db *store.DB, inst *store.Instance, b 
 	if err != nil {
 		return false, fmt.Errorf("read remote copies: %w", err)
 	}
-	newer := 0
+	newer, newerUnflagged := 0, 0
 	created := store.FormatTime(b.CreatedAt)
 	for j := range copies {
 		c := &copies[j]
 		if c.BackupID != b.ID && !c.CleanupPending && classOf(c.Trigger, c.Consistent) == class &&
 			c.ArchiveCreatedAt > created {
 			newer++
+			if !c.WorldFlagged {
+				newerUnflagged++
+			}
 		}
+	}
+	if class != classSnapshot && len(b.WorldAttention) == 0 && newerUnflagged == 0 {
+		return false, nil
 	}
 	return newer >= limit, nil
 }

@@ -113,4 +113,9 @@ describe('conditionDetail', () => {
 			session.user = null;
 		}
 	});
+
+	it('carries what the world check found on a flagged backup', () => {
+		const flagged = item('backup_attention', { detail: { Reason: 'a chunk is missing' } });
+		expect(conditionDetail(flagged)).toBe('a chunk is missing');
+	});
 });

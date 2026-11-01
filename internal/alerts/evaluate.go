@@ -2,6 +2,7 @@ package alerts
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/valminhq/valmin/internal/jobs"
@@ -24,6 +25,9 @@ type Snapshot struct {
 	BackupSchedules []BackupSchedule
 	// LastBackups is each instance's newest consistent archive.
 	LastBackups map[string]time.Time
+	// FlaggedBackups is each instance's newest archive, other than a snapshot, when the world
+	// check flagged it.
+	FlaggedBackups map[string]store.Backup
 	// Incidents is when each instance was observed going down on its own, newest first.
 	Incidents map[string][]time.Time
 	// InstalledBuilds is the build each instance actually runs, by instance id.
@@ -61,6 +65,7 @@ func Evaluate(s *Snapshot, resolve Resolver) []Condition {
 	out = append(out, failedJobs(s)...)
 	out = append(out, uncleanStops(s)...)
 	out = append(out, staleBackups(s, params)...)
+	out = append(out, flaggedBackups(s)...)
 	out = append(out, stuckJobs(s, params)...)
 	return out
 }
@@ -182,6 +187,23 @@ func staleBackups(s *Snapshot, params func(Kind, string) Params) []Condition {
 			detail[DetailLast] = last.UTC().Format(time.RFC3339)
 		}
 		out = append(out, Condition{Kind: KindStaleBackup, InstanceID: sc.InstanceID, Detail: detail})
+	}
+	return out
+}
+
+// flaggedBackups reports each server whose newest archive needs a look, with what was found.
+func flaggedBackups(s *Snapshot) []Condition {
+	out := make([]Condition, 0, len(s.FlaggedBackups))
+	for instanceID := range s.FlaggedBackups {
+		b := s.FlaggedBackups[instanceID]
+		messages := make([]string, 0, len(b.WorldAttention))
+		for _, a := range b.WorldAttention {
+			messages = append(messages, a.Message)
+		}
+		out = append(out, Condition{Kind: KindBackupAttention, InstanceID: instanceID, Detail: map[string]string{
+			DetailReason: strings.Join(messages, "; "),
+			DetailBackup: b.CreatedAt.UTC().Format(time.RFC3339),
+		}})
 	}
 	return out
 }

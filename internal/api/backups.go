@@ -13,6 +13,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
+	"github.com/valminhq/valmin/internal/backup"
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -34,14 +35,23 @@ type backupView struct {
 	// daemon decides it because retention is one policy (02 §4.4 step 7); a client counting
 	// rows of its own would be a second copy that drifts, and it can only see one page.
 	PrunesNext bool `json:"prunes_next"`
+	// WorldBytes is the size of the world inside the archive, null when it was never measured.
+	WorldBytes *int64 `json:"world_bytes"`
+	// WorldAttention is what the world check asks the operator to look at, empty when nothing.
+	WorldAttention []backup.Attention `json:"world_attention"`
 }
 
 func toBackupView(b *store.Backup) backupView {
-	return backupView{
+	v := backupView{
 		ID: b.ID, InstanceID: b.InstanceID, SizeBytes: b.SizeBytes, SHA256: b.SHA256,
 		WorldName: b.WorldName, Trigger: b.Trigger, Consistent: b.Consistent,
 		CreatedAt: b.CreatedAt, Filename: filepath.Base(b.Path),
+		WorldBytes: b.WorldBytes, WorldAttention: b.WorldAttention,
 	}
+	if v.WorldAttention == nil {
+		v.WorldAttention = []backup.Attention{}
+	}
+	return v
 }
 
 // listBackups is GET /instances/{id}/backups (04 §3).
@@ -205,6 +215,42 @@ func (h *Instances) deleteBackup(w http.ResponseWriter, r *http.Request) {
 	if err := os.Remove(b.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		slog.ErrorContext(r.Context(), "remove deleted backup archive; the file is left on disk",
 			slog.String("instance_id", id), slog.String("backup_id", b.ID), slog.Any("error", err))
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// acknowledgeWorld is POST /instances/{id}/backups/{bid}/acknowledge: the operator has
+// looked at what the world check flagged and accepts the archive's world. Gated on
+// backups.restore, since it decides which archive retention protects.
+func (h *Instances) acknowledgeWorld(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	id := strings.TrimSpace(r.PathValue("id"))
+	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	if !h.Authz.Can(r.Context(), u, authz.BackupsRestore, id) {
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
+		return
+	}
+	b, ok := h.mustLoadBackup(w, r, id)
+	if !ok {
+		return
+	}
+	found, err := h.DB.AcknowledgeWorld(r.Context(), id, b.ID, &store.AuditEntry{
+		UserID: u.ID, InstanceID: id, Action: "instances.backups.acknowledge_world",
+		Detail: detailJSON(map[string]string{"backup_id": b.ID}), IP: clientIP(r.Context()),
+	})
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if !found {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

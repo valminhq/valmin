@@ -363,6 +363,21 @@ room again. Starting and stopping servers, editing configs and deleting backups,
 setups and servers still work, so delete what you no longer need from the panel. The
 refusal lifts as soon as enough space is free, without a restart.
 
+## A backup says attention required
+
+The [world check](operations.md#world-check) found something in the world when the backup was
+made. The backup is kept either way. Read what the box on **Backups** lists, then open the
+server's console and look at the log around the time of the backup:
+
+- A crash, an out-of-memory kill or a disk-full warning near the last save means the world
+  was probably written short. Stop the server and restore the newest backup without the
+  warning, which retention has kept for you.
+- A mod or console command that deleted or reset zones, or a world swapped by hand, explains a
+  smaller world. Choose **Acknowledge** on the backup so later backups compare against it.
+
+If every new backup is flagged, the world on disk is still damaged: restore before the next
+backup runs.
+
 ## A game server does not start or mods do not load
 
 When a start fails, or a running server's mods did not load, the server's **Console** card

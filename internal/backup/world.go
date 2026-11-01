@@ -48,7 +48,7 @@ var mainFile = regexp.MustCompile(`^_main\.\d+\.(db2|fwl2)$`)
 // instance's, which is what keeps them from satisfying the pair check on its behalf
 // (03 §4.1 rule 5).
 func ClassifyWorldFile(rel string) (dir, world string, part WorldPart) {
-	rel = path.Clean(strings.ReplaceAll(rel, `\`, "/"))
+	rel = cleanRel(rel)
 	base := path.Base(rel)
 	parent := path.Dir(rel)
 
@@ -67,6 +67,12 @@ func ClassifyWorldFile(rel string) (dir, world string, part WorldPart) {
 		return cleanDir(parent), strings.TrimSuffix(base, ".fwl"), PartHeader
 	}
 	return "", "", PartOther
+}
+
+// cleanRel normalises a savedir-relative path from a walk or a tar entry to slash-separated
+// clean form, so every reader of world paths compares them the same way.
+func cleanRel(rel string) string {
+	return path.Clean(strings.ReplaceAll(rel, `\`, "/"))
 }
 
 func partOfExt(ext string) WorldPart {

@@ -137,6 +137,22 @@
 
 	const take = (mode: BackupMode) => run(() => backups.create(instance.id, mode));
 
+	let acknowledging = $state<string | null>(null);
+	/** Clears a flagged archive's findings, then re-reads the catalogue: acknowledging moves
+	 * which archive retention protects, so the pending-deletion badges can change too. */
+	async function acknowledge(archive: Backup) {
+		acknowledging = archive.id;
+		failure = null;
+		try {
+			await backups.acknowledge(instance.id, archive.id);
+			await load(instance.id);
+		} catch (err) {
+			failure = err;
+		} finally {
+			acknowledging = null;
+		}
+	}
+
 	function askRestore(archive: Backup) {
 		restoring = archive;
 		restoreOpen = true;
@@ -453,7 +469,42 @@
 									<div class="grid gap-0.5">
 										<span class="text-xs text-muted-foreground md:hidden">Size</span>
 										<span class="tabular-nums">{bytes(archive.size_bytes)}</span>
+										{#if archive.world_bytes !== null}
+											<span class="text-xs text-muted-foreground tabular-nums"
+												>world {bytes(archive.world_bytes)}</span
+											>
+										{/if}
 									</div>
+									{#if archive.world_attention.length > 0}
+										<div
+											class="grid justify-items-start gap-1 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 md:col-span-full dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+										>
+											<span class="font-medium">Attention required</span>
+											<ul class="list-disc pl-5">
+												{#each archive.world_attention as finding (finding.code)}
+													<li>{finding.message}</li>
+												{/each}
+											</ul>
+											<span>
+												Check the server log around this time before relying on this backup.
+												<a
+													class="underline"
+													href={resolve('/instances/[id]#console', { id: instance.id })}
+													>Open the console</a
+												>
+											</span>
+											{#if canRestore}
+												<Button
+													variant="outline"
+													size="sm"
+													disabled={acknowledging !== null}
+													onclick={() => acknowledge(archive)}
+												>
+													{acknowledging === archive.id ? 'Acknowledging…' : 'Acknowledge'}
+												</Button>
+											{/if}
+										</div>
+									{/if}
 									<div class="flex flex-wrap gap-1 md:col-span-full md:justify-end">
 										{#if canCreate}
 											<Button

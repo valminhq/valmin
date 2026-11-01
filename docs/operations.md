@@ -16,7 +16,9 @@ Open **Backups** on a server. Two buttons make a backup now:
 Each archive in the history shows when it was made, the world, whether it is
 **Consistent** or **Best-effort**, why it was made (manual, scheduled, pre update,
 pre restore or pre import), and its size. An archive that retention will remove at the next
-prune is marked **Pending deletion**. **Download** saves an archive to your computer,
+prune is marked **Pending deletion**. Below the archive size is the size of the world inside
+it, and an archive whose world needs a look carries an **Attention required** box (see
+[World check](#world-check)). **Download** saves an archive to your computer,
 and **Delete** removes it after you type the server's name. With
 [off-host copies](remote-backups.md) configured, **Upload now** sends an existing
 archive to the remote destination. Downloading needs operator access; deleting needs
@@ -48,6 +50,43 @@ no archive is taken and the operation says so.
 To back up on a schedule, see [Schedule maintenance](#schedule-maintenance). To keep
 copies off the host, see [off-host copies](remote-backups.md) or download archives to
 another machine.
+
+### World check
+
+A world is usually lost when the server dies or the disk fills while it is saving, and the
+world is left cut short. A schedule then keeps archiving the broken world, and retention would
+push the good archives out. To catch this, every backup is checked when it is made. A check
+never refuses or deletes a backup: it marks it **Attention required**, lists what it found,
+writes the same to the job log, and raises the **Backup needs a look** alert
+([notifications](usage.md#get-notified)). Check the server log around that time, then decide.
+
+What the check looks for:
+
+- **The world shrank to under half** of the newest earlier backup that passed the check. Worlds
+  shrink a little between saves; halving is what a cut-short save or a replaced world looks
+  like. A zone reset run by a mod outside Valmin (FreshWorld, for example) shrinks the world
+  this much too, so expect the flag after one and acknowledge it.
+- **The world file is under half of the copy the game kept from its previous save**, for worlds
+  in the format before Valheim 1.0 (`<world>.db` against `<world>.db.old`).
+- For Valheim 1.0 worlds: the newest save is missing one of its `_main.<n>` files, those files
+  disagree on the world version, a chunk the save's index lists is missing, empty or not the
+  one indexed, or the compressed world data in `_main.<n>.db2` is cut short or corrupt. These
+  checks run for the world versions whose layout has been measured, 41 and 42; for any other
+  version the job log says the files were not checked.
+
+Restoring, importing, updating mods and running a world tool each take a snapshot first, and
+the size comparison starts again after a snapshot, so these deliberate changes are not
+flagged. Snapshots themselves are not checked.
+
+While archives are flagged, retention keeps the newest **consistent** and the newest
+**best-effort** backup that passed the check, even past the counts, so a broken world archived
+every day cannot push out the last backup worth restoring. The same applies to
+[off-host copies](remote-backups.md).
+
+If the world is damaged, restore the newest backup without the warning. If the change was
+intended, choose **Acknowledge** on the flagged backup (needs `backups.restore`): its warning
+clears, later backups are compared against it, and the older backup is no longer kept past the
+count.
 
 ### Restore a backup
 
