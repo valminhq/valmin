@@ -81,6 +81,13 @@ func (s *Sessions) Login(ctx context.Context, username, password, ip, userAgent 
 		return nil, ErrAccountDisabled
 	}
 
+	s.rehashIfWeak(ctx, rec, password)
+	return s.open(ctx, rec, ip, userAgent)
+}
+
+// rehashIfWeak stores a fresh hash of password when the stored one uses parameters below the
+// current ones. A failure is logged and the old hash kept.
+func (s *Sessions) rehashIfWeak(ctx context.Context, rec *store.AuthRecord, password string) {
 	if params, perr := LoadArgon2Params(ctx, s.db); perr == nil && NeedsRehash(rec.PasswordHash, params) {
 		// 10 §3.4: rehash on successful login when stored parameters are below current.
 		// Best-effort — a failure here does not fail the login the user is waiting on.
@@ -91,7 +98,31 @@ func (s *Sessions) Login(ctx context.Context, username, password, ip, userAgent 
 			}
 		}
 	}
+}
 
+// ErrProxyAdmin refuses a proxy sign-in for an admin account: admins sign in with their password.
+var ErrProxyAdmin = errors.New("admin accounts cannot sign in through the proxy")
+
+// LoginTrusted creates a session for username, whom a trusted reverse proxy has already
+// authenticated. An unknown name is ErrInvalidCredentials, a disabled account
+// ErrAccountDisabled and an admin ErrProxyAdmin.
+func (s *Sessions) LoginTrusted(ctx context.Context, username, ip, userAgent string) (*LoggedIn, error) {
+	rec, err := s.db.UserForLogin(ctx, username)
+	switch {
+	case err != nil:
+		return nil, fmt.Errorf("look up user: %w", err)
+	case rec == nil:
+		return nil, ErrInvalidCredentials
+	case rec.Disabled:
+		return nil, ErrAccountDisabled
+	case rec.Role == store.RoleAdmin:
+		return nil, ErrProxyAdmin
+	}
+	return s.open(ctx, rec, ip, userAgent)
+}
+
+// open creates a session for an already verified account and records the login.
+func (s *Sessions) open(ctx context.Context, rec *store.AuthRecord, ip, userAgent string) (*LoggedIn, error) {
 	now := time.Now()
 	cookieValue, tokenHash := NewSessionToken()
 	sess := &store.Session{

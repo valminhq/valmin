@@ -154,6 +154,10 @@ using DNS validation. That requires a DNS-provider plugin and credentials in
 Caddy; it is not configured by this Compose file. See
 [Caddy's certificate challenge documentation](https://caddyserver.com/docs/automatic-https#dns-challenge).
 
+If your group already uses a single sign-on gateway such as Authelia or Authentik, Caddy
+can sign members in through it. See
+[sign in through a reverse proxy](configuration.md#sign-in-through-a-reverse-proxy).
+
 ## Prepare the data directory
 
 From the repository root, after saving `deploy/.env`:

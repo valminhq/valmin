@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/auth"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/ratelimit"
 	"github.com/valminhq/valmin/internal/store"
@@ -547,7 +548,7 @@ func TestSessionAuth(t *testing.T) {
 			var gotUser *store.User
 			var gotID string
 			reached := false
-			h := SessionAuth(tt.sessions)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h := SessionAuth(tt.sessions, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				reached = true
 				gotUser, gotID = UserFrom(r.Context()), SessionIDFrom(r.Context())
 				w.WriteHeader(http.StatusNoContent)
@@ -567,6 +568,122 @@ func TestSessionAuth(t *testing.T) {
 			}
 			if tt.sessions.calls != tt.wantCalls {
 				t.Errorf("Authenticate called %d times, want %d", tt.sessions.calls, tt.wantCalls)
+			}
+		})
+	}
+}
+
+// fakeTrustedLogin opens a session for any name in users and counts the calls.
+type fakeTrustedLogin struct {
+	users map[string]store.User
+	calls int
+}
+
+func (f *fakeTrustedLogin) LoginTrusted(_ context.Context, username, _, _ string) (*auth.LoggedIn, error) {
+	f.calls++
+	u, ok := f.users[username]
+	if !ok {
+		return nil, auth.ErrInvalidCredentials
+	}
+	return &auth.LoggedIn{Cookie: "c-" + username, SessionID: "s-" + username, User: u}, nil
+}
+
+// TestSessionAuthProxy asserts the trusted proxy header: read only from a trusted peer, it
+// opens a session for the named user on a read unless the cookie already belongs to that user,
+// never opens one on a write, and leaves a request unauthenticated when it names someone other
+// than the cookie's user without opening a session.
+func TestSessionAuthProxy(t *testing.T) {
+	ada := store.User{ID: "u-ada", Username: "ada"}
+	bob := &store.User{ID: "u-bob", Username: "bob"}
+	const trustedPeer, otherPeer = "192.0.2.1:4000", "198.51.100.9:4000"
+	tests := []struct {
+		name       string
+		method     string
+		off        bool
+		peer       string
+		header     string
+		cookieUser *store.User
+		wantUserID string
+		wantMint   bool
+	}{
+		{name: "trusted header signs in", peer: trustedPeer, header: "ada", wantUserID: "u-ada", wantMint: true},
+		{name: "untrusted peer is ignored", peer: otherPeer, header: "ada"},
+		{name: "feature off ignores the header", off: true, peer: trustedPeer, header: "ada"},
+		{name: "no header keeps the cookie", peer: trustedPeer, cookieUser: bob, wantUserID: "u-bob"},
+		{name: "matching cookie is reused", peer: trustedPeer, header: "bob", cookieUser: bob, wantUserID: "u-bob"},
+		{
+			name:       "other user's cookie is replaced",
+			peer:       trustedPeer,
+			header:     "ada",
+			cookieUser: bob,
+			wantUserID: "u-ada",
+			wantMint:   true,
+		},
+		{name: "refused name drops the cookie", peer: trustedPeer, header: "root", cookieUser: bob},
+		{name: "write opens no session", method: http.MethodPost, peer: trustedPeer, header: "ada"},
+		{name: "options opens no session", method: http.MethodOptions, peer: trustedPeer, header: "ada"},
+		{
+			name:       "write drops another user's cookie",
+			method:     http.MethodPost,
+			peer:       trustedPeer,
+			header:     "ada",
+			cookieUser: bob,
+		},
+		{
+			name:       "write keeps a matching cookie",
+			method:     http.MethodPost,
+			peer:       trustedPeer,
+			header:     "bob",
+			cookieUser: bob,
+			wantUserID: "u-bob",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logins := &fakeTrustedLogin{users: map[string]store.User{"ada": ada}}
+			proxy := &ProxyAuth{
+				Header: "Remote-User", Trusted: []netip.Prefix{netip.MustParsePrefix("192.0.2.1/32")}, Login: logins,
+			}
+			if tt.off {
+				proxy = nil
+			}
+			sessions := &fakeSessions{user: tt.cookieUser, id: "s-cookie"}
+			var gotUser *store.User
+			h := SessionAuth(sessions, proxy)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotUser = UserFrom(r.Context())
+				w.WriteHeader(http.StatusNoContent)
+			}))
+
+			method := tt.method
+			if method == "" {
+				method = http.MethodGet
+			}
+			req := httptest.NewRequest(method, "/api/v1/auth/me", http.NoBody)
+			req.RemoteAddr = tt.peer
+			if tt.header != "" {
+				req.Header.Set("Remote-User", tt.header)
+			}
+			if tt.cookieUser != nil {
+				req.AddCookie(&http.Cookie{Name: SessionCookie, Value: "v"})
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+
+			gotUserID := ""
+			if gotUser != nil {
+				gotUserID = gotUser.ID
+			}
+			if gotUserID != tt.wantUserID {
+				t.Errorf("context user = %q, want %q", gotUserID, tt.wantUserID)
+			}
+			minted := strings.Contains(rec.Header().Get("Set-Cookie"), SessionCookie+"=c-")
+			if minted != tt.wantMint {
+				t.Errorf(
+					"session cookie set = %v, want %v (Set-Cookie %q)",
+					minted,
+					tt.wantMint,
+					rec.Header().Get("Set-Cookie"),
+				)
 			}
 		})
 	}

@@ -30,6 +30,9 @@ type Auth struct {
 	Gate      *middleware.BootstrapGate
 	Keeper    *crypto.Keeper
 	Devices   *auth.DeviceTrust
+	// LogoutURL is where the browser goes after sign-out when a reverse proxy owns the
+	// sign-in. Empty sends it to the panel's own sign-in page.
+	LogoutURL string
 
 	setupByIP        *ratelimit.Limiter
 	loginByIP        *ratelimit.Limiter
@@ -220,7 +223,16 @@ func (a *Auth) logout(w http.ResponseWriter, r *http.Request) {
 	}
 	middleware.ClearSessionCookie(w)
 	middleware.ClearCSRFCookie(w)
+	if a.LogoutURL != "" {
+		JSON(w, r, http.StatusOK, logoutResponse{RedirectURL: a.LogoutURL})
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// logoutResponse tells the browser where to finish signing out.
+type logoutResponse struct {
+	RedirectURL string `json:"redirect_url"`
 }
 
 func (a *Auth) me(w http.ResponseWriter, r *http.Request) {

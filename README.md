@@ -55,6 +55,8 @@ every server gets its own copy.
 
 - Invite people with a single-use link and give each person viewer or operator access
   per server, with optional extra permissions.
+- Let members sign in through your SSO gateway (Authelia, Authentik, oauth2-proxy) behind
+  Caddy, with no second password.
 - Share a server's setup as a template file or a short code that any Valmin panel can
   turn into a new server.
 - Compare two servers side by side.

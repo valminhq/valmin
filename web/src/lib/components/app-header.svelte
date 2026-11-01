@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { navigationMenu } from '#lib/navigation-menu.js';
+	import { leave } from '#lib/nav.js';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
@@ -119,13 +120,21 @@
 	const openAdmin = $derived(adminLinks.find((link) => link.href === page.url.pathname));
 	const home = $derived(page.url.pathname === resolve('/'));
 
+	/** Ends the session, then opens the sign-in page or the reverse proxy's logout page. */
 	async function signOut() {
+		let redirect: string | undefined;
 		try {
-			await api.post('/auth/logout');
+			redirect = (await api.post<{ redirect_url?: string } | undefined>('/auth/logout'))
+				?.redirect_url;
 		} finally {
 			instanceList.release();
-			session.signedOut();
-			await goto(resolve('login'));
+			// Leaving for the gateway's logout page skips the sign-in page, whose session check
+			// would otherwise open a new session before the gateway's own one ends.
+			if (redirect) leave(redirect);
+			else {
+				session.signedOut();
+				await goto(resolve('login'));
+			}
 		}
 	}
 

@@ -249,10 +249,12 @@ func (s *Server) onJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.Finish
 // returns the grants handler, whose changes the hub announces.
 func (w *wiring) accountRoutes(gate *middleware.BootstrapGate) *Grants {
 	permissionRoutes(w.routes, &Permissions{Authz: w.az, DB: w.db, Commands: w.commands})
-	authRoutes(w.routes, NewAuth(auth.NewBootstrap(w.db), w.sessions, gate, w.keeper,
+	a := NewAuth(auth.NewBootstrap(w.db), w.sessions, gate, w.keeper,
 		auth.NewDeviceTrust(w.db, func(msg []byte) ([]byte, error) {
 			return w.keeper.MAC(crypto.PurposeCookieMAC, msg)
-		})))
+		}))
+	a.LogoutURL = w.cfg.Server.ProxyLogoutURL
+	authRoutes(w.routes, a)
 	userRoutes(w.routes, &Users{DB: w.db, Sessions: w.sessions, Authz: w.az})
 	grants := &Grants{DB: w.db, Authz: w.az}
 	grantRoutes(w.routes, grants)
@@ -466,6 +468,14 @@ func parseServerNetwork(cfg *config.Config) (*url.URL, []netip.Prefix, error) {
 	return external, trusted, nil
 }
 
+// proxyAuth is sign-in through the configured reverse proxy header, or nil when it is off.
+func (w *wiring) proxyAuth(trusted []netip.Prefix) *middleware.ProxyAuth {
+	if w.cfg.Server.ProxyAuthHeader == "" {
+		return nil
+	}
+	return &middleware.ProxyAuth{Header: w.cfg.Server.ProxyAuthHeader, Trusted: trusted, Login: w.sessions}
+}
+
 // finishRouter installs every registered route behind the API chain, then the SPA fallback,
 // and returns the routes it installed. A nil spa serves the embedded build.
 func (w *wiring) finishRouter(
@@ -487,6 +497,7 @@ func (w *wiring) finishRouter(
 		PerUser:   perMinute(floodPerMinute, floodBurst),
 		Bootstrap: gate,
 		Auth:      w.sessions,
+		Proxy:     w.proxyAuth(trusted),
 	})
 	// Registering /api/ here keeps the API structural: http.ServeMux takes the most specific
 	// pattern, so the SPA's "/" cannot answer a mistyped endpoint with 200 and a page of HTML.

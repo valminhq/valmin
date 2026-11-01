@@ -23,11 +23,20 @@ import (
 // bootstrapPending computed from an empty database.
 func pendingRouter(t *testing.T) (*Server, *store.DB) {
 	t.Helper()
+	return pendingRouterWith(t, nil)
+}
+
+// pendingRouterWith is pendingRouter with edit applied to the configuration first.
+func pendingRouterWith(t *testing.T, edit func(*config.Config)) (*Server, *store.DB) {
+	t.Helper()
 	cfg := config.Defaults()
 	cfg.Server.ExternalURL = testOrigin
 	cfg.Auth.SessionIdleTTL = config.Duration(time.Hour)
 	cfg.Auth.SessionAbsoluteTTL = config.Duration(24 * time.Hour)
 	cfg.Auth.InviteTTL = config.Duration(7 * 24 * time.Hour)
+	if edit != nil {
+		edit(&cfg)
+	}
 
 	k, err := crypto.NewKeeper(bytes.Repeat([]byte{7}, crypto.MasterKeyLen), []byte("salt"), "1")
 	if err != nil {
@@ -311,6 +320,68 @@ func TestLogoutEndsTheSession(t *testing.T) {
 	me := send(rt, authenticated(httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", http.NoBody), login))
 	if me.Code != http.StatusUnauthorized {
 		t.Errorf("me after logout = %d, want 401", me.Code)
+	}
+}
+
+// TestProxySignIn asserts the trusted header end to end: a member named by the proxy is signed
+// in, an admin and a header from another peer are not, the password form still works behind
+// the proxy, and sign-out answers the logout URL.
+func TestProxySignIn(t *testing.T) {
+	t.Parallel()
+	rt, db := pendingRouterWith(t, func(cfg *config.Config) {
+		cfg.Server.TrustedProxies = []string{"192.0.2.1/32"}
+		cfg.Server.ProxyAuthHeader = "Remote-User"
+		cfg.Server.ProxyLogoutURL = "https://auth.example.com/logout"
+	})
+	token := bootstrapToken(t, db)
+	admin := send(rt, httptest.NewRequest(http.MethodPost, "/api/v1/setup", jsonBody(t, map[string]string{
+		"token": token, "username": "ada", "password": "a-fine-password",
+	})))
+	create := send(
+		rt,
+		authenticated(httptest.NewRequest(http.MethodPost, "/api/v1/users", jsonBody(t, map[string]string{
+			"username": "bob", "password": "a-fine-password", "role": "member",
+		})), admin),
+	)
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create member = %d %s", create.Code, create.Body)
+	}
+
+	viaProxy := func(peer, name string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", http.NoBody)
+		r.RemoteAddr = peer
+		r.Header.Set("Remote-User", name)
+		return send(rt, r)
+	}
+	member := viaProxy("192.0.2.1:4000", "bob")
+	if member.Code != http.StatusOK || cookieValue(member, "valmin_session") == "" {
+		t.Fatalf("member through the proxy = %d, session cookie %q; want 200 and a cookie",
+			member.Code, cookieValue(member, "valmin_session"))
+	}
+	if got := viaProxy("192.0.2.1:4000", "ada").Code; got != http.StatusUnauthorized {
+		t.Errorf("admin through the proxy = %d, want 401", got)
+	}
+	if got := viaProxy("198.51.100.9:4000", "bob").Code; got != http.StatusUnauthorized {
+		t.Errorf("header from an untrusted peer = %d, want 401", got)
+	}
+
+	password := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", jsonBody(t, map[string]string{
+		"username": "bob", "password": "a-fine-password",
+	}))
+	password.RemoteAddr = "192.0.2.1:4000"
+	password.Header.Set("Remote-User", "bob")
+	if got := send(rt, password); got.Code != http.StatusOK {
+		t.Errorf("password sign-in through the proxy = %d %s, want 200", got.Code, got.Body)
+	}
+
+	out := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", http.NoBody)
+	logout := send(rt, authenticated(out, member))
+	var body struct {
+		RedirectURL string `json:"redirect_url"`
+	}
+	decodeInto(t, logout, &body)
+	if logout.Code != http.StatusOK || body.RedirectURL != "https://auth.example.com/logout" {
+		t.Errorf("logout = %d %+v, want 200 with the logout URL", logout.Code, body)
 	}
 }
 

@@ -29,7 +29,16 @@
 	}
 	encode @compressible zstd gzip
 
-	reverse_proxy valmind:8080 {
-		header_up X-Forwarded-For {remote_host}
+	# A route runs its directives in the order written. The client's copy of the sign-in header
+	# is dropped first, so only an SSO gateway added below it can set the header.
+	# See docs/configuration.md#sign-in-through-a-reverse-proxy.
+	route {
+		request_header -{$VALMIN_PROXY_AUTH_HEADER:Remote-User}
+
+		# forward_auth goes here.
+
+		reverse_proxy valmind:8080 {
+			header_up X-Forwarded-For {remote_host}
+		}
 	}
 }

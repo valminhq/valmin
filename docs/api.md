@@ -56,6 +56,15 @@ A successful login returns the user object and sets three cookies:
 | `valmin_csrf`    | Supplies the token for authenticated writes. Secure and readable by browser JavaScript. |
 | `valmin_device`  | Marks this client as trusted for the account's login limit. Secure and HttpOnly.        |
 
+With [reverse proxy sign-in](configuration.md#sign-in-through-a-reverse-proxy) turned on,
+a request from a trusted proxy that carries the username header is signed in without
+`/auth/login`. Only a `GET` or `HEAD` opens a session from the header; its response sets
+`valmin_session` and `valmin_csrf` for that member account. If the header names a different
+user than the session cookie, the header wins: a read opens a session for the named user,
+or is handled as signed out when that user is unknown, disabled or an administrator, and a
+state-changing request is handled as signed out. A header from any other address is ignored. Administrator
+accounts always sign in with `/auth/login`.
+
 Read the servers your account can access:
 
 ```sh
@@ -343,7 +352,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/setup`                                  | Create the first administrator; see above.                            |
 | `POST`   | `/auth/login`                             | Sign in; sets the session and CSRF cookies.                           |
 | `GET`    | `/auth/me`                                | Current account.                                                      |
-| `POST`   | `/auth/logout`                            | Revoke the session and clear its cookies.                             |
+| `POST`   | `/auth/logout`                            | Revoke the session and clear its cookies; `204`, or `200` with `redirect_url` when a proxy logout URL is set. |
 | `GET`    | `/me/permissions`                         | Current account's permissions.                                        |
 | `POST`   | `/me/password`                            | Change your own password; returns `204`.                              |
 | `PATCH`  | `/me`                                     | Change your own preferences; returns the account.                     |
@@ -1575,7 +1584,8 @@ curl --fail-with-body --silent --show-error \
 rm login.json cookies.txt
 ```
 
-Logout returns 204 and invalidates the session. Remove the example's local files
+Logout invalidates the session and returns 204, or 200 with `redirect_url` when a proxy
+logout URL is configured. Remove the example's local files
 when finished; they contain credentials.
 
 ## Remote backups
