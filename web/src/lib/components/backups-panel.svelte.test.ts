@@ -262,6 +262,46 @@ describe('the backups panel', () => {
 		expect(rows[1].textContent).toContain('Pending deletion');
 	});
 
+	// The world check flags rather than refuses: the operator reads what it found, checks the
+	// log, and accepts the archive if the change was intended.
+	it('says what the world check found and acknowledges it on request', async () => {
+		const flagged = backup({
+			id: 'flagged',
+			world_attention: [
+				{ code: 'world_shrunk', message: 'the world is 4.0 MiB, under half of the 17.2 MiB' }
+			]
+		});
+		await open([actions.backupsList, actions.backupsRestore], {
+			archives: [flagged, backup({ id: 'good' })]
+		});
+		daemon.on(
+			'POST',
+			'/instances/inst-a/backups/flagged/acknowledge',
+			() => new Response(null, { status: 204 })
+		);
+
+		expect(screen.getAllByText('Attention required')).toHaveLength(1);
+		expect(screen.getByText(/under half of the 17\.2 MiB/)).toBeTruthy();
+		expect(screen.getByRole('link', { name: 'Open the console' }).getAttribute('href')).toContain(
+			'#console'
+		);
+
+		await click(button('Acknowledge'));
+		await vi.waitFor(() => expect(daemon.requests('GET', list)).toHaveLength(2));
+		expect(daemon.requests('POST', '/instances/inst-a/backups/flagged/acknowledge')).toHaveLength(
+			1
+		);
+	});
+
+	it('leaves acknowledging to whoever may restore', async () => {
+		await open([actions.backupsList], {
+			archives: [backup({ world_attention: [{ code: 'chunk_missing', message: 'a chunk' }] })]
+		});
+
+		expect(screen.getByText('Attention required')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Acknowledge' })).toBeNull();
+	});
+
 	// A restore replaces the world this server loads, so the world's name is typed back
 	// and nothing is sent until it is.
 	it('restores the chosen archive only after the world name is typed back', async () => {

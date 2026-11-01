@@ -111,7 +111,9 @@ This includes future manual, scheduled, and safety snapshots. Existing archives
 are sent only with **Upload now**.
 
 Remote retention defaults to 10 consistent copies, 5 best-effort copies, and 10 safety
-snapshots. Each class is counted separately; zero keeps all copies in that class.
+snapshots. Each class is counted separately; zero keeps all copies in that class. The newest consistent
+and best-effort copy whose world passed the [world check](operations.md#world-check) is kept
+even past the count, so a broken world uploaded every day cannot push it out.
 Retention runs after successful uploads and daily. Only recorded Valmin objects
 are deleted, and they are deleted outright: on Google Drive, MEGA and OneDrive, pruned
 copies skip the trash, so they stop counting against the quota at once. Raising a count

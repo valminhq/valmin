@@ -13,7 +13,9 @@ function archive(id: string, createdAt: string, consistent: boolean): Backup {
 		consistent,
 		created_at: createdAt,
 		filename: `${id}.tar.gz`,
-		prunes_next: false
+		prunes_next: false,
+		world_bytes: null,
+		world_attention: []
 	};
 }
 

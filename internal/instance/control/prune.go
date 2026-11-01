@@ -144,6 +144,7 @@ func pruneEntry(b *store.Backup) backup.Entry {
 	return backup.Entry{
 		ID: b.ID, Path: b.Path, Consistent: b.Consistent,
 		Snapshot: store.SnapshotTrigger(b.Trigger),
+		Flagged:  len(b.WorldAttention) > 0,
 	}
 }
 

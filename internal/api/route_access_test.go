@@ -42,6 +42,7 @@ var instanceRouteAccess = map[string]string{
 	"GET /api/v1/instances/{id}/backups/{bid}/download":          "backups.download",
 	"POST /api/v1/instances/{id}/backups/{bid}/remote-copy":      "backups.create",
 	"POST /api/v1/instances/{id}/backups/{bid}/restore":          "backups.restore",
+	"POST /api/v1/instances/{id}/backups/{bid}/acknowledge":      "backups.restore",
 	"GET /api/v1/instances/{id}/bans":                            "players.manage",
 	"PUT /api/v1/instances/{id}/bans":                            "players.manage",
 	"GET /api/v1/instances/{id}/capabilities":                    accessView,

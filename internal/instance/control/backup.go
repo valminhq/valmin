@@ -75,7 +75,7 @@ func (b *Backupper) Run(run *BackupRun) jobs.Runner {
 		}
 
 		jh.Progress(ctx, 55, "archiving the world")
-		row, err := b.archiveAndVerify(inst, backupID, dest, trigger, consistent)
+		row, err := b.archiveAndVerify(ctx, jh, inst, backupID, dest, trigger, consistent)
 		if err != nil {
 			return b.abandonBackup(ctx, inst.ID, quiescing, jobs.Outcome{
 				Status: jobs.StatusFailed, ErrorCode: archiveFailureCode(err),
@@ -198,9 +198,11 @@ func (b *Backupper) quiesce(
 
 // archiveAndVerify writes the archive and proves it is one before any row names it
 // (02 §4.4 steps 4 and 5). A verification failure removes the file: an archive nothing
-// vouches for must not be left where a later operator reads it as a backup.
+// vouches for must not be left where a later operator reads it as a backup. A verified archive
+// also records its world's size and what the world check found, which never refuses it.
 func (b *Backupper) archiveAndVerify(
-	inst *store.Instance, backupID, dest, trigger string, consistent bool,
+	ctx context.Context, jh *jobs.Handle, inst *store.Instance,
+	backupID, dest, trigger string, consistent bool,
 ) (*store.Backup, error) {
 	archive := backup.Archive
 	if !consistent {
@@ -210,22 +212,53 @@ func (b *Backupper) archiveAndVerify(
 	if err != nil {
 		return nil, fmt.Errorf("archive the world: %w", err)
 	}
-	// A snapshot is the copy taken of the world about to be changed. A world worth going back to
-	// is often one that would fail verification, so a snapshot is kept as it was copied.
-	if !store.SnapshotTrigger(trigger) {
-		if _, err := backup.Verify(dest, inst.WorldName); err != nil {
-			// dest is panel-built from data.root, the instance id and a timestamp; no request
-			// value reaches it.
-			_ = os.Remove(dest)
-			return nil, fmt.Errorf("verify the archive: %w", err)
-		}
-	}
-
-	return &store.Backup{
+	row := &store.Backup{
 		ID: backupID, InstanceID: inst.ID, Path: res.Path,
 		SizeBytes: res.SizeBytes, SHA256: res.SHA256, WorldName: inst.WorldName,
 		Trigger: trigger, Consistent: consistent,
-	}, nil
+	}
+	// A snapshot is the copy taken of the world about to be changed. A world worth going back to
+	// is often one that would fail verification, so a snapshot is kept as it was copied.
+	if store.SnapshotTrigger(trigger) {
+		return row, nil
+	}
+	found, err := backup.Verify(dest, inst.WorldName)
+	if err != nil {
+		// dest is panel-built from data.root, the instance id and a timestamp; no request
+		// value reaches it.
+		_ = os.Remove(dest)
+		return nil, fmt.Errorf("verify the archive: %w", err)
+	}
+	attention := found.Attention
+	if shrunk, ok, err := b.shrinkage(ctx, inst, found.WorldBytes); err != nil {
+		// The check flags and never refuses, so a failed read costs the comparison, not the archive.
+		jh.Log("could not compare the world with earlier backups: " + err.Error())
+	} else if ok {
+		attention = append(attention, shrunk)
+	}
+	if found.Unchecked != "" {
+		jh.Log(found.Unchecked)
+	}
+	for _, a := range attention {
+		jh.Log("attention required, check the server log around this save: " + a.Message)
+	}
+	row.WorldBytes, row.WorldAttention = &found.WorldBytes, attention
+	return row, nil
+}
+
+// shrinkage compares a world of worldBytes with the last archive of it that passed the world
+// check, reporting the finding when it shrank to under half.
+func (b *Backupper) shrinkage(
+	ctx context.Context, inst *store.Instance, worldBytes int64,
+) (backup.Attention, bool, error) {
+	baseline, at, ok, err := b.DB.WorldBaseline(ctx, inst.ID, inst.WorldName)
+	if err != nil {
+		return backup.Attention{}, false, fmt.Errorf("read the world baseline: %w", err)
+	}
+	if !ok || !backup.Shrunk(worldBytes, baseline) {
+		return backup.Attention{}, false, nil
+	}
+	return backup.ShrunkAttention(worldBytes, baseline, at), true, nil
 }
 
 // ArchivePath is where an archive of inst identified by backupID lands. Built from data.root,
@@ -351,6 +384,8 @@ func (b *Backupper) archiveOnRestart(
 	jh.Progress(ctx, 40, "archiving the world")
 	backupID := store.NewID()
 	row, err := b.archiveAndVerify(
+		ctx,
+		jh,
 		inst,
 		backupID,
 		ArchivePath(b.DataRoot, inst, backupID),

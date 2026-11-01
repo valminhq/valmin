@@ -127,3 +127,45 @@ func TestRemoveToleratesAnAbsentFile(t *testing.T) {
 		t.Error("Remove left the archive on disk")
 	}
 }
+
+// Asserts a world that broke and keeps being archived cannot push out the last archive whose
+// world passed. Without the rule, five daily archives of a broken world at a count of three
+// leave only broken worlds to restore.
+func TestPruneKeepsTheLastArchiveWhoseWorldPassed(t *testing.T) {
+	entries := catalogue("cccccc")
+	for i := range 5 {
+		entries[i].Flagged = true
+	}
+
+	got := doomedIDs(Prune(entries, Policy{KeepCold: 3, KeepHot: 5}))
+	want := []string{"c3", "c4"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("pruned %v, want %v: the flagged c3 and c4 go, and c5 stays as the last that passed", got, want)
+	}
+}
+
+// Asserts each class keeps its own last good archive, and a snapshot never counts as one.
+func TestPruneKeepsTheLastGoodArchivePerClass(t *testing.T) {
+	entries := catalogue("hhcchcs")
+	for _, i := range []int{0, 1, 2, 3} {
+		entries[i].Flagged = true
+	}
+
+	got := doomedIDs(Prune(entries, Policy{KeepCold: 1, KeepHot: 1}))
+	want := []string{"h1", "c3"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("pruned %v, want %v: h4 and c5 are their classes' last good archives", got, want)
+	}
+}
+
+// Asserts that once an operator acknowledges a flagged archive, it is the one protected.
+func TestPruneMovesProtectionToAnAcknowledgedArchive(t *testing.T) {
+	entries := catalogue("ccc")
+	entries[1].Flagged = true
+
+	got := doomedIDs(Prune(entries, Policy{KeepCold: 1, KeepHot: 5}))
+	want := []string{"c1", "c2"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("pruned %v, want %v: the unflagged newest archive is the last good one", got, want)
+	}
+}

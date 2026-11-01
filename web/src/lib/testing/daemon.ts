@@ -168,6 +168,8 @@ export function backup(overrides: Partial<Backup> = {}): Backup {
 		created_at: '2026-09-20T12:00:00Z',
 		filename: 'inst-a-MyWorld-20260920T120000Z-bk-1.tar.gz',
 		prunes_next: false,
+		world_bytes: 2 * 1024 * 1024,
+		world_attention: [],
 		...overrides
 	};
 }

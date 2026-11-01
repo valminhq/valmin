@@ -140,6 +140,7 @@ func instanceRoutes(rt *routeTable, h *Instances) {
 	rt.Handle("POST /api/v1/instances/{id}/backups", http.HandlerFunc(h.createBackup))
 	rt.Handle("DELETE /api/v1/instances/{id}/backups/{bid}", http.HandlerFunc(h.deleteBackup))
 	rt.Handle("POST /api/v1/instances/{id}/backups/{bid}/restore", http.HandlerFunc(h.restoreBackup))
+	rt.Handle("POST /api/v1/instances/{id}/backups/{bid}/acknowledge", http.HandlerFunc(h.acknowledgeWorld))
 	rt.Handle("POST /api/v1/instances/{id}/acknowledge", http.HandlerFunc(h.acknowledge))
 	rt.Handle("GET /api/v1/instances/{id}/operation", http.HandlerFunc(h.operation))
 	rt.Handle("POST /api/v1/instances/{id}/operation/resume", http.HandlerFunc(h.resumeOperation))

@@ -578,3 +578,66 @@ func TestBackupDoesNotCallALiveWorldConsistent(t *testing.T) {
 		})
 	}
 }
+
+// Asserts a world that shrank to under half between backups is flagged rather than refused,
+// that retention keeps the last archive whose world passed even past the count, and that
+// acknowledging the flagged archive moves that protection to it.
+func TestBackupFlagsAShrunkWorldAndKeepsTheLastOneThatPassed(t *testing.T) {
+	t.Parallel()
+	w := newBackupWorld(t, "stopped")
+	rt, db, admin := w.rt, w.db, w.admin
+	seed(t, db, `UPDATE instances SET backup_keep_cold = 1 WHERE id = 'inst-a'`)
+	backup := func() {
+		t.Helper()
+		stub := postBackup(t, rt, admin, "")
+		if final := waitJob(t, rt, admin, stub.JobID); final.Status != "succeeded" {
+			t.Fatalf("backup job = %+v", final)
+		}
+	}
+
+	backup()
+	// Still above Verify's floor, so the archive is taken; under half, so it is flagged.
+	if err := os.WriteFile(filepath.Join(worldsDirOf(t, db), "worlds_local", "World.db"),
+		[]byte(strings.Repeat("w", 1100)), 0o664); err != nil {
+		t.Fatal(err)
+	}
+	backup()
+	backup()
+
+	page := listBackupsAs(t, rt, admin, "")
+	if len(page.Items) != 2 {
+		t.Fatalf("catalogue has %d archives, want the newest and the last one that passed", len(page.Items))
+	}
+	newest, good := page.Items[0], page.Items[1]
+	attention, _ := newest["world_attention"].([]any)
+	if len(attention) != 1 || attention[0].(map[string]any)["code"] != "world_shrunk" {
+		t.Fatalf("newest world_attention = %v, want world_shrunk", newest["world_attention"])
+	}
+	if got, _ := good["world_attention"].([]any); len(got) != 0 || good["prunes_next"] != false {
+		t.Fatalf("the last good archive = %v, want unflagged and kept", good)
+	}
+	if good["world_bytes"].(float64) <= 2*newest["world_bytes"].(float64) {
+		t.Errorf("world_bytes %v then %v do not describe a halving", good["world_bytes"], newest["world_bytes"])
+	}
+
+	path := backupsPath + "/" + newest["id"].(string) + "/acknowledge"
+	if rec := as(rt, admin, httptest.NewRequest(http.MethodPost, path, http.NoBody)); rec.Code != http.StatusNoContent {
+		t.Fatalf("acknowledge = %d, want 204 (%s)", rec.Code, rec.Body)
+	}
+	page = listBackupsAs(t, rt, admin, "")
+	if got, _ := page.Items[0]["world_attention"].([]any); len(got) != 0 {
+		t.Errorf("world_attention after acknowledging = %v, want empty", got)
+	}
+	if page.Items[1]["prunes_next"] != true {
+		t.Error("the older archive is still protected after the newer one was acknowledged")
+	}
+
+	missing := backupsPath + "/does-not-exist/acknowledge"
+	if rec := as(
+		rt,
+		admin,
+		httptest.NewRequest(http.MethodPost, missing, http.NoBody),
+	); rec.Code != http.StatusNotFound {
+		t.Errorf("acknowledge of an unknown archive = %d, want 404", rec.Code)
+	}
+}

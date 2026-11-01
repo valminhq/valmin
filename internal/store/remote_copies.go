@@ -48,12 +48,14 @@ type RemoteCopy struct {
 	CleanupNextAt    string  `json:"-"`
 	CreatedAt        string  `json:"created_at"`
 	UpdatedAt        string  `json:"updated_at"`
+	// WorldFlagged is whether the world check flagged the archive this copy was made from.
+	WorldFlagged bool `json:"-"`
 }
 
 const remoteCopyColumns = `id,destination_id,instance_id,backup_id,instance_name,world_name,
 trigger,consistent,size_bytes,sha256,source_path,archive_created_at,status,attempts,
 next_attempt_at,deadline_at,last_error,cancel_requested,job_id,object_json,manifest_json,
-succeeded_at,cleanup_pending,cleanup_error,cleanup_next_at,created_at,updated_at`
+succeeded_at,cleanup_pending,cleanup_error,cleanup_next_at,created_at,updated_at,world_flagged`
 
 func scanRemoteCopy(row scanner) (*RemoteCopy, error) {
 	var c RemoteCopy
@@ -61,7 +63,7 @@ func scanRemoteCopy(row scanner) (*RemoteCopy, error) {
 		&c.Trigger, &c.Consistent, &c.SizeBytes, &c.SHA256, &c.SourcePath, &c.ArchiveCreatedAt,
 		&c.Status, &c.Attempts, &c.NextAttemptAt, &c.DeadlineAt, &c.LastError, &c.CancelRequested,
 		&c.JobID, &c.ObjectJSON, &c.ManifestJSON, &c.SucceededAt, &c.CleanupPending, &c.CleanupError,
-		&c.CleanupNextAt, &c.CreatedAt, &c.UpdatedAt)
+		&c.CleanupNextAt, &c.CreatedAt, &c.UpdatedAt, &c.WorldFlagged)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -77,9 +79,9 @@ func enqueueRemoteCopy(ctx context.Context, ex execer, instanceID, backupID stri
 	_, err := ex.ExecContext(ctx, `INSERT INTO remote_copies
  (id,destination_id,instance_id,backup_id,instance_name,world_name,trigger,consistent,
  size_bytes,sha256,source_path,archive_created_at,status,next_attempt_at,deadline_at,
- cleanup_next_at,created_at,updated_at)
+ cleanup_next_at,created_at,updated_at,world_flagged)
  SELECT ?,d.id,b.instance_id,b.id,i.name,b.world_name,b.trigger,b.consistent,
- b.size_bytes,b.sha256,b.path,b.created_at,'pending',?,?,?,?,?
+ b.size_bytes,b.sha256,b.path,b.created_at,'pending',?,?,?,?,?,b.world_attention IS NOT NULL
  FROM backups b JOIN instances i ON i.id=b.instance_id
  CROSS JOIN remote_backup_destinations d
  WHERE b.id=? AND b.instance_id=? AND i.state <> 'deleting'

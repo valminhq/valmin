@@ -47,18 +47,25 @@ type Verified struct {
 	// Directory is 1.0's layout: the world is a directory of `_main.<gen>.*` files and chunks
 	// rather than a `.db`/`.fwl` pair (03 §4).
 	Directory bool
+	// WorldBytes is everything the world owns in the archive: the pair, or the whole 1.0
+	// directory with its chunks. The engine's `.old` fallbacks and rolling saves are not counted.
+	WorldBytes int64
+	// Attention is what the world check found. It never fails verification.
+	Attention []Attention
+	// Unchecked says why the 1.0 world check did not run, empty when it did or did not apply.
+	Unchecked string
 }
 
 // dataName and headerName are the two halves as the world's own layout spells them, so an
 // error names a file an operator can go and look for.
-func (v Verified) dataName() string {
+func (v *Verified) dataName() string {
 	if v.Directory {
 		return v.WorldName + "/_main.<n>.db2"
 	}
 	return v.WorldName + ".db"
 }
 
-func (v Verified) headerName() string {
+func (v *Verified) headerName() string {
 	if v.Directory {
 		return v.WorldName + "/_main.<n>.fwl2"
 	}
@@ -66,7 +73,7 @@ func (v Verified) headerName() string {
 }
 
 // Verify reads a written archive back and reports whether it carries worldName's pair at a
-// plausible size (02 §4.4 step 5, B8).
+// plausible size (02 §4.4 step 5, B8), how large the world is, and what the world check found.
 //
 // It never compares the .fwl against a previous one: the engine rewrites that file between
 // sessions, so such a check fails on every healthy backup (B8, 03 §4).
@@ -87,6 +94,8 @@ func Verify(archivePath, worldName string) (Verified, error) {
 	// Every world the archive holds, in either layout. The scan is what answers both
 	// questions: whether this world is here, and — when it is not — what is (ADR-179).
 	scan := WorldScan{}
+	check := newWorldCheck(worldName)
+	var files []scannedFile
 	tr := tar.NewReader(gz)
 	for {
 		hdr, err := tr.Next()
@@ -104,6 +113,10 @@ func Verify(archivePath, worldName string) (Verified, error) {
 		// _backup_auto-* saves are named after the world and sit beside it; they classify as
 		// their own world and so cannot satisfy this one's pair check (03 §4.1 rule 5).
 		scan.Add(hdr.Name, hdr.Size)
+		files = append(files, scannedFile{rel: cleanRel(hdr.Name), size: hdr.Size})
+		if err := check.add(hdr.Name, hdr.Size, tr); err != nil {
+			return Verified{}, fmt.Errorf("%w: %w", ErrArchiveUnreadable, err)
+		}
 	}
 
 	// The tar reader stops at the two zero blocks, leaving gzip's trailer and its CRC32
@@ -118,7 +131,18 @@ func Verify(archivePath, worldName string) (Verified, error) {
 			"%w: more than %d bytes follow the archive's end", ErrArchiveUnreadable, maxTrailerBytes)
 	}
 
-	return verified(scan, worldName)
+	found, err := verified(scan, worldName)
+	if err != nil {
+		return Verified{}, err
+	}
+	world := scan[worldName]
+	for _, f := range files {
+		if world.owns(f.rel, worldName) {
+			found.WorldBytes += f.size
+		}
+	}
+	found.Attention, found.Unchecked = check.attention(world.Dir, world.Directory)
+	return found, nil
 }
 
 // verified applies the pair rule and the size floors to what the walk found.
@@ -129,7 +153,7 @@ func verified(scan WorldScan, worldName string) (Verified, error) {
 		found.DBBytes, found.FWLBytes = world.DataBytes, world.HeaderBytes
 		found.Directory = world.Directory
 	}
-	if err := verifyPair(found, worldName, scan); err != nil {
+	if err := verifyPair(&found, worldName, scan); err != nil {
 		return Verified{}, err
 	}
 	return found, nil
@@ -156,7 +180,7 @@ func heldInstead(scan WorldScan) string {
 
 // verifyPair applies the pair rule and the size floors to what the walk found. scan is every
 // world the archive carries, which is what the missing-world error reports back.
-func verifyPair(found Verified, worldName string, scan WorldScan) error {
+func verifyPair(found *Verified, worldName string, scan WorldScan) error {
 	if !scan.Complete(worldName) {
 		return fmt.Errorf("%w: %s%s", ErrWorldMissing, missingHalves(found, worldName),
 			heldInstead(scan))
@@ -181,7 +205,7 @@ func verifyPair(found Verified, worldName string, scan WorldScan) error {
 }
 
 // missingHalves names what was not there, in the layout's own vocabulary.
-func missingHalves(found Verified, worldName string) string {
+func missingHalves(found *Verified, worldName string) string {
 	var missing []string
 	if found.DBBytes < 0 {
 		missing = append(missing, found.dataName())

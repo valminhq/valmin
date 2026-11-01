@@ -22,6 +22,17 @@ export interface Backup {
 	/** True when retention would remove this archive on its next run. The daemon decides it
 	 * over the whole catalogue — a count kept here would be a second copy of one policy. */
 	prunes_next: boolean;
+	/** Size of the world inside the archive; null when it was never measured. */
+	world_bytes: number | null;
+	/** What the world check asks the operator to look at; empty when nothing. The daemon writes
+	 * the messages, so the SPA holds no knowledge of world files. */
+	world_attention: WorldAttention[];
+}
+
+/** One finding of the world check. A finding flags an archive; it never refuses one. */
+export interface WorldAttention {
+	code: string;
+	message: string;
 }
 
 export interface Page<T> {
@@ -54,6 +65,9 @@ export const backups = {
 		api.post<Job>(`/instances/${instanceId}/backups/${backupId}/restore`),
 	remove: (instanceId: string, backupId: string) =>
 		api.del<void>(`/instances/${instanceId}/backups/${backupId}`),
+	/** Accepts a flagged archive's world after the operator has checked it. */
+	acknowledge: (instanceId: string, backupId: string) =>
+		api.post<void>(`/instances/${instanceId}/backups/${backupId}/acknowledge`),
 	/** A plain link rather than a fetch: the archive is served on the streaming router with no
 	 * write deadline (`11 §8.1`), and the browser's own download handles a multi-gigabyte body
 	 * without the SPA holding it in memory. */

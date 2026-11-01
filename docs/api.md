@@ -387,12 +387,13 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/operation/resume`        | Continue an interrupted operation; returns a job.                     |
 | `POST`   | `/instances/{id}/operation/abandon`       | Drop the steps that never ran; returns the operation.                 |
 | `GET`    | `/instances/{id}/jobs`                    | Server job history; `scheduled=true` lists scheduled runs only.       |
-| `GET`    | `/instances/{id}/backups`                 | World backup catalog.                                                 |
+| `GET`    | `/instances/{id}/backups`                 | World backup catalog, with each archive's `world_bytes` and `world_attention`. |
 | `POST`   | `/instances/{id}/backups?mode=quiesced`   | Stop, back up, and resume a previously running server; returns a job. |
 | `POST`   | `/instances/{id}/backups?mode=hot`        | Best-effort backup without stopping; returns a job.                   |
 | `GET`    | `/instances/{id}/backups/{bid}/download`  | Download an archive.                                                  |
 | `DELETE` | `/instances/{id}/backups/{bid}`           | Delete an unlinked archive.                                           |
 | `POST`   | `/instances/{id}/backups/{bid}/restore`   | Restore into a stopped server; returns a job.                         |
+| `POST`   | `/instances/{id}/backups/{bid}/acknowledge` | Clear the archive's world check findings; needs `backups.restore`.  |
 | `GET`    | `/instances/{id}/setups`                  | Saved setups for the server.                                          |
 | `POST`   | `/instances/{id}/setups`                  | Save a setup from a stopped server; returns a job.                    |
 | `GET`    | `/instances/{id}/setups/{sid}`            | One saved setup and its linked world backup.                          |
@@ -1134,7 +1135,7 @@ A rule has `condition_kind`, `instance_id` (`null` for every server), `webhook_i
 must be shared or belong to the rule's server, so a rule for every server names only shared
 ones; any other is `422` on `webhook_ids`, worded as if it did not exist. The condition kinds are
 `job_failed`, `job_stuck`, `crash_loop`, `unclean_stop`, `instance_error`,
-`restart_required`, `update_available`, `stale_backup` and `low_disk`, plus the one-off
+`restart_required`, `update_available`, `stale_backup`, `backup_attention` and `low_disk`, plus the one-off
 events `server_started`, `server_stopped` and `power_cut`, and the game events below.
 
 Three events are sent without any rule to every enabled destination with `catch_all` on that
@@ -1196,6 +1197,7 @@ kept. The names each kind fills:
 | `instance_error`   | `what_to_do`                                                  |
 | `crash_loop`       | `stops`, `what_to_do`                                         |
 | `job_stuck`        | `running`, `what_to_do`                                       |
+| `backup_attention` | `backup`, `findings`, `what_to_do`                            |
 | `server_started`   | `server_name`, `world`, `join_code`, `port`, `time`           |
 | `server_stopped`   | `reason`, `server_name`, `world`, `time`                      |
 | `power_cut`        | `power_off`, `stop_at`, `servers`                             |
@@ -1217,6 +1219,14 @@ embed then has no fields.
 counted on its own clock and days, since the last consistent archive; a hot copy does not count. On a server that backs up
 on restart, its restart schedule counts too, while its latest restart succeeded. A failed
 restart raises `job_failed` instead.
+
+`backup_attention` opens when a server's newest archive other than a snapshot was flagged by
+the [world check](operations.md#world-check), and resolves when a newer archive passes or the
+flagged one is acknowledged. In the backup catalog, `world_bytes` is the size of the world
+inside the archive (`null` when never measured) and `world_attention` is a list of
+`{code, message}` findings, empty when there are none. The codes are `world_shrunk`,
+`db_shorter_than_old`, `save_incomplete`, `version_mismatch`, `chunk_missing` and
+`db2_damaged`; `message` is written for people. A finding never refuses an archive.
 
 When a rule covers the same incident as one of the first three events, the rule's destinations
 receive only the rule's alert. A failed backup is covered by a `job_failed` rule, a new
