@@ -284,7 +284,6 @@ func (h *Instances) seedModChosen(ctx context.Context, mods []resolveRequest) (b
 func (h *Instances) submitProvision(
 	ctx context.Context, run *control.ProvisionRun, from instance.State,
 ) (*store.Job, error) {
-	//nolint:wrapcheck // preserve typed job conflicts and the submission error
 	return h.ctl.Provisioner.Submit(ctx, run, from)
 }
 

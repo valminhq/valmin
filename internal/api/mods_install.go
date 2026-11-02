@@ -102,7 +102,6 @@ func (m *Mods) submitInstall(
 	audit *store.AuditEntry,
 	afterFinish func(context.Context),
 ) (*store.Job, error) {
-	//nolint:wrapcheck // preserve typed job conflicts for the HTTP response
 	return m.install.Submit(ctx, &manager.InstallSubmission{
 		Instance: inst, RequestedBy: requestedBy, Audit: audit, AfterFinish: afterFinish,
 		Payload: &manager.InstallPayload{

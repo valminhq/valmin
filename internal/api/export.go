@@ -158,7 +158,7 @@ func (h *Exports) download(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
-	f, err := os.Open(path) //nolint:gosec // found in the export directory, never named by the request
+	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
@@ -188,7 +188,7 @@ func (h *Exports) download(w http.ResponseWriter, r *http.Request) {
 func (h *Exports) findLatest() (path string, fi os.FileInfo, err error) {
 	path, err = export.Latest(h.Exporter.Root)
 	if err != nil || path == "" {
-		return "", nil, err //nolint:wrapcheck // Latest names the listing
+		return "", nil, err
 	}
 	fi, err = os.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {

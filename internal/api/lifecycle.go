@@ -106,7 +106,6 @@ func (h *Instances) start(w http.ResponseWriter, r *http.Request) {
 func (h *Instances) submitStart(
 	ctx context.Context, inst *store.Instance, containerID, requestedBy string, audit *store.AuditEntry,
 ) (*store.Job, error) {
-	//nolint:wrapcheck // preserve typed job conflicts and the submission error
 	return h.ctl.Starter.Submit(ctx, &control.StartSubmission{
 		Instance: inst, ContainerID: containerID, RequestedBy: requestedBy, Audit: audit,
 	})
@@ -190,7 +189,6 @@ func (h *Instances) restart(w http.ResponseWriter, r *http.Request) {
 func (h *Instances) submitRestart(
 	ctx context.Context, inst *store.Instance, containerID, requestedBy, scheduleID string,
 ) (*store.Job, error) {
-	//nolint:wrapcheck // preserve typed job conflicts and the submission error
 	return h.ctl.Restarter.Submit(ctx, &control.RestartSubmission{
 		Instance: inst, ContainerID: containerID, RequestedBy: requestedBy, ScheduleID: scheduleID,
 		Audit: jobAudit(ctx, requestedBy, inst.ID, "instances.restart", struct{}{}),
@@ -253,7 +251,6 @@ func (h *Instances) delete(w http.ResponseWriter, r *http.Request) {
 func (h *Instances) submitDelete(
 	ctx context.Context, inst *store.Instance, keepWorlds bool, requestedBy string,
 ) (*store.Job, error) {
-	//nolint:wrapcheck // preserve typed job conflicts and the submission error
 	return h.ctl.Deleter.Submit(ctx, &control.DeleteSubmission{
 		Instance: inst, KeepWorlds: keepWorlds, RequestedBy: requestedBy,
 		Audit: jobAudit(ctx, requestedBy, inst.ID, "instances.delete", control.DeletePayload{KeepWorlds: keepWorlds}),

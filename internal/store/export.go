@@ -12,7 +12,7 @@ import (
 // reader connection, so writes carry on while it copies. path must not exist.
 func (db *DB) CopyTo(ctx context.Context, path string) error {
 	// VACUUM INTO accepts an empty existing file, so creating it first fixes the mode.
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // panel-built path
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", path, err)
 	}

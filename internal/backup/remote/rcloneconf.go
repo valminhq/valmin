@@ -179,7 +179,7 @@ func writePrivateFile(path string, data []byte) error {
 	if err := os.Rename(name, path); err != nil {
 		return fmt.Errorf("replace rclone configuration: %w", err)
 	}
-	d, err := os.Open(dir) //nolint:gosec // The directory comes from the operator's rclone_config setting.
+	d, err := os.Open(dir)
 	if err != nil {
 		return fmt.Errorf("open rclone configuration directory: %w", err)
 	}

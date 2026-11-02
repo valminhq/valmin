@@ -650,7 +650,7 @@ func ProbeFSType(path string) string {
 	if err := unix.Statfs(path, &st); err != nil {
 		return "unknown"
 	}
-	switch int64(st.Type) { //nolint:unconvert // Type's width differs by architecture
+	switch int64(st.Type) { // Type's width differs by architecture
 	case fsMagicBtrfs:
 		return "btrfs"
 	case fsMagicXFS:

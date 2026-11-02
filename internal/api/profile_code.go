@@ -133,7 +133,7 @@ func fetchProfile(ctx context.Context, hosts profileHosts, key string) ([]byte, 
 func codeInvalid(detail string) error {
 	var val apierr.Validation
 	val.Add("code", apierr.FieldInvalid, detail)
-	return val.Err() //nolint:wrapcheck // the validation error is the response
+	return val.Err()
 }
 
 // profileMods puts first the mods no other mod in the profile depends on, which install as the

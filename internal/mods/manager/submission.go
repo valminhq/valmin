@@ -52,7 +52,7 @@ func (i *Installer) SubmitUninstall(
 		},
 	}, runUninstall(i.DB, inst, payload))
 	if err != nil {
-		return nil, err //nolint:wrapcheck // preserve typed engine conflicts
+		return nil, err
 	}
 	submitted = true
 	return job, nil
@@ -81,7 +81,7 @@ func (i *Installer) SubmitToggle(
 		},
 	}, runToggle(i.DB, inst, payload))
 	if err != nil {
-		return nil, err //nolint:wrapcheck // preserve typed engine conflicts
+		return nil, err
 	}
 	return job, nil
 }

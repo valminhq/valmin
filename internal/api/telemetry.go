@@ -182,7 +182,7 @@ func readContainerLog(
 ) (lines []logLine, err error) {
 	rc, err := rt.Logs(ctx, containerID, runtime.LogOptions{Tail: tail, Timestamps: true})
 	if err != nil {
-		return nil, err //nolint:wrapcheck // the caller names the operation
+		return nil, err
 	}
 	defer func() { _ = rc.Close() }()
 
@@ -190,7 +190,7 @@ func readContainerLog(
 	if err := instance.DemuxLines(rc, func(l instance.Line) {
 		lines = append(lines, logLine{TS: l.TS, Stream: l.Stream, Line: l.Text})
 	}); err != nil {
-		return nil, err //nolint:wrapcheck // the caller names the operation
+		return nil, err
 	}
 	return lines, nil
 }

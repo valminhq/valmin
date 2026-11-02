@@ -86,26 +86,26 @@ func (q *ModQueue) publish(instanceID string) {
 func (q *ModQueue) step(ctx context.Context, id string) error {
 	inst, err := q.DB.InstanceByID(ctx, id)
 	if err != nil || inst == nil {
-		return err //nolint:wrapcheck // the store already names the instance
+		return err
 	}
 	if st := instance.State(inst.State); st != instance.StateStopped {
 		if st == instance.StateRunning || st == instance.StateStarting {
 			// Started by someone else: the owed start is spent, the installs wait for the next stop.
-			return q.DB.ClearQueuedModStart(ctx, id) //nolint:wrapcheck // the store names the instance
+			return q.DB.ClearQueuedModStart(ctx, id)
 		}
 		return nil
 	}
 	if op, err := q.DB.OpenOperation(ctx, id); err != nil || op != nil {
-		return err //nolint:wrapcheck // the store names the instance
+		return err
 	}
 	// A server stopped ahead of a power cut keeps its queue until after it.
 	if soon, err := q.DB.PowerCutWithin(ctx, time.Now().UTC(), scheduler.ShutdownQuietLead); err != nil || soon {
-		return err //nolint:wrapcheck // the store names what it read
+		return err
 	}
 
 	queued, err := q.DB.QueuedModInstalls(ctx, id)
 	if err != nil {
-		return err //nolint:wrapcheck // the store names the instance
+		return err
 	}
 	if len(queued) == 0 {
 		return q.startOwed(ctx, inst)
@@ -196,7 +196,7 @@ func (q *ModQueue) installUpdates(
 		names[i] = t.FullName
 	}
 	if err := q.DB.UnqueueModInstalls(ctx, inst.ID, names); err != nil {
-		return err //nolint:wrapcheck // the store names the instance
+		return err
 	}
 	q.submitted(inst.ID)
 	return nil
@@ -249,7 +249,7 @@ func (q *ModQueue) installNext(ctx context.Context, inst *store.Instance, next *
 		return fmt.Errorf("submit queued install of %s: %w", next.FullName, err)
 	}
 	if _, err := q.DB.UnqueueModInstall(ctx, inst.ID, next.FullName); err != nil {
-		return err //nolint:wrapcheck // the store names the package
+		return err
 	}
 	q.submitted(inst.ID)
 	return nil
@@ -261,7 +261,7 @@ func (q *ModQueue) drop(ctx context.Context, instanceID string, entry *store.Que
 		slog.String("instance_id", instanceID), slog.String("user_id", entry.RequestedBy),
 		slog.String("full_name", entry.FullName))
 	if _, err := q.DB.UnqueueModInstall(ctx, instanceID, entry.FullName); err != nil {
-		return err //nolint:wrapcheck // the store names the package
+		return err
 	}
 	q.publish(instanceID)
 	return nil
@@ -271,7 +271,7 @@ func (q *ModQueue) drop(ctx context.Context, instanceID string, entry *store.Que
 func (q *ModQueue) startOwed(ctx context.Context, inst *store.Instance) error {
 	owed, by, err := q.DB.QueuedModStart(ctx, inst.ID)
 	if err != nil || !owed {
-		return err //nolint:wrapcheck // the store names the instance
+		return err
 	}
 	if inst.ContainerID != nil {
 		start := &StartSubmission{Instance: inst, ContainerID: *inst.ContainerID, RequestedBy: by}
@@ -283,7 +283,7 @@ func (q *ModQueue) startOwed(ctx context.Context, inst *store.Instance) error {
 			return err
 		}
 	}
-	return q.DB.ClearQueuedModStart(ctx, inst.ID) //nolint:wrapcheck // the store names the instance
+	return q.DB.ClearQueuedModStart(ctx, inst.ID)
 }
 
 // mayInstall reports whether userID still holds mods.manage on the instance.

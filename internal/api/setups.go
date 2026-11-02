@@ -263,7 +263,7 @@ func (h *Instances) setupPreview(
 ) (setupPreviewView, error) {
 	snap, err := control.DecodeSetupSnapshot(row)
 	if err != nil {
-		return setupPreviewView{}, err //nolint:wrapcheck // preserve the setup error text
+		return setupPreviewView{}, err
 	}
 	detail, err := h.setupDetail(ctx, row, &snap)
 	if err != nil {
@@ -296,11 +296,11 @@ func (h *Instances) setupPreview(
 	} else {
 		currentSnap, err := h.ctl.SetupState.Capture(ctx, inst)
 		if err != nil {
-			return p, err //nolint:wrapcheck // preserve the setup error text
+			return p, err
 		}
 		currentPaths, err := control.SetupPaths(currentSnap.Mods, currentSnap.Configs)
 		if err != nil {
-			return p, err //nolint:wrapcheck // preserve the setup error text
+			return p, err
 		}
 		if err := control.PreflightSetupTargets(inst, currentPaths, targetPaths); err != nil {
 			p.Problems = append(p.Problems, fmt.Sprintf("Restore target conflicts with current files: %v", err))
@@ -324,7 +324,7 @@ func (h *Instances) currentSetupState(
 ) (setupStateView, string, error) {
 	snap, etag, err := h.ctl.SetupState.Current(ctx, inst)
 	if err != nil {
-		return setupStateView{}, "", err //nolint:wrapcheck // preserve the setup error text
+		return setupStateView{}, "", err
 	}
 	return setupStateView{
 		Build: deref(inst.GameBuildID), Launch: snap.Instance,

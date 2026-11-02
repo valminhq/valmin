@@ -102,7 +102,7 @@ func backupOne(root *os.Root, rel, dest string) (ok bool, err error) {
 		return false, ErrUnsupportedEntry
 	}
 	if err != nil {
-		return false, err //nolint:wrapcheck // fsutil names the file
+		return false, err
 	}
 	defer func() { _ = f.Close() }()
 	return true, publishFile(f, dest)
@@ -231,8 +231,7 @@ func Rollback(manifest []ManifestEntry, serverRoot, backupDir string) error {
 }
 
 func restoreOne(root *os.Root, rel, saved string) error {
-	f, err := os.Open(saved) //nolint:gosec // saved is under the job's own backupDir, joined
-	// from a checkDest-validated relative path
+	f, err := os.Open(saved)
 	if err != nil {
 		return fmt.Errorf("open backup: %w", err)
 	}

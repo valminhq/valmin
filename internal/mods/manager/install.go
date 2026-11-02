@@ -130,7 +130,7 @@ func (i *Installer) Submit(ctx context.Context, sub *InstallSubmission) (*store.
 	}, i.runModInstallThen(inst, payload, sub.AfterFinish))
 	if err != nil {
 		// Not wrapped: writeJobSubmitError reads the typed conflicts out with errors.As.
-		return nil, err //nolint:wrapcheck // the caller matches on the engine's typed errors
+		return nil, err
 	}
 	submitted = true
 	return job, nil

@@ -61,7 +61,7 @@ func archive(worldsDir, dest string, live bool) (Result, error) {
 		return Result{}, fmt.Errorf("create archive directory: %w", err)
 	}
 	// dest is panel-built from data.root and an instance id; no request value reaches it.
-	f, err := os.Create(part) //nolint:gosec // see above
+	f, err := os.Create(part)
 	if err != nil {
 		return Result{}, fmt.Errorf("create archive: %w", err)
 	}
@@ -101,7 +101,7 @@ func archive(worldsDir, dest string, live bool) (Result, error) {
 	}
 	published = true
 	if err := fsutil.SyncDir(filepath.Dir(dest)); err != nil {
-		return Result{}, err //nolint:wrapcheck // SyncDir names the directory
+		return Result{}, err
 	}
 
 	return Result{

@@ -80,7 +80,6 @@ func (h *Instances) submitBackup(
 	ctx context.Context, inst *store.Instance, containerID string,
 	mode control.BackupMode, requestedBy, scheduleID string,
 ) (*store.Job, error) {
-	//nolint:wrapcheck // preserve typed job conflicts and the submission error
 	return h.ctl.Backupper.Submit(ctx, &control.BackupSubmission{
 		Instance: inst, ContainerID: containerID, Mode: mode,
 		RequestedBy: requestedBy, ScheduleID: scheduleID,

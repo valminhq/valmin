@@ -78,7 +78,7 @@ func readCorpus(t *testing.T) []corpusPackage {
 		if !ok {
 			t.Fatalf("%s is not named Namespace-Name-Version.zip", filepath.Base(p))
 		}
-		body, err := os.ReadFile(p) //nolint:gosec // a path this test globbed itself
+		body, err := os.ReadFile(p)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -315,7 +315,7 @@ func TestThreeDeepTreePlacesEveryFile(t *testing.T) {
 	for _, row := range rows {
 		for _, e := range manifestOf(t, &row) {
 			claimed[e.Path] = true
-			body, err := os.ReadFile(serverPath(dataDir, e.Path)) //nolint:gosec // the test's own tree
+			body, err := os.ReadFile(serverPath(dataDir, e.Path))
 			if err != nil {
 				t.Errorf("%s claims %s, which is not there: %v", row.FullName, e.Path, err)
 				continue

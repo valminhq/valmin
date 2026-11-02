@@ -48,7 +48,7 @@ var ErrUnsafeEntry = errors.New("archive entry is not safe to extract")
 // package's, never the archive's.
 func Extract(archivePath, prefix, destDir string) error {
 	// archivePath comes from a catalogue row, never from a request (D13).
-	f, err := os.Open(archivePath) //nolint:gosec // see above
+	f, err := os.Open(archivePath)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrArchiveUnreadable, err)
 	}
@@ -156,7 +156,7 @@ func writeExtracted(src io.Reader, dest string, size int64) error {
 		return fmt.Errorf("create %s: %w", filepath.Dir(dest), err)
 	}
 	// dest is root-checked against the staging directory by safeJoin.
-	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fsutil.FileMode) //nolint:gosec // see above
+	f, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, fsutil.FileMode)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", dest, err)
 	}
@@ -183,7 +183,7 @@ func MarkStaged(live string) error {
 	if err := os.WriteFile(stagedComplete(live), nil, fsutil.FileMode); err != nil {
 		return fmt.Errorf("mark the staged world complete: %w", err)
 	}
-	return fsutil.SyncDir(filepath.Dir(live)) //nolint:wrapcheck // SyncDir names the directory
+	return fsutil.SyncDir(filepath.Dir(live))
 }
 
 // DiscardStaged removes the staged tree and its marker, and is also how a stager clears
@@ -226,7 +226,7 @@ func SwapKeeping(live string, keep func(name string) bool) error {
 		return fmt.Errorf("publish the restored world: %w", err)
 	}
 	if err := fsutil.SyncDir(filepath.Dir(live)); err != nil {
-		return err //nolint:wrapcheck // SyncDir names the directory
+		return err
 	}
 	// After the renames, never before: between them the staged tree is the only world there
 	// is, and a tree that has stopped claiming to be complete is one recovery discards.
@@ -337,7 +337,7 @@ func publishStaged(live string, keep func(name string) bool) (string, error) {
 		return "", fmt.Errorf("publish the restored world: %w", err)
 	}
 	if err := fsutil.SyncDir(filepath.Dir(live)); err != nil {
-		return "", err //nolint:wrapcheck // SyncDir names the directory
+		return "", err
 	}
 	if err := os.Remove(stagedComplete(live)); err != nil && !os.IsNotExist(err) {
 		return "", fmt.Errorf("clear the completion marker: %w", err)

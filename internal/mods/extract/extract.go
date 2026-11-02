@@ -139,7 +139,7 @@ func writeEntry(f *zip.File, dest string) error {
 	}
 	defer func() { _ = rc.Close() }()
 
-	out, err := os.OpenFile( //nolint:gosec // dest validated by safeJoin
+	out, err := os.OpenFile(
 		dest,
 		os.O_WRONLY|os.O_CREATE|os.O_TRUNC,
 		fsutil.FileMode,

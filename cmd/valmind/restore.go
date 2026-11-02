@@ -54,7 +54,7 @@ func runRestore(ctx context.Context, getenv func(string) string, in io.Reader, o
 		return fmt.Errorf("%w; run the restore again to start over", err)
 	}
 	if err := export.FinishRestore(cfg.Data.Root); err != nil {
-		return err //nolint:wrapcheck // FinishRestore names the step
+		return err
 	}
 	return printRestored(out, m, restored, keyNote(cfg, getenv))
 }
@@ -111,7 +111,7 @@ func prepareRestored(ctx context.Context, db *store.DB, root string, builds map[
 
 	backups, err := db.BackupFiles(ctx)
 	if err != nil {
-		return 0, err //nolint:wrapcheck // BackupFiles names the query
+		return 0, err
 	}
 	var missing []store.BackupFile
 	for _, b := range backups {
@@ -120,7 +120,7 @@ func prepareRestored(ctx context.Context, db *store.DB, root string, builds map[
 		}
 	}
 	if err := db.PrepareRestored(ctx, builds, missing); err != nil {
-		return 0, err //nolint:wrapcheck // PrepareRestored names the step
+		return 0, err
 	}
 	return marked, nil
 }

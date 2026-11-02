@@ -234,7 +234,6 @@ func SnapshotBeforeMigrate(ctx context.Context, db *sql.DB, dir string, now time
 	path := filepath.Join(dir, fmt.Sprintf("panel-pre-%04d-%s.db",
 		migrations[i].Version, now.UTC().Format("20060102T150405Z")))
 	// VACUUM INTO accepts an empty existing file, so creating it first fixes the mode.
-	//nolint:gosec // dir is the data root's backups directory
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return "", fmt.Errorf("create %s: %w", path, err)
@@ -261,7 +260,7 @@ func SnapshotBeforeMigrate(ctx context.Context, db *sql.DB, dir string, now time
 
 // syncPath flushes a file or directory to disk.
 func syncPath(path string) error {
-	f, err := os.Open(path) //nolint:gosec // path is the snapshot or its directory
+	f, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
 	}

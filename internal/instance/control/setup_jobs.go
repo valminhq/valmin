@@ -37,7 +37,7 @@ func SubmitSetupDelete(
 	audit *store.AuditEntry,
 ) (*store.Job, error) {
 	id := inst.ID
-	return engine.Submit(ctx, &jobs.Spec{ //nolint:wrapcheck // preserve typed job conflicts
+	return engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindSetupDelete, LockKey: jobs.InstanceLockKey(id),
 		LockKeys:   []string{SetupArtifactLock},
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy,

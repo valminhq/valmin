@@ -198,7 +198,7 @@ func treeHash(t *testing.T, dataDir string) string {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		body, err := os.ReadFile(p) //nolint:gosec // the test's own tree
+		body, err := os.ReadFile(p)
 		if err != nil {
 			return err
 		}

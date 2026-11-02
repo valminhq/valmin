@@ -67,7 +67,7 @@ func (w *stateWatch) subscribe(instanceID string) (changed <-chan struct{}, stop
 func (c *Chainer) waitChild(ctx context.Context, jh *jobs.Handle, job *store.Job) error {
 	row, err := jh.WaitJob(ctx, job.ID)
 	if err != nil {
-		return err //nolint:wrapcheck // the wait names the job
+		return err
 	}
 	if row.Status == jobs.StatusSucceeded {
 		return nil

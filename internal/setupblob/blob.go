@@ -161,7 +161,7 @@ func (s *Store) GC(referenced map[string]bool) error {
 			return fmt.Errorf("remove orphan setup blob %s: %w", name, err)
 		}
 	}
-	return fsutil.SyncDir(s.root) //nolint:wrapcheck // SyncDir names the directory
+	return fsutil.SyncDir(s.root)
 }
 
 func validDigest(digest string) bool {

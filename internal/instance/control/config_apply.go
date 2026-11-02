@@ -51,7 +51,7 @@ func ApplyManifestConfigs(inst *store.Instance, configs []ManifestConfig, merge 
 	}
 	dir, err := instance.OpenConfigDir(inst.DataDir)
 	if err != nil {
-		return err //nolint:wrapcheck // OpenConfigDir names the directory
+		return err
 	}
 	defer func() { _ = dir.Close() }()
 	for _, cfg := range configs {
@@ -64,13 +64,13 @@ func ApplyManifestConfigs(inst *store.Instance, configs []ManifestConfig, merge 
 			next = modconfig.Merge(current, next)
 		}
 		if err := modconfig.KeepCopies(dir, cfg.File, current); err != nil {
-			return err //nolint:wrapcheck // KeepCopies names the file
+			return err
 		}
 		if err := fsutil.WriteFileAtomicIn(dir, cfg.File, next); err != nil {
 			return fmt.Errorf("write config %s: %w", cfg.File, err)
 		}
 		if err := modconfig.DropPending(dir, cfg.File); err != nil {
-			return err //nolint:wrapcheck // DropPending names the file
+			return err
 		}
 	}
 	return nil

@@ -135,7 +135,7 @@ func WriteWorldFileFromReader(dataDir, name string, src io.Reader) error {
 	if err := os.Rename(tmp, path); err != nil {
 		return fmt.Errorf("publish %s: %w", name, err)
 	}
-	return fsutil.SyncDir(dir) //nolint:wrapcheck // SyncDir names the directory
+	return fsutil.SyncDir(dir)
 }
 
 // World is one world the panel can see under an instance's savedir, in whichever layout the

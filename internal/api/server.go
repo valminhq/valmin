@@ -240,9 +240,9 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 // notification never changes a job's outcome, so it is ordered last.
 func (s *Server) onJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.FinishedJob) error {
 	if err := s.instances.ctl.Operations.OnJobFinished(ctx, tx, fin); err != nil {
-		return err //nolint:wrapcheck // preserve the operation's original job error
+		return err
 	}
-	return s.notifier.OnJobFinished(ctx, tx, fin) //nolint:wrapcheck // preserve the notifier's original job error
+	return s.notifier.OnJobFinished(ctx, tx, fin)
 }
 
 // accountRoutes registers the user, session, permission, audit, job, key and export endpoints and

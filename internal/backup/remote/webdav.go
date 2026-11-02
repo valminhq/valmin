@@ -209,7 +209,7 @@ func (b *WebDAVBackend) Put(ctx context.Context, key, localPath string) (Object,
 	if !ValidKey(key) {
 		return Object{}, ErrConfiguration
 	}
-	f, err := os.Open(localPath) //nolint:gosec // Source comes from the internal backup catalogue.
+	f, err := os.Open(localPath)
 	if err != nil {
 		return Object{}, &Failure{Message: "local archive is unavailable"}
 	}

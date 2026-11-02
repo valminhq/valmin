@@ -304,7 +304,7 @@ func (t *UpdateTester) updateMods(
 		Payload: &manager.InstallPayload{Updates: targets, Backup: true, Unowned: installer.UnownedKeep},
 	})
 	if err != nil {
-		return err //nolint:wrapcheck // the caller reads the job conflict
+		return err
 	}
 	return t.Chainer.waitChild(ctx, jh, job)
 }
