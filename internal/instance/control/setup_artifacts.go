@@ -29,8 +29,8 @@ import (
 // setupArtifacts captures and stages the package bytes referenced by saved setups.
 type setupArtifacts struct{ DataRoot string }
 
-//nolint:gocritic // Callers use immutable snapshot values shared with restore validation.
-func setupManifest(mod SetupMod) ([]installer.ManifestEntry, error) {
+// setupManifest decodes mod's file manifest and checks its name and every path in it.
+func setupManifest(mod *SetupMod) ([]installer.ManifestEntry, error) {
 	var entries []installer.ManifestEntry
 	if err := installer.CheckFullName(mod.FullName); err != nil {
 		return nil, fmt.Errorf("validate mod name %s: %w", mod.FullName, err)
@@ -135,7 +135,7 @@ func (a *setupArtifacts) Save(
 func (a *setupArtifacts) retainSetupModArtifact(
 	ctx context.Context, blobs *setupblob.Store, inst *store.Instance, mod *SetupMod, staging string, index int,
 ) (store.SetupArtifactRef, error) {
-	entries, err := setupManifest(*mod)
+	entries, err := setupManifest(mod)
 	if err != nil {
 		return store.SetupArtifactRef{}, err
 	}
@@ -183,7 +183,7 @@ func (a *setupArtifacts) retainSetupModArtifact(
 }
 
 func captureSetupModEntries(inst *store.Instance, mod *SetupMod, entries []installer.ManifestEntry) (bool, error) {
-	var total uint64
+	var total int64
 	cacheMatches := true
 	for i := range entries {
 		if installer.UserConfig(entries[i].Path) {
@@ -193,9 +193,8 @@ func captureSetupModEntries(inst *store.Instance, mod *SetupMod, entries []insta
 		if err != nil {
 			return false, fmt.Errorf("capture %s/%s: %w", mod.FullName, entries[i].Path, err)
 		}
-		// io.Copy returns a nonnegative count.
-		total += uint64(size) //nolint:gosec // io.Copy returns a nonnegative byte count.
-		if total > extract.MaxTotalUncompressedBytes {
+		total += size
+		if total > int64(extract.MaxTotalUncompressedBytes) {
 			return false, extract.ErrLimit
 		}
 		cacheMatches = cacheMatches && hash == entries[i].SHA256
@@ -358,7 +357,7 @@ func (a *setupArtifacts) stageSetupMod(
 	if err != nil {
 		return fmt.Errorf("verify %s payload: %w", mod.FullName, err)
 	}
-	entries, err := setupManifest(*mod)
+	entries, err := setupManifest(mod)
 	if err != nil {
 		return err
 	}

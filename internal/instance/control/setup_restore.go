@@ -25,7 +25,7 @@ import (
 func SetupPaths(mods []SetupMod, configs []ManifestConfig) (SetupFiles, error) {
 	paths := SetupFiles{}
 	for _, mod := range mods {
-		entries, err := setupManifest(mod)
+		entries, err := setupManifest(&mod)
 		if err != nil {
 			return nil, err
 		}
@@ -187,7 +187,7 @@ func setupStateRows(
 		if !ok {
 			return nil, store.InstanceLaunch{}, store.BackupPolicy{}, fmt.Errorf("unknown mod source %s", mod.Source)
 		}
-		if _, err := setupManifest(mod); err != nil {
+		if _, err := setupManifest(&mod); err != nil {
 			return nil, store.InstanceLaunch{}, store.BackupPolicy{}, err
 		}
 		mods = append(mods, store.InstanceMod{
@@ -318,6 +318,10 @@ func (s *SetupJobs) applyStagedSetup(
 	return nil
 }
 
+// RunRestore applies a saved setup to a stopped instance: it snapshots the world when mods
+// change, saves the current files for rollback, applies the staged files, and commits the rows
+// in the job's finish. A failed apply rolls the files back.
+//
 //nolint:gocognit // The restore phases share a single rollback boundary.
 func (s *SetupJobs) RunRestore(
 	inst *store.Instance, row *store.SavedSetup, refs []store.SetupArtifactRef, payload *SetupJobPayload,
@@ -384,7 +388,7 @@ func (s *SetupJobs) RunRestore(
 		out := jobs.Outcome{
 			Status: jobs.StatusSucceeded,
 			OnFinish: func(ctx context.Context, tx *sql.Tx) error {
-				return store.TxApplySetupState(ctx, tx, inst.ID, mods, launch, backup)
+				return store.TxApplySetupState(ctx, tx, inst.ID, mods, &launch, backup)
 			},
 			AfterFinish: cleanup,
 		}
