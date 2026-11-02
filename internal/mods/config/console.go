@@ -22,7 +22,7 @@ const (
 // EnsureConsoleLogging makes `[Logging.Console] Enabled` read `true` and touches nothing else.
 // changed reports whether the file was rewritten; one that already reads `true` is left alone.
 func EnsureConsoleLogging(path string) (changed bool, err error) {
-	raw, err := os.ReadFile(path) //nolint:gosec // path is built by the caller from an instance's own server directory
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		return false, fmt.Errorf("read %s: %w", path, err)
 	}

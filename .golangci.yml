@@ -106,6 +106,8 @@ linters:
       enabled-tags: [diagnostic, experimental, opinionated, performance, style]
 
     gosec:
+      # G703 covers paths built from request data; G304 flags every non-constant path.
+      excludes: [G304]
       severity: medium
       confidence: medium
 
@@ -119,6 +121,9 @@ linters:
           disabled: true
 
     wrapcheck:
+      # Errors from valmin's own packages already name their operation.
+      ignore-package-globs:
+        - github.com/valminhq/valmin/*
       ignore-sigs:
         - .Errorf(
         - errors.New(

@@ -188,8 +188,8 @@ func (s *Schedules) submitScheduledInstance(ctx context.Context, sc *store.Sched
 			Instance: inst, Steps: steps, ScheduleID: sc.ID,
 			Kind: jobs.KindChain, Payload: control.ChainPayload{Steps: steps},
 		})
-		return err //nolint:wrapcheck // keep the original skip reason
+		return err
 	}
 	_, err = chainer.SubmitStep(ctx, inst, &steps[0], control.StepOrigin{ScheduleID: sc.ID})
-	return err //nolint:wrapcheck // keep the original skip reason
+	return err
 }

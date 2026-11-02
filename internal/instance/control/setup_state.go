@@ -106,7 +106,7 @@ func readSetupConfigs(inst *store.Instance) ([]ManifestConfig, error) {
 		return []ManifestConfig{}, nil
 	}
 	if err != nil {
-		return nil, err //nolint:wrapcheck // OpenConfigDir names the directory
+		return nil, err
 	}
 	defer func() { _ = root.Close() }()
 	entries, err := fs.ReadDir(root.FS(), ".")

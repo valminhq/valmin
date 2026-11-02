@@ -49,7 +49,6 @@ func loadMasterKey(path string, getenv func(string) string, generate bool) ([]by
 		return decodeMasterKey(inline, EnvMasterKey)
 
 	case file != "":
-		//nolint:gosec // the path is an operator-set variable, which is the point of _FILE
 		raw, err := os.ReadFile(file)
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", EnvMasterKeyFile, err)
@@ -88,7 +87,6 @@ func keyFile(path string, generate bool) ([]byte, error) {
 			path, perm, keyFileMode)
 	}
 
-	//nolint:gosec // the path is secrets.master_key_file, an operator setting
 	key, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read master key %s: %w", path, err)
@@ -158,7 +156,7 @@ func decodeMasterKey(value, source string) ([]byte, error) {
 
 // syncDir flushes a directory, so a name just created in it survives a power cut.
 func syncDir(dir string) error {
-	d, err := os.Open(dir) //nolint:gosec // the directory of secrets.master_key_file
+	d, err := os.Open(dir)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", dir, err)
 	}

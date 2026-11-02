@@ -59,7 +59,6 @@ func (m *Mods) enabledSources() []source.Source {
 func (m *Mods) indexedPackage(
 	ctx context.Context, fullName string, prefer source.Source, allowed []source.Source,
 ) (*store.ModPackage, error) {
-	//nolint:wrapcheck // preserve the catalogue read error
 	return manager.IndexedPackage(
 		ctx,
 		m.DB,

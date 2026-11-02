@@ -116,7 +116,7 @@ func listConfigDir(dataDir string) (configListView, error) {
 		return configListView{Items: []configFileView{}}, nil
 	}
 	if err != nil {
-		return configListView{}, err //nolint:wrapcheck // OpenConfigDir names the directory
+		return configListView{}, err
 	}
 	defer func() { _ = root.Close() }()
 	entries, err := fs.ReadDir(root.FS(), ".")
@@ -205,7 +205,7 @@ func configListEntry(root *os.Root, name string) (item configFileView, skip bool
 		return configFileView{}, true, nil
 	}
 	if err != nil {
-		return configFileView{}, false, err //nolint:wrapcheck // fsutil names the file
+		return configFileView{}, false, err
 	}
 	// The plugin name comes from the file's own header, the only link it carries.
 	return configFileView{
@@ -223,7 +223,7 @@ func configPlugins(dataDir string) (map[string]string, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, err //nolint:wrapcheck // names the directory
+		return nil, err
 	}
 	defer func() { _ = root.Close() }()
 	entries, err := fs.ReadDir(root.FS(), ".")
@@ -801,7 +801,7 @@ func markPending(dir *os.Root, name string, next []byte, running bool) error {
 		}
 		return nil
 	}
-	return modconfig.DropPending(dir, name) //nolint:wrapcheck // DropPending names the file
+	return modconfig.DropPending(dir, name)
 }
 
 // configValidation maps the config package's own field codes onto 11 §2.4's closed registry.

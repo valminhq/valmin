@@ -205,7 +205,7 @@ func regularFileExists(dest string) (bool, error) {
 }
 
 func sha256File(src string) (string, error) {
-	f, err := os.Open(src) //nolint:gosec // src comes from Plan, which only ever walks the staging directory
+	f, err := os.Open(src)
 	if err != nil {
 		return "", fmt.Errorf("open %s: %w", src, err)
 	}

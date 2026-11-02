@@ -141,7 +141,7 @@ func (h *Worlds) InstallWorld(
 }
 
 func installStagedWorldFile(dataDir, name, src string) error {
-	in, err := os.Open(src) //nolint:gosec // src is validated against the panel's staging tree
+	in, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("open staged file: %w", err)
 	}

@@ -481,21 +481,20 @@ func stagedWorldName(staging string) string {
 	return ""
 }
 
-// copyInto copies one file, creating the directory a 1.0 world needs above it.
+// copyInto copies one file, creating the directory a 1.0 world needs above it. src comes from
+// walking the instance's own savedir and dst is staging joined with that walk's relative path.
+//
+//nolint:gosec // G703: neither path carries a caller string.
 func copyInto(src, dst string) error {
-	//nolint:gosec // G703: dst is staging joined with a path the scanner produced by walking
-	// the instance's own savedir, so it carries no caller string and filepath.Rel has already
-	// resolved it; src is that same walk's own output.
 	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
 		return fmt.Errorf("create %s: %w", filepath.Dir(dst), err)
 	}
-	in, err := os.Open(src) //nolint:gosec // G304: src is a path the scanner found under the
-	// instance's own savedir, never a caller string.
+	in, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", src, err)
 	}
 	defer func() { _ = in.Close() }()
-	out, err := os.Create(dst) //nolint:gosec // G304: panel-built staging path.
+	out, err := os.Create(dst)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", dst, err)
 	}
@@ -688,7 +687,7 @@ func copyStaged(src io.Reader, path string, limit int64) (int64, error) {
 	}
 	// path is the staging dir plus at most a directory and a basename, both rebuilt by
 	// stagedName; no caller-supplied path reaches it.
-	f, err := os.Create(path) //nolint:gosec // see above
+	f, err := os.Create(path)
 	if err != nil {
 		return 0, apierr.New(errcode.Internal).Wrap(err)
 	}

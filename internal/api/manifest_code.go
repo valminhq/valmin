@@ -205,13 +205,13 @@ func (h *Instances) requestManifest(ctx context.Context, body *importRequest) (*
 	switch {
 	case body.Manifest != nil && body.Code != "":
 		val.Add("code", apierr.FieldInvalid, "Send a manifest or a code, not both.")
-		return nil, 0, val.Err() //nolint:wrapcheck // the validation error is the response
+		return nil, 0, val.Err()
 	case body.Manifest != nil:
 		body.Manifest.Configs = portableConfigs(body.Manifest.Configs)
 		return body.Manifest, len(body.Manifest.Mods), nil
 	case body.Code == "":
 		val.Add("manifest", apierr.FieldRequired, "A manifest or a code is required.")
-		return nil, 0, val.Err() //nolint:wrapcheck // the validation error is the response
+		return nil, 0, val.Err()
 	}
 	if key, ok := profile.ParseKey(body.Code); ok {
 		return h.profileManifest(ctx, key)
@@ -219,7 +219,7 @@ func (h *Instances) requestManifest(ctx context.Context, body *importRequest) (*
 	t, err := sharecode.Decode(body.Code, maxManifestBytes)
 	if err != nil {
 		val.Add("code", apierr.FieldInvalid, capitalize(err.Error())+".")
-		return nil, 0, val.Err() //nolint:wrapcheck // the validation error is the response
+		return nil, 0, val.Err()
 	}
 	m := &instanceManifest{
 		Schema: manifestSchema, Name: t.Name, Instance: t.Launch,

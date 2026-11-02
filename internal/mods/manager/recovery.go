@@ -70,7 +70,7 @@ type replaced struct {
 func readPrevRow(stagingDir, fullName string) (*replaced, error) {
 	// fullName passed installer.CheckFullName before this job ever used it as a path.
 	path := prevRowPath(stagingDir, fullName)
-	raw, err := os.ReadFile(path) //nolint:gosec // see above
+	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}

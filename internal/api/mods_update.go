@@ -54,7 +54,7 @@ type applyUpdatesRequest struct {
 
 // pendingUpdates delegates update selection to the mod manager.
 func (m *Mods) pendingUpdates(ctx context.Context, instanceID string) ([]manager.UpdateTarget, error) {
-	return m.plan.PendingUpdates(ctx, instanceID) //nolint:wrapcheck // preserve catalogue read errors
+	return m.plan.PendingUpdates(ctx, instanceID)
 }
 
 // previewUpdates is POST /instances/{id}/mods/updates/resolve: the combined diff "Update all"

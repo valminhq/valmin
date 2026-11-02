@@ -170,7 +170,7 @@ func dropPendingConfigs(rootPath string, sets ...map[string]bool) error {
 				continue
 			}
 			if err := modconfig.DropPending(root, filepath.FromSlash(p)); err != nil {
-				return err //nolint:wrapcheck // DropPending names the file
+				return err
 			}
 		}
 	}

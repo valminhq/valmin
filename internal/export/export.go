@@ -192,7 +192,7 @@ func writeExtra(tw *tar.Writer, root, rel string) error {
 	}
 	if fi.IsDir() {
 		_, err := backup.WriteTree(tw, src, rel, finished, true)
-		return err //nolint:wrapcheck // WriteTree names the tree
+		return err
 	}
 	if !fi.Mode().IsRegular() || strings.HasSuffix(rel, backup.PartSuffix) {
 		return nil
@@ -207,7 +207,7 @@ func writeDirIfPresent(tw *tar.Writer, root, rel string, keep func(string) bool,
 		return nil
 	}
 	_, err := backup.WriteTree(tw, src, rel, keep, live)
-	return err //nolint:wrapcheck // WriteTree names the tree
+	return err
 }
 
 func keepAll(string) bool { return true }
@@ -216,7 +216,7 @@ func finished(rel string) bool { return !strings.HasSuffix(rel, backup.PartSuffi
 
 // writeFile archives one regular file as name, mode 0600.
 func writeFile(tw *tar.Writer, src, name string) error {
-	f, err := os.OpenFile(src, os.O_RDONLY|syscall.O_NOFOLLOW, 0) //nolint:gosec // panel-built path
+	f, err := os.OpenFile(src, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", name, err)
 	}
@@ -241,7 +241,7 @@ func writeFile(tw *tar.Writer, src, name string) error {
 // writeOperatorFile archives the small file at an operator-configured path as name, following
 // a symlink as the panel does when it reads the file.
 func writeOperatorFile(tw *tar.Writer, src, name string) error {
-	data, err := os.ReadFile(src) //nolint:gosec // an operator setting
+	data, err := os.ReadFile(src)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", name, err)
 	}

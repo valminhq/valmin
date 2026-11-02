@@ -90,7 +90,7 @@ func WriteSetupJournal(staging string, journal SetupJournal) error {
 		return fmt.Errorf("encode setup rollback journal: %w", err)
 	}
 	journalPath := filepath.Join(staging, "journal.json")
-	f, err := os.OpenFile(journalPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600) //nolint:gosec // panel-generated path
+	f, err := os.OpenFile(journalPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("create setup rollback journal: %w", err)
 	}

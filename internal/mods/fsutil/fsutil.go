@@ -28,7 +28,7 @@ const (
 
 // SyncDir flushes a directory's entries to disk, so a rename into it survives a power loss.
 func SyncDir(path string) error {
-	dir, err := os.Open(path) //nolint:gosec // callers pass directories they own
+	dir, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("open directory %s: %w", path, err)
 	}

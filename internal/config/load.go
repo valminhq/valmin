@@ -95,7 +95,7 @@ func configPath(args []string, getenv func(string) string) (path string, rest []
 // applyFile overlays the YAML file. A missing file at the default path is not an error:
 // the shipped deployment is docker compose, which speaks env (10 §1).
 func applyFile(cfg *Config, path string) error {
-	raw, err := os.ReadFile(path) //nolint:gosec // operator-supplied path, resolved above
+	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -175,7 +175,7 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 
 		value := direct
 		if fromFile != "" {
-			b, err := os.ReadFile(fromFile) //nolint:gosec // operator-supplied secret path
+			b, err := os.ReadFile(fromFile)
 			if err != nil {
 				return fmt.Errorf("read %s_FILE: %w", f.env, err)
 			}

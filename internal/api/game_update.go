@@ -73,7 +73,6 @@ func (h *Instances) updateGame(w http.ResponseWriter, r *http.Request) {
 func (h *Instances) submitGameUpdate(
 	ctx context.Context, inst *store.Instance, confirmed bool, requestedBy, scheduleID string,
 ) (*store.Job, error) {
-	//nolint:wrapcheck // preserve typed job conflicts and the submission error
 	return h.ctl.GameUpdater.Submit(ctx, &control.GameUpdateSubmission{
 		Instance: inst, Confirmed: confirmed, RequestedBy: requestedBy, ScheduleID: scheduleID,
 		Audit: jobAudit(ctx, requestedBy, inst.ID, "instances.game.update", struct{}{}),
@@ -86,5 +85,5 @@ func (h *Instances) submitGameUpdate(
 // with a docker CLI, and renaming a tree out from under a running server is unrecoverable.
 // Never call it inside a write transaction: it is a Docker round trip.
 func (h *Instances) assertStopped(ctx context.Context, inst *store.Instance) error {
-	return control.AssertStopped(ctx, h.Runtime, inst) //nolint:wrapcheck // preserve the job error text
+	return control.AssertStopped(ctx, h.Runtime, inst)
 }

@@ -72,7 +72,7 @@ var bepinexPrefix = regexp.MustCompile(`^\[[^\]]*\]\s*`)
 // modded: an absence of information rather than a failure to report.
 func ReadPluginLoad(dataDir string, patterns PatternSet) (*PluginLoad, error) {
 	p := filepath.Join(dataDir, filepath.FromSlash(bepinexLog))
-	f, err := os.Open(p) //nolint:gosec // dataDir is the panel's own layout, not a user string
+	f, err := os.Open(p)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}

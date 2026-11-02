@@ -79,7 +79,7 @@ func (v *Verified) headerName() string {
 // sessions, so such a check fails on every healthy backup (B8, 03 §4).
 func Verify(archivePath, worldName string) (Verified, error) {
 	// archivePath comes from a catalogue row, never from a request (D13).
-	f, err := os.Open(archivePath) //nolint:gosec // see above
+	f, err := os.Open(archivePath)
 	if err != nil {
 		return Verified{}, fmt.Errorf("%w: %w", ErrArchiveUnreadable, err)
 	}

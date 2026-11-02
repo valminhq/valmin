@@ -202,7 +202,7 @@ func (c *Cache) download(
 	}
 
 	part := final + ".part"
-	out, err := os.OpenFile( //nolint:gosec // ident was checked to be one path component by path
+	out, err := os.OpenFile(
 		part,
 		os.O_WRONLY|os.O_CREATE|os.O_TRUNC,
 		fsutil.FileMode,

@@ -341,7 +341,6 @@ func (h *Instances) submitAdoption(
 	if modifiers != "" {
 		modifiersPtr = &modifiers
 	}
-	//nolint:wrapcheck // preserve typed job and row conflicts for the HTTP response
 	return control.SubmitAdoption(ctx, h.Engine, &store.AdoptedInstance{
 		ID: facts.instanceID, Name: body.Name, State: facts.state, ContainerID: facts.container.ID,
 		DataDir: facts.localDataDir, BasePort: facts.basePort,

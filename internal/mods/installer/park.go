@@ -287,7 +287,7 @@ func sameBytes(root *os.Root, rel, other string) (bool, error) {
 func hashIn(root *os.Root, rel string) (string, error) {
 	f, _, err := fsutil.OpenRegularIn(root, rel)
 	if err != nil {
-		return "", err //nolint:wrapcheck // fsutil names the file
+		return "", err
 	}
 	defer func() { _ = f.Close() }()
 	h := sha256.New()

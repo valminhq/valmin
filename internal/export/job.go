@@ -106,7 +106,7 @@ func (e *Exporter) run(ctx context.Context, jh *jobs.Handle, mode Mode, unlocked
 	jh.Progress(ctx, 5, "copying the database")
 	db := filepath.Join(work, DatabaseName)
 	if err := e.DB.CopyTo(ctx, db); err != nil {
-		return "", err //nolint:wrapcheck // CopyTo names the copy
+		return "", err
 	}
 	plan, err := e.plan(ctx, mode, db, unlocked)
 	if err != nil {
@@ -275,7 +275,7 @@ func (c *checkedWriter) Write(p []byte) (int, error) {
 // stops when check returns an error.
 func writeAtomic(dest string, p *Plan, check func() error) error {
 	part := dest + backup.PartSuffix
-	f, err := os.OpenFile(part, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // panel-built path
+	f, err := os.OpenFile(part, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("create export: %w", err)
 	}
@@ -299,7 +299,7 @@ func writeAtomic(dest string, p *Plan, check func() error) error {
 		return fmt.Errorf("publish export: %w", err)
 	}
 	published = true
-	return fsutil.SyncDir(filepath.Dir(dest)) //nolint:wrapcheck // SyncDir names the directory
+	return fsutil.SyncDir(filepath.Dir(dest))
 }
 
 // removeOlder deletes everything in dir but keep: older exports, and what an interrupted

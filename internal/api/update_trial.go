@@ -252,7 +252,7 @@ func (h *Instances) updateTestView(r *http.Request, inst, testCopy *store.Instan
 	view.PluginLoad = toPluginLoadView(load)
 	mods, err := h.DB.InstanceMods(r.Context(), testCopy.ID)
 	if err != nil {
-		return nil, err //nolint:wrapcheck // the handler wraps it
+		return nil, err
 	}
 	for i := range mods {
 		if !mods[i].Enabled {

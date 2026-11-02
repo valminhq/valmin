@@ -37,7 +37,7 @@ type Submission struct {
 
 // Submit queues the container-backed diagnostic checks.
 func Submit(ctx context.Context, s *Submission) (*store.Job, error) {
-	return s.Engine.Submit(ctx, &jobs.Spec{ //nolint:wrapcheck // preserve typed job conflicts
+	return s.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindDiagnose, LockKey: jobs.GlobalLockKey(jobs.KindDiagnose), Payload: struct{}{},
 		RequestedBy: s.RequestedBy, Audit: s.Audit,
 	}, func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
