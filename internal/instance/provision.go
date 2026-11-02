@@ -98,6 +98,9 @@ type BuildCacheInput struct {
 	// Report, when set, is called before each retry with a human message, so a retrying run
 	// does not read as a hang.
 	Report func(attempt, of int, err error)
+	// Progress, when set, is called every downloadReportInterval while SteamCMD runs with how
+	// much the download has put on disk, so a long download shows it is still moving.
+	Progress func(message string)
 }
 
 func (in *BuildCacheInput) branch() string {
@@ -217,7 +220,10 @@ func (b *BuildCache) download(ctx context.Context, in *BuildCacheInput, partName
 	if err := clearSurvivingDownload(ctx, in, partHost); err != nil {
 		return "", err
 	}
-	if err := b.runSteamCMD(ctx, in, partHost); err != nil {
+	stopWatch := in.watchDownload(partLocal, downloadReportInterval)
+	err := b.runSteamCMD(ctx, in, partHost)
+	stopWatch()
+	if err != nil {
 		return "", err
 	}
 	published := false
@@ -397,6 +403,70 @@ func (b *BuildCache) runSteamCMD(ctx context.Context, in *BuildCacheInput, partH
 		}
 	}
 	return fmt.Errorf("after %d attempts: %w", steamCMDAttempts, last)
+}
+
+// downloadReportInterval is how often a running download reports its size.
+const downloadReportInterval = 15 * time.Second
+
+// watchDownload reports, every interval until the returned stop is called, how much SteamCMD
+// has put on disk under partLocal and for how long it has run. Stop returns once the watcher
+// has exited. Without a Progress callback it does nothing.
+func (in *BuildCacheInput) watchDownload(partLocal string, interval time.Duration) (stop func()) {
+	if in.Progress == nil {
+		return func() {}
+	}
+	started := time.Now()
+	done, exited := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(exited)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				used, err := diskUsage(partLocal)
+				if err != nil {
+					continue
+				}
+				in.Progress(fmt.Sprintf("downloading %s: %d MB on disk after %s",
+					in.label(), used>>20, time.Since(started).Round(time.Second)))
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		<-exited
+	}
+}
+
+// diskUsage is the space the regular files under root occupy, counted in allocated blocks
+// rather than apparent size, so a preallocated file counts only what has been written.
+func diskUsage(root string) (int64, error) {
+	var total int64
+	err := filepath.WalkDir(root, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
+			return fmt.Errorf("walk %s: %w", root, err)
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		// A file SteamCMD moved away mid-walk has no info and is skipped.
+		if info, infoErr := d.Info(); infoErr == nil {
+			if st, ok := info.Sys().(*syscall.Stat_t); ok {
+				total += st.Blocks * 512
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, fmt.Errorf("measure disk usage of %s: %w", root, err)
+	}
+	return total, nil
 }
 
 // steamCMDErrorLines is how much of a failed run's output travels with the error.

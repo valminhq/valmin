@@ -166,6 +166,8 @@ type updateTestView struct {
 	// Applicable is whether the copy can be applied now: it is settled and its test ran to the
 	// end.
 	Applicable bool `json:"applicable"`
+	// ApplyBlocker says why the copy cannot be applied, null when it can.
+	ApplyBlocker *string `json:"apply_blocker"`
 	// ModChanges are the packages the copy runs at a newer version than the server.
 	ModChanges []testModChange `json:"mod_changes"`
 	// Failed and NotSeen are the copy's load verification, empty until it has booted.
@@ -217,10 +219,15 @@ func (h *Instances) updateTestView(r *http.Request, inst, testCopy *store.Instan
 		CopyMemLimit: testCopy.MemLimitMB, CopyCPULimit: testCopy.CPULimit, Branch: inst.GameBranch,
 		ModChanges: []testModChange{}, Failed: []failedModView{}, NotSeen: []string{},
 	}
+	blocker := h.ctl.UpdateTester.ApplyBlocker(r.Context(), inst, testCopy)
+	view.Applicable = blocker == nil
+	if blocker != nil {
+		reason := blocker.Error()
+		view.ApplyBlocker = &reason
+	}
 	if instance.State(testCopy.State) == instance.StateProvisioning {
 		return view, nil
 	}
-	view.Applicable = h.ctl.UpdateTester.ApplyBlocker(r.Context(), inst, testCopy) == nil
 	changes, err := h.ctl.UpdateTester.Changes(r.Context(), inst, testCopy)
 	if err != nil {
 		// A copy whose creation failed may have no game files. It is still reported, so it can

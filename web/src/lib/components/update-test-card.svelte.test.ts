@@ -38,6 +38,7 @@ function report(overrides: Partial<UpdateTest> = {}): UpdateTest {
 		copy_build_id: '22110001',
 		game_newer: true,
 		applicable: true,
+		apply_blocker: null,
 		mod_changes: [{ full_name: 'Author-Mod', from: '1.0.0', to: '1.1.0', source: 'thunderstore' }],
 		failed: [],
 		not_seen: [],
@@ -228,7 +229,11 @@ describe('the update test card', () => {
 	it('holds apply back until the copy is ready and its test ran to the end', async () => {
 		await open(
 			admin,
-			report({ copy_state: 'stopped', applicable: false }),
+			report({
+				copy_state: 'stopped',
+				applicable: false,
+				apply_blocker: 'the copy is not ready: its test did not run to the end'
+			}),
 			instance({ modded: true })
 		);
 
@@ -236,6 +241,7 @@ describe('the update test card', () => {
 			name: 'Apply to inst-a'
 		})) as HTMLButtonElement;
 		expect(apply.disabled).toBe(true);
+		expect(screen.getByText(/its test did not run to the end/)).toBeTruthy();
 	});
 
 	it('keeps the choices made when the server changes state', async () => {
