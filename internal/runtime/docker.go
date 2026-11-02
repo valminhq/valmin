@@ -186,19 +186,86 @@ func (d *Docker) Stop(ctx context.Context, id, signal string, timeout time.Durat
 	return nil
 }
 
+const (
+	// rewaitDelay is the pause before a broken wait on a running container is issued again.
+	rewaitDelay = time.Second
+	// quickBreak is how soon a broken wait counts as an error answer rather than a stream an
+	// idle timeout closed, and maxQuickBreaks how many of those in a row end the wait.
+	quickBreak     = 10 * time.Second
+	maxQuickBreaks = 3
+)
+
 // Wait blocks until the container is no longer running and returns its exit code. A
-// container that has already exited returns immediately.
+// container that has already exited returns immediately. The wait is one HTTP response that
+// stays silent until the exit, so a proxy in front of Docker closes it at its idle timeout,
+// 10 minutes for the socket proxy; a wait that breaks while the container still runs is
+// issued again, and one that breaks after the exit takes the code from an inspect. A wait
+// that keeps breaking as soon as it is issued is an error answer and is returned.
 func (d *Docker) Wait(ctx context.Context, id string) (int, error) {
-	okC, errC := d.cli.ContainerWait(ctx, id, container.WaitConditionNotRunning)
-	select {
-	case err := <-errC:
-		return 0, wrap(err, "wait for container %s", id)
-	case ok := <-okC:
-		if ok.Error != nil && ok.Error.Message != "" {
-			return int(ok.StatusCode), fmt.Errorf("wait for container %s: %s", id, ok.Error.Message)
+	quick := 0
+	for {
+		issued := time.Now()
+		okC, errC := d.cli.ContainerWait(ctx, id, container.WaitConditionNotRunning)
+		var waitErr error
+		select {
+		case ok := <-okC:
+			return waitResult(id, ok)
+		case waitErr = <-errC:
 		}
-		return int(ok.StatusCode), nil
+		if ctx.Err() != nil {
+			return 0, wrap(waitErr, "wait for container %s", id)
+		}
+		code, stopped, err := d.stoppedState(ctx, id)
+		if stopped {
+			return code, err
+		}
+		if err != nil {
+			return 0, wrap(waitErr, "wait for container %s", id)
+		}
+		if time.Since(issued) < quickBreak {
+			quick++
+		} else {
+			quick = 0
+		}
+		if quick >= maxQuickBreaks {
+			return 0, wrap(waitErr, "wait for container %s", id)
+		}
+		slog.WarnContext(ctx, "the wait for a running container broke off; waiting again",
+			slog.String("container_id", id), slog.Any("error", waitErr))
+		select {
+		case <-ctx.Done():
+			return 0, wrap(ctx.Err(), "wait for container %s", id)
+		case <-time.After(rewaitDelay):
+		}
 	}
+}
+
+// waitResult is the exit code a completed wait reports, with the error Docker attached to it.
+func waitResult(id string, ok container.WaitResponse) (int, error) {
+	if ok.Error != nil && ok.Error.Message != "" {
+		return int(ok.StatusCode), fmt.Errorf("wait for container %s: %s", id, ok.Error.Message)
+	}
+	return int(ok.StatusCode), nil
+}
+
+// stoppedState inspects container id. A stopped container reports its exit code and the error
+// Docker recorded for its run; a running one reports false. An inspect that fails is an error
+// with stopped false.
+func (d *Docker) stoppedState(ctx context.Context, id string) (code int, stopped bool, err error) {
+	info, err := d.cli.ContainerInspect(ctx, id)
+	if err != nil {
+		return 0, false, wrap(err, "inspect container %s", id)
+	}
+	if info.State == nil {
+		return 0, false, fmt.Errorf("inspect container %s: no state", id)
+	}
+	if info.State.Running {
+		return 0, false, nil
+	}
+	if info.State.Error != "" {
+		return info.State.ExitCode, true, fmt.Errorf("wait for container %s: %s", id, info.State.Error)
+	}
+	return info.State.ExitCode, true, nil
 }
 
 // Logs returns the container's log stream. With TTY false the stream carries Docker's

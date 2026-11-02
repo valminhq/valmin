@@ -288,6 +288,14 @@
 						{/if}
 					</span>
 				</div>
+				{#if test.apply_blocker}
+					<p class="text-sm text-muted-foreground first-letter:uppercase">{test.apply_blocker}.</p>
+				{:else if !sourceSettled}
+					<p class="text-sm text-muted-foreground">
+						{instance.name} is {instance.state}; the update can be applied once it is stopped or
+						running.
+					</p>
+				{/if}
 			{:else if loaded}
 				<div class="grid gap-3 text-sm">
 					<p class="text-muted-foreground">

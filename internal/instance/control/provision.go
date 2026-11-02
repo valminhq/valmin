@@ -142,6 +142,7 @@ func (p *Provisioner) provisionBuildCache(
 			jh.Log(fmt.Sprintf("steamcmd attempt %d of %d failed (%v); retrying", attempt, of, err))
 			jh.Progress(ctx, 10, fmt.Sprintf("retrying download (attempt %d of %d)", attempt+1, of))
 		},
+		Progress: func(message string) { jh.Progress(ctx, 10, message) },
 	})
 	if err != nil {
 		return provisionFailed(run.InstanceID, fmt.Errorf("build cache: %w", err)), true

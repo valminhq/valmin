@@ -532,7 +532,8 @@ has `auto_stop_minutes` of 10. The request answers:
 copy, and otherwise `{"test": {...}}` with `copy_id`, `copy_name`, `copy_state`, `copy_port`,
 `copy_mem_limit_mb`, `copy_cpu_limit`, `branch`, the `source_build_id` and `copy_build_id`,
 `game_newer` (the copy's build is newer, so an apply installs it), `applicable` (the copy is
-stopped or running and its test ran to the end), the
+stopped or running and its test ran to the end), `apply_blocker` (why it is not applicable, as
+a sentence, or null), the
 `mod_changes` (`full_name`, `from`, `to`, `source`) where the copy runs a newer version,
 `failed` (`full_name`, `load_error`) and `not_seen` for the copy's load verification, and
 `plugin_load`, which is null until the copy's loader has written a log. While the copy is

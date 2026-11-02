@@ -2,6 +2,7 @@ package instance
 
 import (
 	"context"
+	"crypto/rand"
 	"os"
 	"path/filepath"
 	"slices"
@@ -615,5 +616,40 @@ func TestPasswordBranchPublishesUnderDownloadedBuild(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(cache, "20222098", binaryMarker)); err != nil {
 		t.Fatalf("not published under the downloaded build: %v", err)
+	}
+}
+
+// TestWatchDownloadReportsWhatIsOnDisk asserts a running download reports the space its files
+// occupy, and that nothing is reported once it is stopped.
+func TestWatchDownloadReportsWhatIsOnDisk(t *testing.T) {
+	part := t.TempDir()
+	// Random bytes, since a filesystem that compresses zeros allocates no blocks for them.
+	chunk := make([]byte, 3<<20)
+	_, _ = rand.Read(chunk)
+	if err := os.WriteFile(filepath.Join(part, "chunk"), chunk, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var messages []string
+	in := &BuildCacheInput{BuildID: "123", Progress: func(m string) {
+		mu.Lock()
+		defer mu.Unlock()
+		messages = append(messages, m)
+	}}
+	stop := in.watchDownload(part, time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
+	stop()
+	mu.Lock()
+	seen := len(messages)
+	mu.Unlock()
+	time.Sleep(10 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if seen == 0 || !strings.HasPrefix(messages[0], "downloading build 123: 3 MB on disk after ") {
+		t.Fatalf("messages = %q, want a report of 3 MB for build 123", messages)
+	}
+	if len(messages) != seen {
+		t.Errorf("%d reports arrived after stop", len(messages)-seen)
 	}
 }

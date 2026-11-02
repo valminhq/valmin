@@ -346,6 +346,8 @@ export interface UpdateTest {
 	game_newer: boolean;
 	/** Whether the copy can be applied now: it is settled and its test ran to the end. */
 	applicable: boolean;
+	/** Why the copy cannot be applied, null when it can. */
+	apply_blocker: string | null;
 	mod_changes: UpdateTestModChange[];
 	failed: UpdateTestFailure[];
 	not_seen: string[];

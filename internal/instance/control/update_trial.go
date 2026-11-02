@@ -425,12 +425,17 @@ var ErrUpdateTestUnsettled = errors.New("the update test copy is not ready to be
 // ApplyBlocker says why testCopy's updates cannot be applied to src, or returns nil. A copy
 // can be applied once it is stopped or running and its test ran to the end: a test that failed
 // or was cancelled may have left it with only part of the update, and never booted.
+// The error reads as a sentence the panel shows beside the disabled apply.
 func (t *UpdateTester) ApplyBlocker(ctx context.Context, src, testCopy *store.Instance) error {
-	if state := instance.State(testCopy.State); state != instance.StateStopped && state != instance.StateRunning {
+	switch state := instance.State(testCopy.State); {
+	case state == instance.StateError:
+		return fmt.Errorf("%w: it is in error, so a step of its test or its run failed; "+
+			"check its jobs, then discard it and test again", ErrUpdateTestUnsettled)
+	case state != instance.StateStopped && state != instance.StateRunning:
 		return fmt.Errorf("%w: it is %s", ErrUpdateTestUnsettled, state)
-	}
-	if !testCopy.TestPassed {
-		return fmt.Errorf("%w: its test has not run to the end", ErrUpdateTestUnsettled)
+	case !testCopy.TestPassed:
+		return fmt.Errorf("%w: its test did not run to the end; check the update test job, "+
+			"then discard the copy and test again", ErrUpdateTestUnsettled)
 	}
 	return nil
 }

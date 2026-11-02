@@ -412,6 +412,17 @@ page, or pick a listed branch.
 `steam installed branch public ... when <branch> was asked for` means SteamCMD reported
 success but installed another branch. Nothing was published; run the update again.
 
+## A game download looks stuck or fails
+
+While SteamCMD downloads a build, the job's progress line says how much it has put on disk
+and for how long it has run, every 15 seconds. A test or apply that is waiting on the
+download shows the same line after its own. A number that keeps rising is a download that is
+still moving; one that stays put for a long time is worth checking with `sudo docker ps
+--filter label=io.valmin.throwaway=steamcmd`, which lists the helper while it runs.
+
+A failed attempt is retried twice, and each retry is written to the job's log. When all three
+fail, the job's error carries the last lines SteamCMD printed.
+
 ## Game server runs but players cannot connect
 
 Start with **Check reachability** on the server's connection card (see

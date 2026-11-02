@@ -492,7 +492,8 @@ reported as not checked rather than as a success.
   backs up the world, installs the game build and mod versions the copy runs, starts the
   server again if it was running, and deletes the copy. It is available once the copy has
   started and its test ran to the end; a test that failed or was cancelled can leave the
-  copy with only part of the update. Mods are installed at the versions the copy runs, not
+  copy with only part of the update. While the button is unavailable, the card says why.
+  Mods are installed at the versions the copy runs, not
   at whatever is newest then, and only where those are newer than what the server runs: if
   you updated the server by other means since the test, nothing older is put back. The game
   build comes from the download the test already made, so nothing is downloaded again; if

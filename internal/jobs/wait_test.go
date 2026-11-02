@@ -32,7 +32,7 @@ func TestWaitReturnsTheJobOnceItFinishes(t *testing.T) {
 
 	got := make(chan *store.Job, 1)
 	go func() {
-		row, err := e.wait(t.Context(), j.ID, nil)
+		row, err := e.wait(t.Context(), j.ID, nil, nil)
 		if err != nil {
 			t.Error(err)
 		}
@@ -62,7 +62,7 @@ func TestWaitReturnsAJobThatAlreadyFinished(t *testing.T) {
 	}
 	waitForTerminal(t, db, j.ID)
 
-	row, err := e.wait(t.Context(), j.ID, nil)
+	row, err := e.wait(t.Context(), j.ID, nil, nil)
 	if err != nil || row.Status != StatusSucceeded {
 		t.Fatalf("Wait = %+v, %v, want a succeeded job", row, err)
 	}
@@ -86,7 +86,7 @@ func TestWaitReadsTheRowWhenNoEventArrives(t *testing.T) {
 		}
 	}()
 
-	row, err := e.wait(t.Context(), j.ID, nil)
+	row, err := e.wait(t.Context(), j.ID, nil, nil)
 	if err != nil || row.Status != StatusFailed {
 		t.Fatalf("Wait = %+v, %v, want the failed job", row, err)
 	}
@@ -100,7 +100,7 @@ func TestWaitStopsWithItsContext(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
 	defer cancel()
-	if _, err := e.wait(ctx, j.ID, nil); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := e.wait(ctx, j.ID, nil, nil); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Wait = %v, want the context's deadline", err)
 	}
 }
@@ -108,8 +108,65 @@ func TestWaitStopsWithItsContext(t *testing.T) {
 // TestWaitForAMissingJobFails asserts an unknown id is an error and not a wait.
 func TestWaitForAMissingJobFails(t *testing.T) {
 	e := New(testDB(t), "panel:boot-a", testConfig())
-	if _, err := e.wait(t.Context(), "nope", nil); !errors.Is(err, ErrJobNotFound) {
+	if _, err := e.wait(t.Context(), "nope", nil, nil); !errors.Is(err, ErrJobNotFound) {
 		t.Fatalf("Wait = %v, want ErrJobNotFound", err)
+	}
+}
+
+// TestWaitJobRelaysTheChildsProgress asserts a waiting job's message carries the awaited job's
+// after its own while it waits, and is its own again once the wait ends.
+func TestWaitJobRelaysTheChildsProgress(t *testing.T) {
+	db := testDB(t)
+	e := New(db, "panel:boot-a", testConfig())
+	step, release := make(chan struct{}), make(chan struct{})
+	child, err := e.Submit(t.Context(), &Spec{Kind: KindStart, LockKey: "instance:relay"},
+		func(ctx context.Context, h *Handle) Outcome {
+			<-step
+			h.Progress(ctx, 50, "downloading 5 MB")
+			<-release
+			return Outcome{Status: StatusSucceeded}
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waited := make(chan struct{})
+	parent, err := e.Submit(t.Context(), &Spec{Kind: KindChain, LockKey: "chain:relay"},
+		func(ctx context.Context, h *Handle) Outcome {
+			h.Progress(ctx, 30, "installing")
+			if _, err := h.WaitJob(ctx, child.ID); err != nil {
+				t.Error(err)
+			}
+			close(waited)
+			<-ctx.Done()
+			return Outcome{Status: StatusCancelled}
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	close(step)
+	waitForMessage(t, db, parent.ID, "installing: downloading 5 MB")
+	close(release)
+	<-waited
+	waitForMessage(t, db, parent.ID, "installing")
+}
+
+// waitForMessage polls job id's row until its progress message is want.
+func waitForMessage(t *testing.T, db *store.DB, id, want string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		row, err := db.JobByID(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if row.Message != nil && *row.Message == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job %s message = %v, want %q", id, row.Message, want)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

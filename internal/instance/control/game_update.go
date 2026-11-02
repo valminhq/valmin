@@ -101,8 +101,8 @@ func (r *gameUpdateRun) takeArchive(ctx context.Context, jh *jobs.Handle) error 
 
 // fetchBuild puts the build to install in the cache: the pinned one, or the instance's
 // branch's current one, under the build id the downloaded bytes declare rather than the one
-// the lookup returned.
-func (r *gameUpdateRun) fetchBuild(ctx context.Context) error {
+// the lookup returned. Retries and the download's size are reported on jh.
+func (r *gameUpdateRun) fetchBuild(ctx context.Context, jh *jobs.Handle) error {
 	password, err := DecryptBranchPassword(ctx, r.g.DB, r.g.Keeper, r.inst.ID)
 	if err != nil {
 		return err
@@ -115,6 +115,11 @@ func (r *gameUpdateRun) fetchBuild(ctx context.Context) error {
 		HostDataRoot:   r.g.Config.Data.HostRoot,
 		Branch:         r.inst.GameBranch,
 		BranchPassword: password,
+		Report: func(attempt, of int, err error) {
+			jh.Log(fmt.Sprintf("steamcmd attempt %d of %d failed (%v); retrying", attempt, of, err))
+			jh.Progress(ctx, 15, fmt.Sprintf("retrying download (attempt %d of %d)", attempt+1, of))
+		},
+		Progress: func(message string) { jh.Progress(ctx, 15, message) },
 	}
 	// A restore installs the build the server ran when the export carried it.
 	if r.restoring && r.pinned == "" && r.inst.GameBuildID != nil &&
@@ -170,7 +175,7 @@ func (r *gameUpdateRun) phases(ctx context.Context, jh *jobs.Handle) []updatePha
 			15,
 			"fetching the current build of branch " + r.inst.GameBranch,
 			updateBuildCached,
-			func() error { return r.fetchBuild(ctx) },
+			func() error { return r.fetchBuild(ctx, jh) },
 		},
 		{35, "cloning the new build", updateCloned, func() error { return r.cloneBuild(ctx) }},
 		{60, "putting the mods and configs back", updateModsReplayed, func() error {
