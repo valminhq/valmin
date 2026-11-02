@@ -303,18 +303,25 @@ func TestDockerLogLimitSurvivesRotation(t *testing.T) {
 	}
 
 	// The daemon follows only a running container, so the follow opens after the start; the
-	// sleep before the last line gives it time to attach.
+	// sleep before the last line gives it time to attach. Docker ends a follow that falls a
+	// whole file behind, so it is re-opened from the tail as the log reader does.
 	if err := d.Start(t.Context(), id); err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	follow, err := d.Logs(t.Context(), id, LogOptions{Follow: true})
-	if err != nil {
-		t.Fatalf("follow: %v", err)
-	}
-	defer func() { _ = follow.Close() }()
 	var live bytes.Buffer
-	if _, err := stdcopy.StdCopy(&live, io.Discard, follow); err != nil {
-		t.Fatalf("demux follow: %v", err)
+	for range 3 {
+		follow, err := d.Logs(t.Context(), id, LogOptions{Follow: true, Tail: 1})
+		if err != nil {
+			t.Fatalf("follow: %v", err)
+		}
+		_, err = stdcopy.StdCopy(&live, io.Discard, follow)
+		_ = follow.Close()
+		if err != nil {
+			t.Fatalf("demux follow: %v", err)
+		}
+		if strings.HasSuffix(strings.TrimSpace(live.String()), "the-end") {
+			break
+		}
 	}
 	if !strings.HasSuffix(strings.TrimSpace(live.String()), "the-end") {
 		t.Errorf("follow ended without the last line; tail of output: %q", lastBytes(live.String(), 80))
