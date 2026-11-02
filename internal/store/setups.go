@@ -289,11 +289,9 @@ func validDigest(digest string) bool {
 // TxApplySetupState replaces managed-mod rows and saved launch and backup settings in one
 // transaction. World selection, game build, credentials, and other instance fields remain
 // untouched. Files must already have been staged and verified before the transaction starts.
-//
-//nolint:gocritic // Keep the state-application API stable for existing job callers.
 func TxApplySetupState(
 	ctx context.Context, tx *sql.Tx, instanceID string,
-	mods []InstanceMod, launch InstanceLaunch, backup BackupPolicy,
+	mods []InstanceMod, launch *InstanceLaunch, backup BackupPolicy,
 ) error {
 	if instanceID == "" {
 		return errors.New("empty setup instance id")

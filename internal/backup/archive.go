@@ -266,8 +266,12 @@ func writeEntry(tw *tar.Writer, dir *os.Root, rel, name string, fi os.FileInfo, 
 		return 0, fmt.Errorf("open %s: %w", rel, err)
 	}
 	defer func() { _ = src.Close() }()
-	if opened, err := src.Stat(); err != nil || !opened.Mode().IsRegular() {
-		return 0, err //nolint:wrapcheck // nil, or the handle's own stat error
+	opened, err := src.Stat()
+	if err != nil {
+		return 0, fmt.Errorf("stat %s: %w", rel, err)
+	}
+	if !opened.Mode().IsRegular() {
+		return 0, nil
 	}
 	if err := tw.WriteHeader(hdr); err != nil {
 		return 0, fmt.Errorf("write header for %s: %w", rel, err)

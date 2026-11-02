@@ -105,7 +105,7 @@ func (c *Client) Reachable(ctx context.Context, etag string) error {
 	if err != nil {
 		return fmt.Errorf("reach %s: %w", c.listingURL(), err)
 	}
-	defer resp.Body.Close() //nolint:errcheck // nothing is read from it
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNotModified {
 		return fmt.Errorf("reach %s: unexpected status %s", c.listingURL(), resp.Status)
 	}

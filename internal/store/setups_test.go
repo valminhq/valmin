@@ -138,7 +138,7 @@ func TestSavedSetupRestoreStateIsExact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := TxApplySetupState(t.Context(), tx, "server", mods, launch, backup); err != nil {
+	if err := TxApplySetupState(t.Context(), tx, "server", mods, &launch, backup); err != nil {
 		t.Fatalf("TxApplySetupState: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -179,7 +179,7 @@ func TestSavedSetupRestoreStateIsExact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = TxApplySetupState(t.Context(), tx, "server", nil, launch, backup)
+	err = TxApplySetupState(t.Context(), tx, "server", nil, &launch, backup)
 	_ = tx.Rollback()
 	if !errors.Is(err, ErrInstanceNotStopped) {
 		t.Errorf("running restore = %v, want ErrInstanceNotStopped", err)

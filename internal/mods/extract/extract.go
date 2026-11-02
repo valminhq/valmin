@@ -151,7 +151,7 @@ func writeEntry(f *zip.File, dest string) error {
 
 	// checkLimits already refused anything over MaxEntryUncompressedBytes, so this bound is
 	// always well inside int64 — restated here rather than trusted silently, since it is
-	// what makes the two conversions below provably safe rather than merely believed to be.
+	// what makes the conversion below provably safe rather than merely believed to be.
 	if f.UncompressedSize64 >= math.MaxInt64 {
 		return fmt.Errorf("%w: %s declares an unrepresentable size", ErrLimit, f.Name)
 	}
@@ -162,7 +162,7 @@ func writeEntry(f *zip.File, dest string) error {
 		return fmt.Errorf("%w: %s decompressed past its declared size", ErrLimit, f.Name)
 	case !errors.Is(copyErr, io.EOF):
 		return fmt.Errorf("write %s: %w", f.Name, copyErr)
-	case uint64(n) != f.UncompressedSize64: //nolint:gosec // n is CopyN's count, always in [0, limit]
+	case n != limit-1:
 		return fmt.Errorf("%w: %s wrote %d bytes, declared %d", ErrLimit, f.Name, n, f.UncompressedSize64)
 	}
 

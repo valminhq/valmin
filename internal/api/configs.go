@@ -640,7 +640,7 @@ func (h *Instances) configDirFor(ctx context.Context, inst *store.Instance, name
 		_ = dir.Close()
 	}
 	if !errors.Is(err, fs.ErrNotExist) {
-		return nil, err //nolint:wrapcheck // OpenConfigDir and Lstat name the path
+		return nil, fmt.Errorf("open config directory: %w", err)
 	}
 	root, err := os.OpenRoot(instance.ServerDir(inst.DataDir))
 	if err != nil {

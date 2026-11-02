@@ -187,10 +187,8 @@ func (p *Planner) PlanInstall(
 	}
 	closure, err := modresolver.Resolve(requests, idx)
 	if idx.err != nil {
-		// A store read failed, so the verdict is worthless. The caller checks idx.err first;
-		// reporting the resolver's error here would surface a database fault to the user as
-		// dependency_unresolved.
-		return ChangePlan{}, nil //nolint:nilerr // idx.err is the real failure, and the caller reads it
+		// A store read failed, so the resolver's verdict is worthless; report the read error.
+		return ChangePlan{}, idx.err
 	}
 	if err != nil {
 		return ChangePlan{}, fmt.Errorf("resolve %s-%s: %w", fullName, version, err)
@@ -242,9 +240,8 @@ func PlanUpdates(targets []UpdateTarget, idx *Index) (ChangePlan, error) {
 	}
 	closure, err := modresolver.Resolve(requests, idx)
 	if idx.err != nil {
-		// As in PlanInstall: a store read failed, so the verdict is worthless and the caller
-		// reports idx.err instead.
-		return ChangePlan{}, nil //nolint:nilerr // idx.err is the real failure, and the caller reads it
+		// As in PlanInstall: report the store read error, not the verdict.
+		return ChangePlan{}, idx.err
 	}
 	if err != nil {
 		return ChangePlan{}, fmt.Errorf("resolve %d updates: %w", len(targets), err)
