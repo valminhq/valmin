@@ -116,7 +116,8 @@ func (p *ProxyAuth) username(r *http.Request) string {
 }
 
 // signIn opens a session for username and sets its cookie, or returns no user when the
-// account is unknown, disabled or an admin.
+// account is unknown, disabled or an admin. The header value is never logged, since an
+// operator may point Header at one that carries a credential.
 //
 // ponytail: every trusted read without a session cookie opens one, so a client that drops
 // cookies, or parallel first requests, open several; add a per-username limiter if rows pile up.
@@ -129,17 +130,14 @@ func (p *ProxyAuth) signIn(
 	switch {
 	case errors.Is(err, auth.ErrInvalidCredentials), errors.Is(err, auth.ErrAccountDisabled),
 		errors.Is(err, auth.ErrProxyAdmin):
-		slog.DebugContext(ctx, "refuse proxy sign-in",
-			slog.String("username", username), slog.String("ip", ip), slog.Any("error", err))
+		slog.DebugContext(ctx, "refuse proxy sign-in", slog.String("ip", ip), slog.Any("error", err))
 		return nil, ""
 	case err != nil:
-		slog.ErrorContext(ctx, "proxy sign-in failed",
-			slog.String("username", username), slog.String("ip", ip), slog.Any("error", err))
+		slog.ErrorContext(ctx, "proxy sign-in failed", slog.String("ip", ip), slog.Any("error", err))
 		return nil, ""
 	}
 	SetSessionCookie(w, logged.Cookie, logged.AbsoluteExpiresAt)
-	slog.InfoContext(ctx, "proxy sign-in",
-		slog.String("username", username), slog.String("ip", ip), slog.String("user_id", logged.User.ID))
+	slog.InfoContext(ctx, "proxy sign-in", slog.String("ip", ip), slog.String("user_id", logged.User.ID))
 	return &logged.User, logged.SessionID
 }
 
