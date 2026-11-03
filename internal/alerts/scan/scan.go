@@ -11,6 +11,7 @@ import (
 	"github.com/valminhq/valmin/internal/alerts"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/scheduler"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -21,13 +22,17 @@ type Dispatcher interface {
 }
 
 // Scanner gathers alert state, reconciles conditions, and dispatches transitions. A nil
-// Dispatcher reconciles without notifying.
+// Dispatcher reconciles without notifying, and a nil ModUpdates never reports mod updates.
 type Scanner struct {
 	DB         *store.DB
 	Engine     *jobs.Engine
 	DataRoot   string
 	AlarmFloor func([]store.Instance) uint64
 	Dispatcher Dispatcher
+	// Patterns reads each modded server's loader log.
+	Patterns instance.PatternSet
+	// ModUpdates lists the mod updates the catalogue offers one server.
+	ModUpdates func(ctx context.Context, instanceID string) ([]manager.UpdateTarget, error)
 }
 
 // Submit enqueues a global condition scan.
@@ -147,12 +152,110 @@ func (s *Scanner) snapshot(ctx context.Context) (*alerts.Snapshot, alerts.Resolv
 		LastBackups:        lastBackups,
 		FlaggedBackups:     flagged,
 		Incidents:          incidents,
+		FailedMods:         s.failedMods(ctx, instances, latest),
+		ModUpdates:         s.modUpdates(ctx, rules, instances),
 		InstalledBuilds:    instance.InstalledBuilds(instances),
 		BranchBuilds:       observedBuild.BranchBuilds(),
 		FreeBytes:          free,
 		AlarmBytes:         s.AlarmFloor(instances),
 		Now:                now,
 	}, alerts.RuleResolver(rules), nil
+}
+
+// failedMods reads each modded server's loader log for the mods its latest boot refused. A log
+// last written before that boot belongs to an earlier one and says nothing about it.
+func (s *Scanner) failedMods(
+	ctx context.Context, instances []store.Instance, latest []store.Job,
+) map[string]alerts.FailedMods {
+	booted := lastBoots(instances, latest)
+	out := map[string]alerts.FailedMods{}
+	for i := range instances {
+		inst := &instances[i]
+		if !inst.Modded {
+			continue
+		}
+		load, err := instance.ReadPluginLoad(inst.DataDir, s.Patterns)
+		if err != nil {
+			slog.WarnContext(ctx, "read the mod loader log",
+				slog.String("instance_id", inst.ID), slog.Any("error", err))
+			continue
+		}
+		if load == nil || len(load.Failed) == 0 || load.ObservedAt.Before(booted[inst.ID]) {
+			continue
+		}
+		var f alerts.FailedMods
+		for _, p := range load.Failed {
+			name := p.Name
+			if p.Skipped {
+				name += " (skipped)"
+			} else if f.Reason == "" {
+				f.Reason = p.Reason
+			}
+			f.Names = append(f.Names, name)
+		}
+		out[inst.ID] = f
+	}
+	return out
+}
+
+// lastBoots is when each instance last booted: its container's observed start, or the start of
+// its latest successful start or restart, whichever is later. The observer sees a start only on
+// its next pass, the job at once.
+func lastBoots(instances []store.Instance, latest []store.Job) map[string]time.Time {
+	out := make(map[string]time.Time, len(instances))
+	for i := range instances {
+		if at := instances[i].ContainerStartedAt; at != nil {
+			out[instances[i].ID] = *at
+		}
+	}
+	for i := range latest {
+		j := &latest[i]
+		started := j.Kind == jobs.KindStart.String() || j.Kind == jobs.KindRestart.String()
+		if !started || j.Status != jobs.StatusSucceeded || j.InstanceID == nil || j.StartedAt == nil {
+			continue
+		}
+		if j.StartedAt.After(out[*j.InstanceID]) {
+			out[*j.InstanceID] = *j.StartedAt
+		}
+	}
+	return out
+}
+
+// modUpdates lists the mod updates of each server an enabled mod_updates rule covers. Servers no
+// rule asks about are not looked at, so the condition exists only where someone wants it.
+func (s *Scanner) modUpdates(
+	ctx context.Context, rules []store.AlertRule, instances []store.Instance,
+) map[string][]string {
+	if s.ModUpdates == nil {
+		return nil
+	}
+	out := map[string][]string{}
+	for i := range instances {
+		id := instances[i].ID
+		if !covered(rules, alerts.KindModUpdates, id) {
+			continue
+		}
+		targets, err := s.ModUpdates(ctx, id)
+		if err != nil {
+			slog.WarnContext(ctx, "read pending mod updates", slog.String("instance_id", id), slog.Any("error", err))
+			continue
+		}
+		for _, t := range targets {
+			out[id] = append(out[id], t.FullName+" "+t.FromVersion+" → "+t.Version)
+		}
+	}
+	return out
+}
+
+// covered reports whether an enabled rule for kind covers instanceID.
+func covered(rules []store.AlertRule, kind alerts.Kind, instanceID string) bool {
+	condition := &store.AlertCondition{Kind: kind.String(), InstanceID: &instanceID}
+	for i := range rules {
+		if alerts.Matches(&rules[i], condition) {
+			return true
+		}
+	}
+	return false
 }
 
 // backupCadences reduces each enabled schedule that takes archives to the interval the

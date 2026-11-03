@@ -16,7 +16,9 @@ export const CONDITION_LABEL: Record<InboxKind, string> = {
 	instance_error: 'error',
 	crash_loop: 'crash loop',
 	job_stuck: 'job stuck',
-	backup_attention: 'backup needs a look'
+	backup_attention: 'backup needs a look',
+	mods_failed: 'mods failed',
+	mod_updates: 'mod updates'
 };
 
 /** Full copy, for the host band and for a chip's tooltip. */
@@ -30,7 +32,9 @@ export const CONDITION_SENTENCE: Record<InboxKind, string> = {
 	instance_error: 'A server is in an error state',
 	crash_loop: 'A server is crashing repeatedly',
 	job_stuck: 'A job has been running unusually long',
-	backup_attention: 'The newest backup’s world needs a look before it is relied on'
+	backup_attention: 'The newest backup’s world needs a look before it is relied on',
+	mods_failed: 'Mods failed to load when the server last started',
+	mod_updates: 'Newer versions of installed mods are available'
 };
 
 /**
@@ -39,6 +43,9 @@ export const CONDITION_SENTENCE: Record<InboxKind, string> = {
  * which is what moving conditions onto the card was meant to stop.
  */
 export const ALREADY_ON_CARD: readonly InboxKind[] = ['restart_required', 'instance_error'];
+
+/** Kinds kept off the card: pending mod updates are routine, and the Mods page lists them. */
+export const NOT_ON_CARD: readonly InboxKind[] = ['mod_updates'];
 
 /** Critical before warning, then longest-standing first. */
 function compare(a: InboxItem, b: InboxItem): number {
@@ -49,7 +56,12 @@ function compare(a: InboxItem, b: InboxItem): number {
 /** The conditions worth a chip on one server's card, in the order they should be read. */
 export function chipsFor(items: InboxItem[], instanceId: string): InboxItem[] {
 	return items
-		.filter((item) => item.instance_id === instanceId && !ALREADY_ON_CARD.includes(item.kind))
+		.filter(
+			(item) =>
+				item.instance_id === instanceId &&
+				!ALREADY_ON_CARD.includes(item.kind) &&
+				!NOT_ON_CARD.includes(item.kind)
+		)
 		.sort(compare);
 }
 
@@ -89,8 +101,14 @@ export function conditionDetail(item: InboxItem): string {
 	if (item.kind === 'crash_loop') {
 		return `${item.detail?.Stops} stops in ${item.detail?.Window}`;
 	}
-	if (item.kind === 'backup_attention') {
+	if (item.kind === 'backup_attention' || item.kind === 'instance_error') {
 		return item.detail?.Reason ?? '';
+	}
+	if (item.kind === 'mods_failed') {
+		return item.detail?.Mods ?? '';
+	}
+	if (item.kind === 'mod_updates') {
+		return `${item.detail?.Count} updates: ${item.detail?.Mods}`;
 	}
 	if (item.kind === 'stale_backup') {
 		return item.detail?.Last

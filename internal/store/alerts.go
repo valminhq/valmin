@@ -510,28 +510,34 @@ func (db *DB) RecordIncident(ctx context.Context, instanceID, reason string, now
 	return nil
 }
 
-// RecentIncidents returns when each instance went down on its own since the given time, keyed
-// by instance id, newest first.
-func (db *DB) RecentIncidents(ctx context.Context, since time.Time) (map[string][]time.Time, error) {
+// Incident is one time a server went down on its own, and the reason the observer gave.
+type Incident struct {
+	At     time.Time
+	Reason string
+}
+
+// RecentIncidents returns each instance's incidents since the given time, keyed by instance id,
+// newest first.
+func (db *DB) RecentIncidents(ctx context.Context, since time.Time) (map[string][]Incident, error) {
 	rows, err := db.Reader.QueryContext(ctx,
-		`SELECT instance_id, occurred_at FROM instance_incidents
+		`SELECT instance_id, occurred_at, reason FROM instance_incidents
 		 WHERE occurred_at > ? ORDER BY instance_id, occurred_at DESC`, FormatTime(since))
 	if err != nil {
 		return nil, fmt.Errorf("read recent incidents: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	out := map[string][]time.Time{}
+	out := map[string][]Incident{}
 	for rows.Next() {
-		var instanceID, at string
-		if err := rows.Scan(&instanceID, &at); err != nil {
+		var instanceID, at, reason string
+		if err := rows.Scan(&instanceID, &at, &reason); err != nil {
 			return nil, fmt.Errorf("scan incident: %w", err)
 		}
 		t, err := ParseTime(at)
 		if err != nil {
 			return nil, fmt.Errorf("parse incident timestamp: %w", err)
 		}
-		out[instanceID] = append(out[instanceID], t)
+		out[instanceID] = append(out[instanceID], Incident{At: t, Reason: reason})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read recent incidents: %w", err)

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -202,12 +203,9 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 		return nil, fmt.Errorf("build instance control: %w", err)
 	}
 	instances := &Instances{
-		ctl: ctl,
-		alerts: &scan.Scanner{
-			DB: w.db, Engine: w.engine, DataRoot: w.cfg.Data.Root, Dispatcher: notifier,
-			AlarmFloor: reportedAlarmFloor(streams, w.cfg.Data.FreeSpaceFloorBytes),
-		},
-		DB: w.db, Authz: w.az, Runtime: w.runtime, Keeper: w.keeper, Engine: w.engine, Cfg: w.cfg,
+		ctl:    ctl,
+		alerts: w.alertScanner(ctl.Starter, streams, mods, notifier),
+		DB:     w.db, Authz: w.az, Runtime: w.runtime, Keeper: w.keeper, Engine: w.engine, Cfg: w.cfg,
 		Streams: streams, Commands: w.commands, Mods: mods.install, Notify: notifier,
 		Profiles:          mods.Profiles,
 		PatchNotes:        instance.NewPatchNotesFeed(&http.Client{Timeout: patchNotesHTTPTimeout}),
@@ -233,6 +231,24 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	registerCancellationPolicies(w.engine)
 	srv.routes = w.finishRouter(rt, extraRoutes, trusted, external, gate, d.Options.SPA)
 	return srv, nil
+}
+
+// alertScanner builds the alert scan and has every successful start run one, so mods that failed
+// to load are reported before players find them.
+func (w *wiring) alertScanner(
+	starter *control.Starter, streams *instance.Streams, mods *Mods, notifier *delivery.Notifier,
+) *scan.Scanner {
+	scanner := &scan.Scanner{
+		DB: w.db, Engine: w.engine, DataRoot: w.cfg.Data.Root, Dispatcher: notifier,
+		AlarmFloor: reportedAlarmFloor(streams, w.cfg.Data.FreeSpaceFloorBytes),
+		Patterns:   streams.Patterns(), ModUpdates: mods.plan.PendingUpdates,
+	}
+	starter.AfterStart = func(ctx context.Context) {
+		if _, err := scanner.Submit(ctx, ""); err != nil {
+			slog.DebugContext(ctx, "alert scan after a start not submitted", slog.Any("error", err))
+		}
+	}
+	return scanner
 }
 
 // onJobFinished is the engine's finish hook, with two owners: the definition chain records its

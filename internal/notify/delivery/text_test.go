@@ -1,9 +1,11 @@
 package delivery
 
 import (
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -88,6 +90,36 @@ func TestAnAlertEdgeReadsAsASentenceWithNextSteps(t *testing.T) {
 			advice: true,
 		},
 		{
+			name: "server error names an out-of-memory kill",
+			condition: store.AlertCondition{Kind: "instance_error", InstanceID: &instanceID, Detail: map[string]string{
+				"Reason": instance.ReasonOOMKilled, "MemLimitMB": "4096",
+			}},
+			edge: store.EdgeOpened, headline: "The server needs a check after a failure",
+			fields: map[string]string{
+				"Cause":      "The server used all 4096 MB its memory limit allows, so the kernel stopped it. The world may be damaged.",
+				"What to do": "Raise the memory limit in the server's settings, then open the server in Valmin and choose Check this server.",
+			},
+			advice: true,
+		},
+		{
+			name: "mods that failed to load",
+			condition: store.AlertCondition{Kind: "mods_failed", InstanceID: &instanceID, Detail: map[string]string{
+				"Mods": "Jotunn, PlanBuild (skipped)", "Reason": "Error loading [Jotunn 2.30.2]",
+			}},
+			edge: store.EdgeOpened, headline: "Mods failed to load",
+			fields: map[string]string{"Mods": "Jotunn, PlanBuild (skipped)", "Reason": "Error loading [Jotunn 2.30.2]"},
+			advice: true,
+		},
+		{
+			name: "pending mod updates",
+			condition: store.AlertCondition{Kind: "mod_updates", InstanceID: &instanceID, Detail: map[string]string{
+				"Count": "1", "Mods": "Jotunn 2.30.2 → 2.30.3",
+			}},
+			edge: store.EdgeOpened, headline: "Mod updates are available",
+			fields: map[string]string{"Updates": "1", "Mods": "Jotunn 2.30.2 → 2.30.3"},
+			advice: true,
+		},
+		{
 			name:      "resolution drops the advice",
 			condition: store.AlertCondition{Kind: "crash_loop", InstanceID: &instanceID, Detail: map[string]string{"Stops": "3", "Window": "1h0m0s"}},
 			edge:      store.EdgeResolved, headline: "Resolved: The server keeps crashing",
@@ -132,9 +164,26 @@ func TestAnUnexpectedStopSaysWhereTheServerIsAndWhatToDo(t *testing.T) {
 		{"error", "Held in the error state; its controls are locked until someone checks it"},
 		{"running", "Running again"},
 	} {
-		fields := downDetail(tc.to, "container exited")
+		fields := downDetail(tc.to, "container exited", 0)
 		if fields[0].Value != tc.status || fields[1].Value != "Container exited." || fields[2].Value == "" {
 			t.Errorf("downDetail(%s) = %+v", tc.to, fields)
+		}
+	}
+}
+
+// TestAnOutOfMemoryStopAdvisesOnMemory asserts a kernel kill is named in words, with advice
+// that depends on whether the server has a memory limit.
+func TestAnOutOfMemoryStopAdvisesOnMemory(t *testing.T) {
+	for _, tc := range []struct {
+		limitMB      int
+		cause, setup string
+	}{
+		{4096, "The server used all 4096 MB its memory limit allows", "Raise the memory limit"},
+		{0, "The host ran out of memory", "Free memory on the host"},
+	} {
+		fields := downDetail("error", instance.ReasonOOMKilled, tc.limitMB)
+		if !strings.HasPrefix(fields[1].Value, tc.cause) || !strings.HasPrefix(fields[2].Value, tc.setup) {
+			t.Errorf("downDetail with a %d MB limit = %+v", tc.limitMB, fields)
 		}
 	}
 }

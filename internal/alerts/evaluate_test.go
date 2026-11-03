@@ -226,7 +226,11 @@ func TestCrashLoopCountsOnlyInsideTheWindow(t *testing.T) {
 			t.Parallel()
 			s := base()
 			s.Instances = []store.Instance{{ID: "a"}}
-			s.Incidents = map[string][]time.Time{"a": tc.incidents}
+			incidents := make([]store.Incident, 0, len(tc.incidents))
+			for _, at := range tc.incidents {
+				incidents = append(incidents, store.Incident{At: at})
+			}
+			s.Incidents = map[string][]store.Incident{"a": incidents}
 			if _, ok := has(t, Evaluate(&s, nil), KindCrashLoop, "a"); ok != tc.want {
 				t.Errorf("crash loop = %v, want %v", ok, tc.want)
 			}
@@ -345,5 +349,66 @@ func TestBackupAttentionCarriesWhatWasFound(t *testing.T) {
 	}
 	if _, ok := has(t, got, KindBackupAttention, "i2"); ok {
 		t.Error("a server with no flagged archive raised the condition")
+	}
+}
+
+// TestErrorCauseIsTheIncidentNoJobFinishedAfter asserts a parked server names the observer's
+// reason only when no later job is the cause.
+func TestErrorCauseIsTheIncidentNoJobFinishedAfter(t *testing.T) {
+	t.Parallel()
+	crashed := now.Add(-10 * time.Minute)
+	id := "a"
+	for _, tc := range []struct {
+		name     string
+		finished time.Time
+		want     string
+	}{
+		{"no job since the incident", crashed.Add(-time.Minute), "oom"},
+		{"a job failed after the incident", crashed.Add(time.Minute), ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := base()
+			s.Instances = []store.Instance{{ID: id, State: stateError, MemLimitMB: 4096}}
+			s.Incidents = map[string][]store.Incident{id: {{At: crashed, Reason: "oom"}}}
+			s.LatestTerminalJobs = []store.Job{{
+				Kind: jobs.KindStart.String(), Status: jobs.StatusFailed, InstanceID: &id, FinishedAt: &tc.finished,
+			}}
+			c, ok := has(t, Evaluate(&s, nil), KindInstanceError, id)
+			if !ok {
+				t.Fatal("instance_error not raised")
+			}
+			if got := c.Detail[DetailReason]; got != tc.want {
+				t.Errorf("cause = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestModConditionsNameTheMods asserts failed loads and pending updates open with the mods
+// they concern, and only for servers that have any.
+func TestModConditionsNameTheMods(t *testing.T) {
+	t.Parallel()
+	s := base()
+	s.FailedMods = map[string]FailedMods{
+		"a": {Names: []string{"Jotunn", "Epic Loot (skipped)"}, Reason: "Error loading [Jotunn]"},
+		"b": {},
+	}
+	s.ModUpdates = map[string][]string{"a": {"Jotunn 2.1.0 → 2.2.0"}, "b": nil}
+	got := Evaluate(&s, nil)
+
+	failed, ok := has(t, got, KindModsFailed, "a")
+	if !ok || failed.Detail[DetailMods] != "Jotunn, Epic Loot (skipped)" ||
+		failed.Detail[DetailReason] != "Error loading [Jotunn]" {
+		t.Errorf("mods_failed = %+v, %v", failed, ok)
+	}
+	updates, ok := has(t, got, KindModUpdates, "a")
+	if !ok || updates.Detail[DetailCount] != "1" || updates.Detail[DetailMods] != "Jotunn 2.1.0 → 2.2.0" {
+		t.Errorf("mod_updates = %+v, %v", updates, ok)
+	}
+	for _, k := range []Kind{KindModsFailed, KindModUpdates} {
+		if _, ok := has(t, got, k, "b"); ok {
+			t.Errorf("%s raised for a server with nothing to report", k)
+		}
 	}
 }

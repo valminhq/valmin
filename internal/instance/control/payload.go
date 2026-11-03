@@ -20,6 +20,9 @@ type (
 	}
 	GameUpdatePayload struct {
 		ConfirmModded bool `json:"confirm_modded"`
+		// FromBuild is the build the server ran when the update was queued. It is neither
+		// stored nor accepted from a request.
+		FromBuild string `json:"-"`
 	}
 	DeletePayload struct {
 		KeepWorlds bool `json:"keep_worlds"`

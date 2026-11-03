@@ -19,16 +19,20 @@ var defaultTemplates = map[alerts.Kind]string{
 	alerts.KindRestartRequired: "**What to do:** {what_to_do}",
 	alerts.KindUpdateAvailable: "**Installed build:** {installed}\n**Available build:** {available}\n" +
 		"**What to do:** {what_to_do}",
-	alerts.KindInstanceError: "**What to do:** {what_to_do}",
+	alerts.KindInstanceError: "**Cause:** {reason}\n**What to do:** {what_to_do}",
 	alerts.KindCrashLoop:     "**Unexpected stops:** {stops}\n**What to do:** {what_to_do}",
 	alerts.KindJobStuck:      "**Running for:** {running}\n**What to do:** {what_to_do}",
 	alerts.KindBackupAttention: "**Backup:** {backup}\n**Found:** {findings}\n" +
 		"**What to do:** {what_to_do}",
-	alerts.KindPowerCut: "**Power goes off:** {power_off}\n**Servers stop:** {stop_at}\n**Running servers:** {servers}",
+	alerts.KindModsFailed: "**Mods:** {mods}\n**Reason:** {reason}\n**What to do:** {what_to_do}",
+	alerts.KindModUpdates: "**Updates:** {count}\n**Mods:** {mods}\n**What to do:** {what_to_do}",
+	alerts.KindPowerCut:   "**Power goes off:** {power_off}\n**Servers stop:** {stop_at}\n**Running servers:** {servers}",
 	alerts.KindServerStarted: "**Server name:** {server_name}\n**World:** {world}\n**Join code:** {join_code}\n" +
 		"**Port:** {port}\n**Started:** {time}",
 	alerts.KindServerStopped: "**Reason:** {reason}\n**Server name:** {server_name}\n**World:** {world}\n" +
 		"**Stopped:** {time}",
+	alerts.KindInstanceDown:     "**Status:** {status}\n**Cause:** {reason}\n**What to do:** {what_to_do}",
+	alerts.KindGameUpdated:      "**Game build:** {build}\n**Mods updated:** {mods}\n**Updated:** {time}",
 	alerts.KindPlayerJoined:     "{player} joined",
 	alerts.KindPlayerLeft:       "{player} left",
 	alerts.KindBossDefeated:     "{boss} was defeated for the first time on day {day}. Fighters: {players}",

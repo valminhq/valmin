@@ -1232,7 +1232,8 @@ Three alerts are built in and need no rule: a server that stops unexpectedly, a 
 backup and a new game build. **Also post built-in alerts** on a channel decides whether they
 reach it. A shared channel gets them for every server, a server's own channel for that
 server, and a new game build reaches shared channels only. A channel that a rule already
-sends the same news to gets it once.
+sends the same news to gets it once. To style the unexpected-stop alert, add a **Stopped
+unexpectedly** rule: the channels it posts to get its message instead of the built-in one.
 
 The switch on the right pauses a channel. A paused channel receives nothing, including
 messages that were still waiting to be sent when you paused it. Deleting a channel removes
@@ -1246,6 +1247,8 @@ Select **Add rule** and choose the event:
 | ---------------------- | ------------------------------------- | -------------------------------------------------------------------- |
 | Server status          | **Server started**                    | Valmin started or restarted a server and its world loaded.           |
 | Server status          | **Server stopped**                    | Valmin stopped a server: by hand, by auto-stop or for a power cut.   |
+| Server status          | **Stopped unexpectedly**              | A server stopped or restarted on its own: a crash, running out of memory or a host reboot. |
+| Server status          | **Server updated**                    | A game update installed a new build, or applying tested updates updated mods. |
 | Server status          | **Power cut soon**                    | A planned power cut is close: players are being warned. Administration page only. |
 | Problems               | **Crash loop**                        | A server is crashing repeatedly.                                     |
 | Problems               | **Server error**                      | A server is in an error state and needs a check.                     |
@@ -1253,9 +1256,11 @@ Select **Add rule** and choose the event:
 | Problems               | **Job failed**                        | A job failed and nothing has retried it.                             |
 | Problems               | **Job stuck**                         | A job has been running unusually long.                               |
 | Problems               | **Backup needs a look**               | The [world check](operations.md#world-check) flagged the newest backup. |
+| Problems               | **Mods failed to load**               | The server's last start could not load some of its mods.             |
 | Maintenance            | **Update available**                  | A new game build is available.                                       |
 | Maintenance            | **Restart required**                  | A change is waiting for a restart.                                   |
 | Maintenance            | **Backups stale**                     | Scheduled backups are not producing archives.                        |
+| Maintenance            | **Mod updates**                       | Newer versions of a server's mods are available. Only checked while such a rule exists. |
 | Maintenance            | **Low disk**                          | The host is running out of disk space. Administration page only.     |
 | Players, Bosses, Raids | [Game events](#game-events-valmineye) | What happens in the game, reported by ValminEye.                     |
 
@@ -1303,6 +1308,17 @@ it is sent anyway). A server that stops before then is not reported as started. 
 stopped** says why: who stopped it, **No players for N minutes**, or **Planned power cut**.
 A server that stops on its own, or that Docker restarted without Valmin, is reported as
 stopped unexpectedly instead.
+
+**Stopped unexpectedly** and **Server error** name the cause Valmin saw. When the kernel
+stopped the server for running out of memory, they say so and advise raising the server's
+memory limit in its settings, or freeing memory on the host for a server without a limit.
+
+**Mods failed to load** is checked right after each start, and every five minutes,
+from the server's BepInEx log. It names the mods and the loader's reason for the first one,
+and clears on the next start that loads them all. **Mod updates** is sent once when updates
+appear and clears once they are applied; it does not show on the server card. **Server
+updated** reports the new game build after a game update. Applying tested updates that also
+change the game build sends the build and the updated mods as two messages.
 
 **Recent deliveries**, at the bottom of both pages, lists every attempt, newest first, and
 can be filtered by channel and status. On a server's tab it lists only messages about that

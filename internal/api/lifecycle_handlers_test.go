@@ -707,3 +707,46 @@ func TestJobsNobodyRequestedWriteNoAuditEntry(t *testing.T) {
 		})
 	}
 }
+
+// TestAStartThatSucceedsScansForAlerts asserts a successful start submits an alert scan, so a
+// mod that failed to load is reported at once, and a failed start submits none.
+func TestAStartThatSucceedsScansForAlerts(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		exits bool
+		want  int
+	}{
+		{"start succeeds", false, 1},
+		{"start fails", true, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rt, db, fake, admin, _ := lifecycleWorld(t)
+			seedInstance(t, rt, db, fake, "stopped")
+			if tc.exits {
+				fake.OnStart = func(c *runtime.FakeContainer) { c.Exit(1) }
+			}
+
+			rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/start", http.NoBody))
+			var stub jobView
+			decodeInto(t, rec, &stub)
+			waitJob(t, rt, admin, stub.JobID)
+
+			// The scan is submitted after the start's finish commits, so it may land a moment later.
+			var scans int
+			for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+				if err := db.Reader.QueryRowContext(t.Context(),
+					`SELECT COUNT(*) FROM job_runs WHERE kind = 'alert_scan'`).Scan(&scans); err != nil {
+					t.Fatal(err)
+				}
+				if scans >= tc.want || time.Now().After(deadline) {
+					break
+				}
+			}
+			if scans != tc.want {
+				t.Errorf("alert scans = %d, want %d", scans, tc.want)
+			}
+		})
+	}
+}

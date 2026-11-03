@@ -306,6 +306,9 @@ func TestRecentIncidentsWindowsAndSweeps(t *testing.T) {
 	if len(got[id]) != 2 {
 		t.Errorf("incidents inside the window = %d, want 2", len(got[id]))
 	}
+	if len(got[id]) > 0 && got[id][0].Reason != "exited" {
+		t.Errorf("incident reason = %q, want exited", got[id][0].Reason)
+	}
 
 	if _, err := db.SweepIncidents(t.Context(), now.Add(-time.Hour)); err != nil {
 		t.Fatal(err)
