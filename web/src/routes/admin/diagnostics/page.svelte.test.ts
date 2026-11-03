@@ -95,6 +95,33 @@ describe('the diagnostics screen', () => {
 		expect(text(line)).toMatch(/3:00:00/);
 	});
 
+	it('links a reachable address to the guide that blocks it', async () => {
+		const docs = 'https://example.test/docs#keep-game-servers-off-your-lan';
+		daemon.on('GET', '/admin/diagnostics', () =>
+			Response.json({
+				...report,
+				checks: [
+					{
+						id: 'network.metadata_egress',
+						group: 'Network',
+						title: 'Cloud metadata from game servers',
+						status: 'warn',
+						source: 'job',
+						detail: 'A game server opened a connection to the cloud metadata service.',
+						remedy: 'Firewall game servers off private addresses.',
+						docs
+					}
+				]
+			})
+		);
+		session.permissions = permissions('', [], [actions.panelSettings]);
+		render(Page);
+
+		const link = await screen.findByRole('link', { name: 'How to block this' });
+		expect(link.getAttribute('href')).toBe(docs);
+		expect(screen.queryAllByRole('link', { name: 'How to block this' })).toHaveLength(1);
+	});
+
 	it('denies that a published port is a reachable one', async () => {
 		await open([actions.panelSettings]);
 		await screen.findByText('Container engine');

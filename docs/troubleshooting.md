@@ -16,6 +16,8 @@ what the sections below ask you to check by hand:
 - When Steam last reported a build.
 - Whether the external URL lets a browser store the panel's session cookies.
 - Whether each running server publishes the UDP ports it was allocated.
+- Whether a game server can reach a cloud provider's metadata service, or an address on
+  your LAN that you name.
 
 The server table includes the last reported free space, container restart count, and
 last exit code, including out-of-memory termination. A server whose container runs another
@@ -37,9 +39,28 @@ probe waits at most five seconds, so a Docker engine or registry that hangs show
 rather than stalling the page. An entry marked
 `unknown` was never measured. Read it as a missing answer, not as a pass.
 
-**Run deep checks** repeats the host data path, game network, and Steam checks. Each starts
-a temporary container, so it runs as a job instead of during a page load. The job succeeds
-even when a check fails, so no failed-job alert fires; the result is on this page.
+**Run deep checks** repeats the host data path, game network, and Steam checks, and tries
+two addresses from the game network. Each starts a temporary container, so it runs as a job
+instead of during a page load. The job succeeds even when a check fails, so no failed-job
+alert fires; the result is on this page.
+
+The two address checks open a TCP connection from a temporary game container, waiting up
+to three seconds:
+
+- **Cloud metadata from game servers** tries `169.254.169.254:80`, where cloud providers
+  hand a machine its credentials.
+- **LAN from game servers** tries the address in
+  [`VALMIN_GAME_LAN_PROBE_ADDRESS`](configuration.md#daemon-settings), such as your router's
+  IP and port 80. Without one it reads **not checked**, never as safe.
+
+A connection that opens, or one the address refuses, is a warning: a refusal still means a
+packet got there. Its entry links to
+[keep game servers off your LAN](advanced-network-setup.md#keep-game-servers-off-your-lan).
+No answer within three seconds passes, but it is not proof that the address is blocked:
+nothing may be listening there. Outside a cloud, the metadata check usually gets no answer.
+A firewall rule that rejects rather than drops looks like a refusal. Any other answer, such
+as a network that reports no route to the address, reads as unknown with the message shown
+beneath it.
 
 Published ports are not proof that players can connect. The page compares the ports a
 server was allocated against the ports Docker publishes for it, inside this host. It cannot

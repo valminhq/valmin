@@ -82,7 +82,8 @@ func TestAHealthyPanelPassesEveryProbedCheck(t *testing.T) {
 	r := Collect(t.Context(), testInput())
 	for _, c := range r.Checks {
 		switch c.ID {
-		case CheckHostRoot, CheckGameNetwork, CheckDataRootWrite, CheckSteam:
+		case CheckHostRoot, CheckGameNetwork, CheckDataRootWrite, CheckSteam,
+			CheckMetadataEgress, CheckLANEgress:
 			if c.Status != StatusUnknown {
 				t.Errorf("%s: got %s, want unknown with nothing recorded", c.ID, c.Status)
 			}
@@ -439,6 +440,71 @@ func TestARecordedCheckKeepsItsSource(t *testing.T) {
 	}
 	if got := find(t, &r, CheckGameNetwork); got.Source != SourceStartup {
 		t.Errorf("game network source = %s, want startup", got.Source)
+	}
+}
+
+// TestReachabilityProbesKeepTheirOwnGrade asserts a probe's recorded status and finding are
+// shown as recorded, a warning links to the firewall guide, and an unset LAN address reads as
+// not checked rather than as safe.
+func TestReachabilityProbesKeepTheirOwnGrade(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		address string
+		obs     *Observation
+		status  Status
+		detail  string
+		docs    bool
+	}{
+		{name: "not recorded", address: "192.168.1.1:80", status: StatusUnknown, detail: "Not recorded yet."},
+		{
+			name:   "not configured",
+			obs:    &Observation{Status: StatusWarn, Detail: "stale"},
+			status: StatusUnknown,
+			detail: "Not checked.",
+		},
+		{
+			name:    "reachable",
+			address: "192.168.1.1:80",
+			obs:     &Observation{Status: StatusWarn, Detail: "opened", Target: "192.168.1.1:80"},
+			status:  StatusWarn,
+			detail:  "opened",
+			docs:    true,
+		},
+		{
+			name:    "no answer",
+			address: "192.168.1.1:80",
+			obs:     &Observation{OK: true, Status: StatusOK, Detail: "No answer", Target: "192.168.1.1:80"},
+			status:  StatusOK,
+			detail:  "No answer",
+		},
+		{
+			name:    "address changed since",
+			address: "192.168.1.2:80",
+			obs:     &Observation{OK: true, Status: StatusOK, Detail: "No answer", Target: "192.168.1.1:80"},
+			status:  StatusUnknown,
+			detail:  "Not recorded yet.",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			in := testInput()
+			in.Config.Game.LANProbeAddress = tc.address
+			if tc.obs != nil {
+				tc.obs.CheckedAt = in.Now
+				in.Recorded = map[string]Observation{CheckLANEgress: *tc.obs}
+			}
+
+			r := Collect(t.Context(), in)
+			got := find(t, &r, CheckLANEgress)
+			if got.Status != tc.status || !strings.HasPrefix(got.Detail, tc.detail) {
+				t.Errorf("lan = %s %q, want %s starting %q", got.Status, got.Detail, tc.status, tc.detail)
+			}
+			if (got.Docs != "") != tc.docs {
+				t.Errorf("docs = %q, want a link: %v", got.Docs, tc.docs)
+			}
+		})
 	}
 }
 

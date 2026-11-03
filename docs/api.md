@@ -1499,7 +1499,8 @@ download a support bundle. Paths are relative to `/api/v1`.
 
 Each check reports `status` as `ok`, `warn`, `fail`, or `unknown`, and `source` as `live`,
 `startup`, `job`, or `config`. `unknown` means the check has no measurement behind it;
-treat it as a missing answer rather than a pass. A failing check can also carry
+treat it as a missing answer rather than a pass. A check can carry `docs`, a link to the
+guide that explains its remedy. A failing check can also carry
 `diagnostic`, the verbatim output of whatever was probed. That field is present in the API
 response and absent from the support bundle, which omits filesystem paths and replaces
 server names, custom image references and a custom Thunderstore URL. Each live probe

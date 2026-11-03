@@ -111,6 +111,9 @@ type Game struct {
 	// PublicIPURL is the service the reachability check asks for the host's public IPv4
 	// address. It must answer with the address as plain text; empty turns the lookup off.
 	PublicIPURL string `yaml:"public_ip_url"`
+	// LANProbeAddress is an IPv4 address and port on the operator's LAN, such as the router's
+	// web page, that the deep diagnostics try to reach from the game network. Empty skips it.
+	LANProbeAddress string `yaml:"lan_probe_address"`
 	// LogPatterns overrides the measured log-line patterns, keyed by event kind, such as
 	// `ready` or `save_complete` (Q32). A game patch that rewords a line otherwise blinds the
 	// panel to it until a release carries the new literal. Each entry replaces every built-in

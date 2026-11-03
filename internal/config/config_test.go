@@ -297,6 +297,39 @@ func TestGamePublicIPURLValidation(t *testing.T) {
 	}
 }
 
+// The LAN probe address is an IPv4 address and a port, and nothing a shell could read as more.
+func TestGameLANProbeAddressValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		value   string
+		refused bool
+	}{
+		{name: "router", value: "192.168.1.1:80"},
+		{name: "empty turns it off", value: ""},
+		{name: "no port", value: "192.168.1.1", refused: true},
+		{name: "port zero", value: "192.168.1.1:0", refused: true},
+		{name: "loopback", value: "127.0.0.1:80", refused: true},
+		{name: "unspecified", value: "0.0.0.0:80", refused: true},
+		{name: "hostname", value: "router.lan:80", refused: true},
+		{name: "ipv6", value: "[fd00::1]:80", refused: true},
+		{name: "shell text", value: "192.168.1.1:80;id", refused: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := loadWith(t, minimalYAML, map[string]string{"VALMIN_GAME_LAN_PROBE_ADDRESS": tc.value})
+			switch {
+			case tc.refused:
+				if err == nil || !strings.Contains(err.Error(), "game.lan_probe_address") {
+					t.Errorf("error = %v, want a game.lan_probe_address refusal", err)
+				}
+			case err != nil:
+				t.Fatalf("Load: %v", err)
+			case cfg.Game.LANProbeAddress != tc.value:
+				t.Errorf("game.lan_probe_address = %q, want %q", cfg.Game.LANProbeAddress, tc.value)
+			}
+		})
+	}
+}
+
 // An explicitly empty game.public_ip_url is legal: it turns the public IP lookup off.
 func TestGamePublicIPURLCanBeEmptied(t *testing.T) {
 	cfg, err := loadWith(t, minimalYAML+"game:\n  public_ip_url: \"\"\n", nil)
