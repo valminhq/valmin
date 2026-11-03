@@ -40,6 +40,9 @@ const (
 	FieldPort       = "port"
 	FieldTime       = "time"
 	FieldReason     = "reason"
+	FieldStatus     = "status"
+	FieldBuild      = "build"
+	FieldMods       = "mods"
 )
 
 // MessageFields is the fields a kind's message can carry, each of which a rule can hide.
@@ -49,6 +52,10 @@ func MessageFields(k Kind) []string {
 		return []string{FieldServerName, FieldWorld, FieldJoinCode, FieldPort, FieldTime}
 	case KindServerStopped:
 		return []string{FieldReason, FieldServerName, FieldWorld, FieldTime}
+	case KindInstanceDown:
+		return []string{FieldStatus, FieldReason, FieldTime}
+	case KindGameUpdated:
+		return []string{FieldBuild, FieldMods, FieldTime}
 	}
 	return nil
 }

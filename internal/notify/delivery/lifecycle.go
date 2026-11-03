@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/valminhq/valmin/internal/alerts"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/store"
@@ -24,8 +26,11 @@ const lifecycleWait = 2 * time.Minute
 // before lowering it.
 const joinCodeWait = 15 * time.Minute
 
-// announceLifecycle is OnJobFinished's share of a start, restart or stop that succeeded. It runs
-// apart from the finish transaction, which holds the writer the deliveries need.
+// announceLifecycle is OnJobFinished's share of a start, restart, stop or update that succeeded.
+// It runs apart from the finish transaction, which holds the writer the deliveries need.
+//
+// An update apply installs its game build through a game_update job of its own, which announces
+// the build, so the apply announces only the mods it updated.
 func (n *Notifier) announceLifecycle(ctx context.Context, fin *jobs.FinishedJob) {
 	if fin.Status != jobs.StatusSucceeded || fin.InstanceID == nil {
 		return
@@ -39,7 +44,65 @@ func (n *Notifier) announceLifecycle(ctx context.Context, fin *jobs.FinishedJob)
 		n.background(ctx, func(ctx context.Context) {
 			n.NotifyServerStopped(ctx, instanceID, payload.Reason, fin.RequestedBy, lifecycleWait)
 		})
+	case jobs.KindGameUpdate:
+		payload, _ := fin.Payload.(control.GameUpdatePayload)
+		n.background(ctx, func(ctx context.Context) { n.notifyNewBuild(ctx, instanceID, payload.FromBuild) })
+	case jobs.KindUpdateApply:
+		payload, _ := fin.Payload.(control.UpdateApplyPayload)
+		if len(payload.Mods) == 0 {
+			return
+		}
+		mods := make([]string, 0, len(payload.Mods))
+		for _, m := range payload.Mods {
+			mods = append(mods, m.FullName+" "+m.Version)
+		}
+		n.background(ctx, func(ctx context.Context) { n.NotifyGameUpdated(ctx, instanceID, "", mods) })
 	}
+}
+
+// notifyNewBuild reports the build a game update installed, unless the server still runs from,
+// the build it ran before.
+func (n *Notifier) notifyNewBuild(ctx context.Context, instanceID, from string) {
+	inst, err := n.DB.InstanceByID(ctx, instanceID)
+	if err != nil || inst == nil {
+		slog.WarnContext(ctx, "read instance for an update notification",
+			slog.String("instance_id", instanceID), slog.Any("error", err))
+		return
+	}
+	build := instance.InstalledBuilds([]store.Instance{*inst})[inst.ID]
+	if build == "" || build == from {
+		return
+	}
+	n.NotifyGameUpdated(ctx, instanceID, build, nil)
+}
+
+// NotifyGameUpdated reports an update installed on a server to the game_updated rules covering
+// it: build is the game build it moved to, empty when the game did not change, and mods the mods
+// updated. A copy made to test updates is never reported.
+func (n *Notifier) NotifyGameUpdated(ctx context.Context, instanceID, build string, mods []string) {
+	if len(n.rulesFor(ctx, alerts.KindGameUpdated, instanceID)) == 0 {
+		return
+	}
+	inst, err := n.DB.InstanceByID(ctx, instanceID)
+	if err != nil || inst == nil {
+		slog.WarnContext(ctx, "read instance for an update notification",
+			slog.String("instance_id", instanceID), slog.Any("error", err))
+		return
+	}
+	if inst.TestOf != nil {
+		return
+	}
+	at := time.Now().UTC()
+	n.emitByRules(ctx, alerts.KindGameUpdated, instanceID, func(p *alerts.ParamsWire) *notify.Event {
+		return &notify.Event{
+			Kind: notify.KindGameUpdated, InstanceID: inst.ID, InstanceName: inst.Name,
+			Detail: shown(p, []shownField{
+				{alerts.FieldBuild, "Game build", build},
+				{alerts.FieldMods, "Mods updated", strings.Join(mods, ", ")},
+				{alerts.FieldTime, "Updated", formatInstant(at, p.Location())},
+			}),
+		}
+	})
 }
 
 // NotifyServerStarted reports a server that reached running to the server_started rules

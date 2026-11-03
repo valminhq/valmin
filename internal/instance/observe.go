@@ -116,6 +116,9 @@ func Observe(state State, r Reality) Verdict {
 // keeps every row from having to remember it.
 func (r Reality) up() bool { return r.Found && r.Running }
 
+// ReasonOOMKilled is the reason the observer gives for a server the kernel killed for memory.
+const ReasonOOMKilled = "container was killed by the out-of-memory killer; the world may be damaged"
+
 // observeRunning is 08 §6.1 step 3's second bullet plus 08 §6's two guards.
 //
 // A non-zero exit that is neither an OOM-kill nor a crash loop still lands in `stopped`, per
@@ -130,7 +133,7 @@ func observeRunning(r Reality) Verdict {
 		return Verdict{
 			To:     StateError,
 			Stop:   true,
-			Reason: "container was killed by the out-of-memory killer; the world may be damaged",
+			Reason: ReasonOOMKilled,
 		}
 	}
 	if r.CrashLooping {

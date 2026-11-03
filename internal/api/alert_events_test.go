@@ -107,3 +107,41 @@ func TestServerStoppedNamesItsReasonAndHonoursTheRulesOptions(t *testing.T) {
 		t.Errorf("stopped at %q, want a time in JST", got)
 	}
 }
+
+// TestGameUpdatedNamesTheModsAndNeedsARule asserts an update message lists the updated mods,
+// leaves out a build it did not install, and goes nowhere without a rule.
+func TestGameUpdatedNamesTheModsAndNeedsARule(t *testing.T) {
+	t.Parallel()
+	rt, db, _, _ := provisionWorld(t)
+	seed(t, db, `INSERT INTO instances (
+		id, name, state, data_dir, base_port, server_name, world_name, password,
+		crossplay_instance_id, created_at, updated_at
+	) VALUES ('inst-a', 'inst-a', 'stopped', '/srv/inst-a', 2456, 'Server', 'Midgard', 'env', 'cp-a', ?, ?)`,
+		store.Now(), store.Now())
+	seedWebhook(t, db, "everyone")
+	mods := []string{"ValheimModding-Jotunn 2.30.3"}
+
+	rt.notifier.NotifyGameUpdated(t.Context(), "inst-a", "", mods)
+	if sent := deliveriesOfKind(t, db, notify.KindGameUpdated); len(sent) != 0 {
+		t.Fatalf("deliveries without a rule = %d, want 0", len(sent))
+	}
+
+	seedRule(t, db, alerts.KindGameUpdated, "", seedWebhook(t, db, "ruled"))
+	rt.notifier.NotifyGameUpdated(t.Context(), "inst-a", "", mods)
+	sent := deliveriesOfKind(t, db, notify.KindGameUpdated)
+	if len(sent) != 1 {
+		t.Fatalf("deliveries = %d, want 1", len(sent))
+	}
+	var body struct {
+		Detail map[string]string `json:"detail"`
+	}
+	if err := json.Unmarshal([]byte(sent[0].Payload), &body); err != nil {
+		t.Fatal(err)
+	}
+	if got := body.Detail["Mods updated"]; got != mods[0] {
+		t.Errorf("mods = %q, want %q", got, mods[0])
+	}
+	if _, ok := body.Detail["Game build"]; ok {
+		t.Error("a build the update did not install was sent")
+	}
+}

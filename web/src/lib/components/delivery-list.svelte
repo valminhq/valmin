@@ -51,6 +51,7 @@
 		power_cut_soon: 'Power cut soon',
 		server_started: 'Server started',
 		server_stopped: 'Server stopped',
+		game_updated: 'Server updated',
 		...Object.fromEntries(GAME_EVENTS.map((e) => [e.kind, e.headline]))
 	};
 

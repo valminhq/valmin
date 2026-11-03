@@ -36,6 +36,11 @@ describe('chipsFor', () => {
 		expect(chipsFor(items, 'one').map((c) => c.kind)).toEqual(['update_available']);
 	});
 
+	it('keeps pending mod updates off the card', () => {
+		const items = [item('mod_updates'), item('mods_failed')];
+		expect(chipsFor(items, 'one').map((c) => c.kind)).toEqual(['mods_failed']);
+	});
+
 	it('orders critical before warning, then longest-standing first', () => {
 		const items = [
 			item('update_available', { since_at: '2026-09-20T11:00:00Z' }),

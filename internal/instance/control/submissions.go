@@ -113,11 +113,15 @@ func (g *GameUpdater) Submit(ctx context.Context, input *GameUpdateSubmission) (
 		return nil, err
 	}
 	id := input.Instance.ID
+	payload := GameUpdatePayload{
+		ConfirmModded: input.Confirmed,
+		FromBuild:     instance.InstalledBuilds([]store.Instance{*input.Instance})[id],
+	}
 	job, err := g.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindGameUpdate, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: input.Instance.Name,
 		RequestedBy: input.RequestedBy, ScheduleID: input.ScheduleID,
-		Payload: GameUpdatePayload{ConfirmModded: input.Confirmed}, Audit: input.Audit,
+		Payload: payload, Audit: input.Audit,
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
 			ok, err := instance.SetStateTx(ctx, tx, id, instance.StateStopped, instance.StateUpdating)
 			if err != nil {

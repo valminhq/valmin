@@ -5,6 +5,7 @@ package delivery
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"net/url"
 	"strings"
@@ -126,6 +127,9 @@ func (n *Notifier) OnJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.Fini
 // with no job holding its lock (C14). An operator's own stop holds that lock, so an expected
 // stop never reaches here — the quiet is structural rather than a flag this has to read.
 //
+// The instance_down rules covering the server send their own message, and the built-in one goes
+// to every other catch-all destination.
+//
 // The state write has already committed. A crash in the gap costs this one notification, which
 // is the trade for keeping the observer's write path free of a notification's transaction.
 func (n *Notifier) NotifyUnexpectedStop(ctx context.Context, inst *store.Instance, to, reason string) {
@@ -141,15 +145,48 @@ func (n *Notifier) NotifyUnexpectedStop(ctx context.Context, inst *store.Instanc
 	}
 	snap.Incidents = incidents
 	owned := n.ruleOwned(ctx, snap, alerts.KindCrashLoop, alerts.KindInstanceError)
+	rules := n.rulesFor(ctx, alerts.KindInstanceDown, inst.ID)
+	owned = claimRules(owned, rules)
 
+	detail := downDetail(to, reason, inst.MemLimitMB)
 	n.emitExcept(ctx, &notify.Event{
 		ID:           store.NewID(),
 		Kind:         notify.KindInstanceDown,
 		OccurredAt:   now,
 		InstanceID:   inst.ID,
 		InstanceName: inst.Name,
-		Detail:       downDetail(to, reason),
+		Detail:       detail,
 	}, owned)
+	if len(rules) == 0 {
+		return
+	}
+	n.emitByRules(ctx, alerts.KindInstanceDown, inst.ID, func(p *alerts.ParamsWire) *notify.Event {
+		fields := shown(p, []shownField{
+			{alerts.FieldStatus, "Status", detail[0].Value},
+			{alerts.FieldReason, "Cause", detail[1].Value},
+			{alerts.FieldTime, "Time", formatInstant(now, p.Location())},
+		})
+		return &notify.Event{
+			Kind: notify.KindInstanceDown, InstanceID: inst.ID, InstanceName: inst.Name,
+			Detail: append(fields, detail[2]),
+		}
+	})
+}
+
+// claimRules adds to owned every destination rules send to themselves.
+func claimRules(owned map[string]bool, rules []store.AlertRule) map[string]bool {
+	if len(rules) == 0 {
+		return owned
+	}
+	if owned == nil {
+		owned = map[string]bool{}
+	}
+	for i := range rules {
+		for _, id := range rules[i].WebhookIDs {
+			owned[id] = true
+		}
+	}
+	return owned
 }
 
 // NotifyPowerCutSoon reports a planned power cut at powerOff, before which the servers named in
@@ -233,8 +270,9 @@ func failureReason(recorded string) string {
 }
 
 // downDetail explains a server that went down on its own: where it is now, the cause the
-// observer saw, and what the reader can do about it.
-func downDetail(to, reason string) []notify.Field {
+// observer saw, and what the reader can do about it. limitMB is the server's memory limit, 0 for
+// none.
+func downDetail(to, reason string, limitMB int) []notify.Field {
 	status, next := to, "Open the server in Valmin to see its current state."
 	switch to {
 	case string(instance.StateStopped):
@@ -247,9 +285,35 @@ func downDetail(to, reason string) []notify.Field {
 		status = "Running again"
 		next = "Anyone playing was disconnected. Check the server's console log for why it went down."
 	}
-	return []notify.Field{
-		{Name: "Status", Value: status},
-		{Name: "Cause", Value: asSentence(reason)},
-		{Name: "What to do", Value: next},
+	if reason == instance.ReasonOOMKilled {
+		next = memoryAdvice(limitMB)
 	}
+	return []notify.Field{
+		{Key: "status", Name: "Status", Value: status},
+		{Key: "reason", Name: "Cause", Value: stopCause(reason, limitMB)},
+		{Key: "what_to_do", Name: "What to do", Value: next},
+	}
+}
+
+// stopCause is the observer's reason for a stop as a sentence, in plain words for a server the
+// kernel killed for memory.
+func stopCause(reason string, limitMB int) string {
+	if reason != instance.ReasonOOMKilled {
+		return asSentence(reason)
+	}
+	if limitMB > 0 {
+		return fmt.Sprintf("The server used all %d MB its memory limit allows, so the kernel stopped it. "+
+			"The world may be damaged.", limitMB)
+	}
+	return "The host ran out of memory and the kernel stopped the server. The world may be damaged."
+}
+
+// memoryAdvice is what to do about a server the kernel killed for memory.
+func memoryAdvice(limitMB int) string {
+	if limitMB > 0 {
+		return "Raise the memory limit in the server's settings, then open the server in Valmin " +
+			"and choose Check this server."
+	}
+	return "Free memory on the host, for example by stopping a server you are not using, " +
+		"then open the server in Valmin and choose Check this server."
 }

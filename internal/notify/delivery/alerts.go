@@ -3,10 +3,12 @@ package delivery
 import (
 	"context"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/valminhq/valmin/internal/alerts"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -149,33 +151,32 @@ func alertEvent(
 	return e
 }
 
+// sentences is the headline of each condition kind whose headline names no job.
+var sentences = map[alerts.Kind]string{
+	alerts.KindLowDisk:         "The host is running low on disk space",
+	alerts.KindStaleBackup:     "Scheduled backups have stopped",
+	alerts.KindUncleanStop:     "The server stopped before its world finished saving",
+	alerts.KindRestartRequired: "The server needs a restart to apply a change",
+	alerts.KindUpdateAvailable: "A game update is available",
+	alerts.KindInstanceError:   "The server needs a check after a failure",
+	alerts.KindCrashLoop:       "The server keeps crashing",
+	alerts.KindBackupAttention: "The newest backup's world needs a look",
+	alerts.KindModsFailed:      "Mods failed to load",
+	alerts.KindModUpdates:      "Mod updates are available",
+}
+
 // summarize is the headline of one alert edge. The server is named beside the headline rather
 // than in it, so a sentence reads the same for every server.
 func summarize(c *store.AlertCondition, edge string) string {
 	job := jobLabel(c.Detail[alerts.DetailJob])
-	var sentence string
-	switch c.Kind {
-	case alerts.KindJobFailed.String():
+	kind, _ := alerts.ParseKind(c.Kind)
+	sentence, ok := sentences[kind]
+	switch {
+	case kind == alerts.KindJobFailed:
 		sentence = job + " failed"
-	case alerts.KindLowDisk.String():
-		sentence = "The host is running low on disk space"
-	case alerts.KindStaleBackup.String():
-		sentence = "Scheduled backups have stopped"
-	case alerts.KindUncleanStop.String():
-		sentence = "The server stopped before its world finished saving"
-	case alerts.KindRestartRequired.String():
-		sentence = "The server needs a restart to apply a change"
-	case alerts.KindUpdateAvailable.String():
-		sentence = "A game update is available"
-	case alerts.KindInstanceError.String():
-		sentence = "The server needs a check after a failure"
-	case alerts.KindCrashLoop.String():
-		sentence = "The server keeps crashing"
-	case alerts.KindJobStuck.String():
+	case kind == alerts.KindJobStuck:
 		sentence = job + " is taking unusually long"
-	case alerts.KindBackupAttention.String():
-		sentence = "The newest backup's world needs a look"
-	default:
+	case !ok:
 		sentence = upperFirst(strings.ReplaceAll(c.Kind, "_", " "))
 	}
 	if edge != store.EdgeResolved {
@@ -230,7 +231,7 @@ func conditionDetail(c *store.AlertCondition, edge string, loc *time.Location) [
 		}
 		next = "Stop the server, then update it from its page in Valmin."
 	case alerts.KindInstanceError.String():
-		next = "Open the server in Valmin and choose Check this server. Its last failed job has the cause."
+		fields, next = errorDetail(d)
 	case alerts.KindCrashLoop.String():
 		fields = []notify.Field{{
 			Key:   "stops",
@@ -249,11 +250,43 @@ func conditionDetail(c *store.AlertCondition, edge string, loc *time.Location) [
 		next = "Check the server log around the time of that backup. If the world is damaged, " +
 			"restore the newest backup without a warning; if the change was intended, " +
 			"acknowledge the warning on the Backups page."
+	case alerts.KindModsFailed.String(), alerts.KindModUpdates.String():
+		fields, next = modDetail(c.Kind, d)
 	}
 	if edge != store.EdgeResolved && next != "" {
 		fields = append(fields, notify.Field{Key: "what_to_do", Name: "What to do", Value: next})
 	}
 	return fields
+}
+
+// errorDetail is the cause and next step of a server parked in error. The observer's reason is
+// the cause when there is one; otherwise the server's last failed job has it.
+func errorDetail(d map[string]string) (fields []notify.Field, next string) {
+	reason := d[alerts.DetailReason]
+	if reason == "" {
+		return nil, "Open the server in Valmin and choose Check this server. Its last failed job has the cause."
+	}
+	limit, _ := strconv.Atoi(d[alerts.DetailMemLimit])
+	fields = []notify.Field{{Key: "reason", Name: "Cause", Value: stopCause(reason, limit)}}
+	if reason == instance.ReasonOOMKilled {
+		return fields, memoryAdvice(limit)
+	}
+	return fields, "Open the server in Valmin and choose Check this server."
+}
+
+// modDetail is the fields and next step of a mod condition: mods that failed to load, or mod
+// updates waiting.
+func modDetail(kind string, d map[string]string) (fields []notify.Field, next string) {
+	if kind == alerts.KindModsFailed.String() {
+		return []notify.Field{
+			{Key: "mods", Name: "Mods", Value: d[alerts.DetailMods]},
+			{Key: "reason", Name: "Reason", Value: d[alerts.DetailReason]},
+		}, "Open the server's Mods page, update or disable the named mods, then restart the server."
+	}
+	return []notify.Field{
+		{Key: "count", Name: "Updates", Value: d[alerts.DetailCount]},
+		{Key: "mods", Name: "Mods", Value: d[alerts.DetailMods]},
+	}, "Review the updates on the server's Mods page. Test them on a copy first if friends are playing."
 }
 
 // instanceNames maps instance ids to names for the notification body. A read failure costs the

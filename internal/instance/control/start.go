@@ -32,6 +32,8 @@ type Starter struct {
 	ReadySettle      time.Duration
 	ReadyTimeout     time.Duration
 	PluginLoadWindow time.Duration
+	// AfterStart runs once a start or restart has committed the server as running. It may be nil.
+	AfterStart func(context.Context)
 }
 
 func (s *Starter) Run(instanceID, containerID string) jobs.Runner {
@@ -86,6 +88,7 @@ func (s *Starter) startAndAwaitReady(
 		OnFinish: func(ctx context.Context, tx *sql.Tx) error {
 			return instance.FinishStartTx(ctx, tx, instanceID, instance.StateStarting, instance.StateRunning)
 		},
+		AfterFinish: s.AfterStart,
 	}
 }
 

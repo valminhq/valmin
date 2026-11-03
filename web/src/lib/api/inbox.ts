@@ -20,7 +20,9 @@ export type InboxKind =
 	| 'instance_error'
 	| 'crash_loop'
 	| 'job_stuck'
-	| 'backup_attention';
+	| 'backup_attention'
+	| 'mods_failed'
+	| 'mod_updates';
 
 interface Page<T> {
 	items: T[];

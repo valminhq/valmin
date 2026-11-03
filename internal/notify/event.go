@@ -46,6 +46,8 @@ var (
 	// KindServerStarted and KindServerStopped report a start or stop the panel made.
 	KindServerStarted = Kind{"server_started"}
 	KindServerStopped = Kind{"server_stopped"}
+	// KindGameUpdated reports a new game build or mod updates installed on a server.
+	KindGameUpdated = Kind{"game_updated"}
 	// KindAlertOpened and KindAlertResolved are the two edges of an operational condition. One
 	// kind per edge rather than per condition: the condition names itself in Summary and
 	// Detail, and a receiver filtering on kind wants "something broke" and "it cleared".
@@ -66,7 +68,7 @@ func ParseKind(name string) (Kind, bool) {
 	for _, k := range []Kind{
 		KindTest, KindInstanceDown, KindUpdateAvailable, KindBackupFailed,
 		KindAlertOpened, KindAlertResolved, KindPowerCutSoon,
-		KindServerStarted, KindServerStopped,
+		KindServerStarted, KindServerStopped, KindGameUpdated,
 		KindPlayerJoined, KindPlayerLeft, KindBossDefeated, KindBossFightStarted, KindBossFightEnded,
 		KindRaidStarted, KindRaidEnded,
 	} {
@@ -88,6 +90,7 @@ var headline = map[Kind]string{
 	KindPowerCutSoon:     "Power cut soon: servers are stopping",
 	KindServerStarted:    "Server started",
 	KindServerStopped:    "Server stopped",
+	KindGameUpdated:      "Server updated",
 	KindPlayerJoined:     "Player joined",
 	KindPlayerLeft:       "Player left",
 	KindBossDefeated:     "Boss defeated",
@@ -108,6 +111,7 @@ var accent = map[Kind]int{
 	KindPowerCutSoon:     0xF1C40F,
 	KindServerStarted:    0x2ECC71,
 	KindServerStopped:    0x95A5A6,
+	KindGameUpdated:      0x5865F2,
 	KindPlayerJoined:     0x2ECC71,
 	KindPlayerLeft:       0x95A5A6,
 	KindBossDefeated:     0xF1C40F,

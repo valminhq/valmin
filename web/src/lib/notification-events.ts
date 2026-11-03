@@ -82,6 +82,38 @@ export const PANEL_EVENTS: PanelEvent[] = [
 		}
 	},
 	{
+		kind: 'instance_down',
+		group: 'Server status',
+		label: 'Stopped unexpectedly',
+		when: 'A server stopped or restarted on its own: a crash, an out-of-memory kill or a host reboot.',
+		headline: 'Server stopped unexpectedly',
+		accent: ALERT,
+		template: '**Status:** {status}\n**Cause:** {reason}\n**What to do:** {what_to_do}',
+		placeholders: ['status', 'reason', 'what_to_do', 'time', 'server', 'event'],
+		sample: {
+			status: 'Running again',
+			reason: 'Container exited.',
+			what_to_do:
+				'Anyone playing was disconnected. Check the server’s console log for why it went down.',
+			time: SERVER_TIME
+		}
+	},
+	{
+		kind: 'game_updated',
+		group: 'Server status',
+		label: 'Server updated',
+		when: 'A new game build or tested mod updates were installed on a server.',
+		headline: 'Server updated',
+		accent: '#5865F2',
+		template: '**Game build:** {build}\n**Mods updated:** {mods}\n**Updated:** {time}',
+		placeholders: ['build', 'mods', 'time', 'server', 'event'],
+		sample: {
+			build: '20012345',
+			mods: 'ValheimModding-Jotunn 2.20.2',
+			time: SERVER_TIME
+		}
+	},
+	{
 		kind: 'power_cut',
 		group: 'Server status',
 		label: 'Power cut soon',
@@ -110,7 +142,13 @@ export const PANEL_EVENTS: PanelEvent[] = [
 		'Problems',
 		'Server error',
 		'The server needs a check after a failure',
-		[],
+		[
+			[
+				'reason',
+				'Cause',
+				'The server used all 4096 MB its memory limit allows, so the kernel stopped it.'
+			]
+		],
 		'Open the server in Valmin and choose Check this server. Its last failed job has the cause.'
 	),
 	condition(
@@ -145,6 +183,17 @@ export const PANEL_EVENTS: PanelEvent[] = [
 		'Check the server log around the time of that backup. If the world is damaged, restore the newest backup without a warning; if the change was intended, acknowledge the warning on the Backups page.'
 	),
 	condition(
+		'mods_failed',
+		'Problems',
+		'Mods failed to load',
+		'Mods failed to load',
+		[
+			['mods', 'Mods', 'Jotunn, EpicLoot (skipped)'],
+			['reason', 'Reason', 'Error loading [Jotunn 2.20.1]: missing dependency']
+		],
+		'Open the server’s Mods page, update or disable the named mods, then restart the server.'
+	),
+	condition(
 		'job_stuck',
 		'Problems',
 		'Job stuck',
@@ -162,6 +211,17 @@ export const PANEL_EVENTS: PanelEvent[] = [
 			['available', 'Available build', '20012345']
 		],
 		'Stop the server, then update it from its page in Valmin.'
+	),
+	condition(
+		'mod_updates',
+		'Maintenance',
+		'Mod updates',
+		'Mod updates are available',
+		[
+			['count', 'Updates', '2'],
+			['mods', 'Mods', 'RandyKnapp-EpicLoot 0.10.3 → 0.10.4, ValheimModding-Jotunn 2.20.1 → 2.20.2']
+		],
+		'Review the updates on the server’s Mods page. Test them on a copy first if friends are playing.'
 	),
 	condition(
 		'restart_required',
@@ -238,13 +298,17 @@ export const TIMED: RuleKind[] = [
 	'server_started',
 	'server_stopped',
 	'stale_backup',
-	'backup_attention'
+	'backup_attention',
+	'instance_down',
+	'game_updated'
 ];
 /** Whether a kind is a condition, sent when it opens and edited when it clears, rather than a
  * one-off event. */
 export const isCondition = (kind: RuleKind) =>
 	PANEL_EVENTS.some((e) => e.kind === kind) &&
-	!['server_started', 'server_stopped', 'power_cut'].includes(kind);
+	!['server_started', 'server_stopped', 'power_cut', 'instance_down', 'game_updated'].includes(
+		kind
+	);
 
 /** alerts.Params.Defaults: what an empty threshold means. */
 export const DEFAULT_CRASH_COUNT = 3;

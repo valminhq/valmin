@@ -28,6 +28,8 @@ var severe = map[string]bool{
 	alerts.KindLowDisk.String():     true,
 	alerts.KindUncleanStop.String(): true,
 	alerts.KindCrashLoop.String():   true,
+	// A world saved without its mods loses what they added.
+	alerts.KindModsFailed.String(): true,
 }
 
 // inbox is GET /instances/inbox: every open condition across the instances the caller can see.

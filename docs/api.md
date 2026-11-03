@@ -1136,8 +1136,9 @@ A rule has `condition_kind`, `instance_id` (`null` for every server), `webhook_i
 must be shared or belong to the rule's server, so a rule for every server names only shared
 ones; any other is `422` on `webhook_ids`, worded as if it did not exist. The condition kinds are
 `job_failed`, `job_stuck`, `crash_loop`, `unclean_stop`, `instance_error`,
-`restart_required`, `update_available`, `stale_backup`, `backup_attention` and `low_disk`, plus the one-off
-events `server_started`, `server_stopped` and `power_cut`, and the game events below.
+`restart_required`, `update_available`, `stale_backup`, `backup_attention`, `mods_failed`,
+`mod_updates` and `low_disk`, plus the one-off events `server_started`, `server_stopped`,
+`instance_down`, `game_updated` and `power_cut`, and the game events below.
 
 Three events are sent without any rule to every enabled destination with `catch_all` on that
 serves the event's server, which is every shared destination and the server's own:
@@ -1147,13 +1148,18 @@ build; servers on another branch are left out; it concerns no one server, so it 
 shared destinations only), and `backup_failed`. Alert rules (`/api/v1/admin/alert-rules`) route a condition kind
 to chosen destinations and send `alert_opened` and `alert_resolved`.
 
-Three `condition_kind` values are one-off events rather than conditions, sent only to the
+Five `condition_kind` values are one-off events rather than conditions, sent only to the
 destinations of an enabled rule for them. `server_started` sends `server_started` when a
 start or restart leaves a server running, once its log says the world loaded and, on
 crossplay, once it has a join code; it is sent without them after 15 minutes.
 `server_stopped` sends `server_stopped` when the panel stops a server, by hand, by auto-stop or for a power cut, with a `Reason` detail; a
 server that stops on its own is `instance_down`. Rules of the old `auto_stopped` kind became
-`server_stopped` rules. `power_cut` (host-wide, so its rule names no server) sends `power_cut_soon` once per planned power cut, when players are warned (`warn_at`), with
+`server_stopped` rules. `instance_down` sends `instance_down` when a server stops or restarts
+on its own, as the built-in event below does; a destination the rule names gets the rule's
+message instead of the built-in one. `game_updated` sends `game_updated` when a game update
+installs a build other than the one the server ran, with `build`, never for a copy made to test
+updates, and when applying tested updates updates mods, with
+`mods`; an apply that also installs a build sends the build in a message of its own. `power_cut` (host-wide, so its rule names no server) sends `power_cut_soon` once per planned power cut, when players are warned (`warn_at`), with
 the cut time, the stop time and the running servers. Inside a rule's quiet hours they are
 not sent at all. Alerts held during a
 rule's quiet hours are sent when the window ends. A rule sends `alert_resolved` only for an
@@ -1195,12 +1201,16 @@ kept. The names each kind fills:
 | `unclean_stop`     | `job`, `what_to_do`                                           |
 | `restart_required` | `what_to_do`                                                  |
 | `update_available` | `installed`, `available`, `what_to_do`                        |
-| `instance_error`   | `what_to_do`                                                  |
+| `instance_error`   | `reason`, `what_to_do`                                        |
 | `crash_loop`       | `stops`, `what_to_do`                                         |
 | `job_stuck`        | `running`, `what_to_do`                                       |
 | `backup_attention` | `backup`, `findings`, `what_to_do`                            |
+| `mods_failed`      | `mods`, `reason`, `what_to_do`                                |
+| `mod_updates`      | `count`, `mods`, `what_to_do`                                 |
 | `server_started`   | `server_name`, `world`, `join_code`, `port`, `time`           |
 | `server_stopped`   | `reason`, `server_name`, `world`, `time`                      |
+| `instance_down`    | `status`, `reason`, `what_to_do`, `time`                      |
+| `game_updated`     | `build`, `mods`, `time`                                       |
 | `power_cut`        | `power_off`, `stop_at`, `servers`                             |
 | Game events        | The event's own fields, as listed for ValminEye above         |
 
@@ -1220,6 +1230,22 @@ embed then has no fields.
 counted on its own clock and days, since the last consistent archive; a hot copy does not count. On a server that backs up
 on restart, its restart schedule counts too, while its latest restart succeeded. A failed
 restart raises `job_failed` instead.
+
+`instance_error` carries the observer's `reason` when the server was parked for something it
+saw, such as `container was killed by the out-of-memory killer; the world may be damaged`, and
+no job finished since; an error a job left behind is that job's `job_failed`. The detail also
+holds `MemLimitMB`, the server's memory limit, 0 for none.
+
+`mods_failed` opens when the BepInEx log of a modded server's latest boot names mods it could
+not load, with `Mods` (a dependency skipped because another mod failed reads `(skipped)`) and
+the loader's `Reason` for the first one; it resolves on a boot that loads them all. A successful
+start or restart runs a scan at once, unless one is already running; the five-minute scan
+follows either way. It is
+`critical` in the inbox.
+
+`mod_updates` opens when the mod catalogue has newer versions of a server's mods, with
+`Count` and `Mods` (`Name 1.2.0 → 1.3.0`), and resolves once none are pending. It is evaluated
+only for servers an enabled `mod_updates` rule covers, so without a rule it never appears.
 
 `backup_attention` opens when a server's newest archive other than a snapshot was flagged by
 the [world check](operations.md#world-check), and resolves when a newer archive passes or the
