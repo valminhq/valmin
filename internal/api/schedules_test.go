@@ -3,7 +3,6 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -168,9 +167,7 @@ func TestPruneAppliesRetentionAndIsIdempotent(t *testing.T) {
 		t.Fatalf("catalogue holds %d archives after a prune to keep_cold = 2, want 2", got)
 	}
 	for _, gone := range []string{"b-1", "b-2"} {
-		if _, err := os.Stat(filepath.Join(root, "backups", "inst-a", gone+".tar.gz")); !os.IsNotExist(err) {
-			t.Errorf("%s survived the prune on disk", gone)
-		}
+		waitArchiveGone(t, filepath.Join(root, "backups", "inst-a", gone+".tar.gz"))
 	}
 
 	runPruneJob(t, rt, admin)

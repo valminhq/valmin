@@ -109,9 +109,7 @@ func assertArchiveRemoved(t *testing.T, db *store.DB, id string, archive store.B
 	if err != nil || row != nil {
 		t.Fatalf("pruned archive %s remains in catalogue: row=%v err=%v", archive.ID, row, err)
 	}
-	if _, err := os.Stat(archive.Path); !os.IsNotExist(err) {
-		t.Fatalf("pruned archive %s remains on disk: %v", archive.ID, err)
-	}
+	waitArchiveGone(t, archive.Path)
 }
 
 func TestRestoreCorruptedWorldThroughAPI(t *testing.T) {
