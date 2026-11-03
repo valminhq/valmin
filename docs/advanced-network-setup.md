@@ -285,6 +285,10 @@ which is what a dropped connection looks like.
 Find another server's IP with
 `docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' <container>`.
 
+**Diagnostics → Run deep checks** runs the metadata probe for you, and a LAN probe once you
+set [`VALMIN_GAME_LAN_PROBE_ADDRESS`](configuration.md#daemon-settings); with these rules
+in place both read as no answer.
+
 Then check that nothing Valmin does broke:
 
 - Console commands still work on a running server.

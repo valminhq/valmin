@@ -66,13 +66,15 @@ func run(ctx context.Context, jh *jobs.Handle, s *Submission) jobs.Outcome {
 	jh.Progress(ctx, 10, "Verifying host_data_root")
 	record(diag.HostRootKey, config.VerifyHostRoot(ctx, rt, cfg))
 
-	jh.Progress(ctx, 35, "Verifying the data root")
+	jh.Progress(ctx, 30, "Verifying the data root")
 	record(diag.DataRootKey, config.VerifyDataRoot(ctx, cfg))
 
-	jh.Progress(ctx, 55, "Verifying the game network")
+	jh.Progress(ctx, 45, "Verifying the game network")
 	record(diag.GameNetworkKey, config.VerifyGameNetwork(ctx, rt, cfg, command.DefaultRCONPort))
 
-	jh.Progress(ctx, 75, "Asking Steam for the public build")
+	probeEgresses(ctx, jh, rt, cfg, observed)
+
+	jh.Progress(ctx, 80, "Asking Steam for the public build")
 	steamBuild, steamErr := instance.QueryBuilds(ctx, rt, cfg.Game.SteamCMDImage, cfg.Data.HostRoot)
 	if steamErr != nil {
 		jh.Log(steamErr.Error())

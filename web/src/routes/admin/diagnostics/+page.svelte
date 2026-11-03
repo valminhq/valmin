@@ -200,7 +200,8 @@
 
 		<p class="text-sm text-muted-foreground">
 			The deep checks start a throwaway container each to re-prove the host data root, the game
-			network and Steam, so they run as a job rather than on page load.
+			network and Steam, and to test whether game servers can reach the cloud metadata service or
+			your LAN, so they run as a job rather than on page load.
 		</p>
 
 		{#if jobId}
@@ -277,6 +278,12 @@
 								{/if}
 								{#if check.remedy}
 									<p class="text-sm text-muted-foreground">{check.remedy}</p>
+								{/if}
+								{#if check.docs}
+									<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+									<a class="text-sm underline" href={check.docs} target="_blank" rel="noreferrer"
+										>How to block this</a
+									>
 								{/if}
 							</div>
 						{/each}

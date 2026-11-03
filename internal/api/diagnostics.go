@@ -215,11 +215,13 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 // recordedChecks reads the outcomes the startup gate and the diagnose job stamped. One that
 // cannot be read is left out, and its check reads as not recorded.
 func (d *Diagnostics) recordedChecks(ctx context.Context) map[string]diag.Observation {
-	out := make(map[string]diag.Observation, 3)
+	out := make(map[string]diag.Observation, 5)
 	for key, id := range map[string]string{
-		diag.HostRootKey:    diag.CheckHostRoot,
-		diag.DataRootKey:    diag.CheckDataRootWrite,
-		diag.GameNetworkKey: diag.CheckGameNetwork,
+		diag.HostRootKey:       diag.CheckHostRoot,
+		diag.DataRootKey:       diag.CheckDataRootWrite,
+		diag.GameNetworkKey:    diag.CheckGameNetwork,
+		diag.MetadataEgressKey: diag.CheckMetadataEgress,
+		diag.LANEgressKey:      diag.CheckLANEgress,
 	} {
 		var obs diag.Observation
 		found, err := d.Instances.DB.KVGet(ctx, key, &obs)

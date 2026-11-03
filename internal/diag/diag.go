@@ -48,6 +48,10 @@ const (
 	HostRootKey    = "diag_host_data_root"
 	DataRootKey    = "diag_data_root"
 	GameNetworkKey = "diag_game_network"
+	// MetadataEgressKey and LANEgressKey hold the deep job's reachability probes, which record
+	// their own Status.
+	MetadataEgressKey = "diag_egress_metadata"
+	LANEgressKey      = "diag_egress_lan"
 )
 
 // Check identifiers. They are stable: the SPA groups on them and a bundle is compared
@@ -63,6 +67,8 @@ const (
 	CheckIdentity        = "storage.identity"
 	CheckHostRoot        = "storage.host_data_root"
 	CheckGameNetwork     = "network.game_network"
+	CheckMetadataEgress  = "network.metadata_egress"
+	CheckLANEgress       = "network.lan_egress"
 	CheckThunderstore    = "network.thunderstore"
 	CheckHexium          = "network.hexium"
 	CheckSteam           = "network.steam"
@@ -91,7 +97,9 @@ type Check struct {
 	// paths and hostnames, so the support bundle omits it; the page shows it.
 	Diagnostic string `json:"diagnostic,omitempty"`
 	// Remedy is what to do about it, and is empty on a passing check.
-	Remedy               string     `json:"remedy,omitempty"`
+	Remedy string `json:"remedy,omitempty"`
+	// Docs links to the guide that explains the remedy, where there is one.
+	Docs                 string     `json:"docs,omitempty"`
 	MeasuredAt           *time.Time `json:"measured_at,omitempty"`
 	LastSuccessfulSyncAt *time.Time `json:"last_successful_sync_at,omitempty"`
 }
@@ -103,6 +111,11 @@ type Observation struct {
 	CheckedAt time.Time `json:"checked_at"`
 	// Source is who recorded it; empty reads as SourceStartup.
 	Source Source `json:"source,omitempty"`
+	// Status is set by a probe that grades its own outcome, with Detail as its finding,
+	// Diagnostic as verbatim output, and Target as the address it probed.
+	Status     Status `json:"status,omitempty"`
+	Diagnostic string `json:"diagnostic,omitempty"`
+	Target     string `json:"target,omitempty"`
 }
 
 // Instance is one server's diagnosable state. Nothing here is console content: those
@@ -392,7 +405,14 @@ func (in *Input) network(ctx context.Context) []Check {
 		wg.Go(func() { registries[i] = in.registry(ctx, &in.Registries[i]) })
 	}
 	wg.Wait()
-	checks := []Check{gameNetwork.Check, steam.Check}
+	metadata := in.probed(CheckMetadataEgress, "Network", "Cloud metadata from game servers", "")
+	lan := in.probed(CheckLANEgress, "Network", "LAN from game servers", in.Config.Game.LANProbeAddress)
+	if in.Config.Game.LANProbeAddress == "" {
+		lan = in.check(CheckLANEgress, "Network", "LAN from game servers", SourceConfig)
+		lan.unknown("Not checked. Set game.lan_probe_address to an address on your LAN, such as " +
+			"the router's IP and port 80, to test it.")
+	}
+	checks := []Check{gameNetwork.Check, metadata.Check, lan.Check, steam.Check}
 	for _, r := range registries {
 		checks = append(checks, r...)
 	}
@@ -535,6 +555,31 @@ func (in *Input) recorded(id, group, title, remedy string) *builder {
 	}
 	c.fail("The last run of this check failed.", remedy)
 	c.verbatim(obs.Detail)
+	return c
+}
+
+// isolationDocs is the guide to firewalling game servers off private addresses.
+const isolationDocs = "https://github.com/valminhq/valmin/blob/main/docs/advanced-network-setup.md" +
+	"#keep-game-servers-off-your-lan"
+
+// probed renders a reachability probe the diagnose job graded itself. A non-empty target must
+// match the address that was probed, so changing the setting does not keep an old answer. A
+// reachable address links to the firewall guide.
+func (in *Input) probed(id, group, title, target string) *builder {
+	c := in.check(id, group, title, SourceJob)
+	obs, found := in.Recorded[id]
+	if !found || obs.Status == "" || (target != "" && obs.Target != target) {
+		c.unknown("Not recorded yet.")
+		c.Remedy = "Run the deep checks."
+		return c
+	}
+	c.at(obs.CheckedAt)
+	c.Status, c.Detail = obs.Status, obs.Detail
+	c.verbatim(obs.Diagnostic)
+	if obs.Status == StatusWarn {
+		c.Remedy = "Firewall game servers off private addresses, or accept that mods can reach it."
+		c.Docs = isolationDocs
+	}
 	return c
 }
 

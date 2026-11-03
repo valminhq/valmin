@@ -66,6 +66,7 @@ override should name a digest too.
 | `VALMIN_GAME_STEAMCMD_IMAGE`                | Download helper image; `steamcmd/steamcmd:latest`.                                 |
 | `VALMIN_GAME_NETWORK`                       | Docker network shared by game containers and the daemon; `valmin-games`.           |
 | `VALMIN_GAME_PUBLIC_IP_URL`                 | Service that answers with the host's public IP; `https://api.ipify.org`. See [reachability](#check-that-players-can-reach-a-server). |
+| `VALMIN_GAME_LAN_PROBE_ADDRESS`             | IPv4 address and port on your LAN, such as `192.168.1.1:80`, that the deep diagnostics try to reach from a game server; empty. See [the diagnostics page](troubleshooting.md#check-the-diagnostics-page). |
 | `VALMIN_GAME_DEFAULT_MEM_MB`                | Default per-server memory limit; `4096`.                                           |
 | `VALMIN_GAME_STOP_TIMEOUT`                  | Graceful stop timeout; `120s`, also the minimum.                                   |
 | `VALMIN_GAME_LOG_PATTERNS`                  | Log-line pattern overrides; empty. See [log patterns](#override-log-patterns).     |

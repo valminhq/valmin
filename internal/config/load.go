@@ -435,7 +435,23 @@ func validateGame(cfg *Config) []error {
 			c.failf("game.public_ip_url must be an absolute http or https URL, got %q", raw)
 		}
 	}
+	if raw := cfg.Game.LANProbeAddress; raw != "" {
+		if _, err := ParseLANProbeAddress(raw); err != nil {
+			c.failf("game.lan_probe_address: %v", err)
+		}
+	}
 	return c
+}
+
+// ParseLANProbeAddress reads game.lan_probe_address: a unicast IPv4 address off the probe's
+// own loopback and a non-zero port, and nothing else, since the probe passes it to a shell.
+func ParseLANProbeAddress(raw string) (netip.AddrPort, error) {
+	addr, err := netip.ParseAddrPort(raw)
+	ip := addr.Addr()
+	if err != nil || !ip.Is4() || ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() || addr.Port() == 0 {
+		return netip.AddrPort{}, fmt.Errorf("want an IPv4 address and port such as 192.168.1.1:80, got %q", raw)
+	}
+	return addr, nil
 }
 
 // dockerNetworkName is what Docker accepts as a network name. A rejected name would otherwise
