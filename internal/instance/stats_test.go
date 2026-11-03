@@ -2,6 +2,7 @@ package instance
 
 import (
 	"math"
+	"strconv"
 	"testing"
 	"time"
 
@@ -72,6 +73,73 @@ func TestCountersGoingBackwardsAreNotAPercentage(t *testing.T) {
 	if got.CPUPct != nil {
 		t.Errorf("reset counters produced cpu_pct = %v, want nil", *got.CPUPct)
 	}
+}
+
+// Network rates are deltas of cumulative counters over the time between samples: unknown
+// without a predecessor and across a restart that reset the counters, zero when idle.
+func TestNetworkRatesAreDeltasOverTime(t *testing.T) {
+	start := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	steps := []struct {
+		name           string
+		rx, tx         uint64
+		after          time.Duration
+		wantRx, wantTx *float64
+	}{
+		{name: "first sample has no predecessor", rx: 10_000, tx: 4_000},
+		{
+			name:   "steady traffic",
+			rx:     30_000,
+			tx:     5_000,
+			after:  2 * time.Second,
+			wantRx: ptr(10_000.0),
+			wantTx: ptr(500.0),
+		},
+		{name: "idle is zero", rx: 30_000, tx: 5_000, after: 2 * time.Second, wantRx: ptr(0.0), wantTx: ptr(0.0)},
+		{name: "restart reset the counters", rx: 1_000, tx: 200, after: 2 * time.Second},
+		{
+			name:   "rates resume after the reset",
+			rx:     5_000,
+			tx:     1_200,
+			after:  4 * time.Second,
+			wantRx: ptr(1_000.0),
+			wantTx: ptr(250.0),
+		},
+		{name: "no time passed", rx: 6_000, tx: 1_300},
+	}
+	s := newSampler()
+	at := start
+	for _, step := range steps {
+		at = at.Add(step.after)
+		got := s.sample(runtime.Stats{RxBytes: step.rx, TxBytes: step.tx}, at)
+		if !sameRate(got.RxBytesPerSecond, step.wantRx) || !sameRate(got.TxBytesPerSecond, step.wantTx) {
+			t.Errorf(
+				"%s: rates = %s, %s, want %s, %s",
+				step.name,
+				rateText(
+					got.RxBytesPerSecond,
+				),
+				rateText(got.TxBytesPerSecond),
+				rateText(step.wantRx),
+				rateText(step.wantTx),
+			)
+		}
+	}
+}
+
+func ptr(v float64) *float64 { return &v }
+
+func sameRate(got, want *float64) bool {
+	if got == nil || want == nil {
+		return got == want
+	}
+	return math.Abs(*got-*want) < 1e-9
+}
+
+func rateText(v *float64) string {
+	if v == nil {
+		return "nil"
+	}
+	return strconv.FormatFloat(*v, 'f', -1, 64)
 }
 
 // TestMemoryPercentageIsAgainstTheContainersLimit is E11. The runtime adapter has already

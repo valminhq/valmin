@@ -381,7 +381,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/update-test/apply`       | Install the tested updates on the server; returns a job.              |
 | `GET`    | `/instances/{id}/logs`                    | Recent game logs.                                                     |
 | `GET`    | `/instances/{id}/diagnosis`               | Why the current start failed or is degraded; needs `console.read`.    |
-| `GET`    | `/instances/{id}/stats`                   | Current resource sample. Unknown values can be null.                  |
+| `GET`    | `/instances/{id}/stats`                   | Current resource sample. Unknown values can be null; see [stats samples](#stats-samples). |
 | `GET`    | `/instances/{id}/disk`                    | Disk use by category and free space; needs `stats.read`.              |
 | `GET`    | `/instances/{id}/operation`               | The unfinished create or import operation, or `null`.                 |
 | `POST`   | `/instances/{id}/operation/resume`        | Continue an interrupted operation; returns a job.                     |
@@ -1475,6 +1475,22 @@ A session holds at most 8 sockets. The ninth closes that session's oldest with c
 which also ends a connection for a policy violation, such as a bad origin or CSRF token. Do
 not reconnect after `1008`. An account holds at most 32 sockets across all its sessions,
 and past that its oldest closes the same way.
+
+### Stats samples
+
+`GET /instances/{id}/stats` and the `instance.{id}.stats` topic carry the same sample,
+taken every two seconds while the server runs:
+
+| Field | Meaning |
+| --- | --- |
+| `ts` | When the sample was taken. |
+| `cpu_pct` | CPU use since the previous sample, 100 per core; null on the first sample. |
+| `mem_bytes`, `mem_limit`, `mem_pct` | Memory in use, the container's limit, and their ratio; `mem_pct` is null without a limit. |
+| `rx_bytes_per_second`, `tx_bytes_per_second` | Network traffic received and sent since the previous sample, over every interface; null on the first sample and after a restart resets the counters. |
+| `players` | Current player count, or null when the panel cannot tell. |
+
+The HTTP read adds `available`, false with every other field null while nothing is
+sampled; the socket message adds `type` `stats` and `instance`.
 
 ## Health and public status
 

@@ -207,6 +207,9 @@ type statsView struct {
 	MemBytes  *uint64    `json:"mem_bytes"`
 	MemLimit  *uint64    `json:"mem_limit"`
 	MemPct    *float64   `json:"mem_pct"`
+	// The network rates are null until a second sample, and after a restart reset the counters.
+	RxBytesPerSecond *float64 `json:"rx_bytes_per_second"`
+	TxBytesPerSecond *float64 `json:"tx_bytes_per_second"`
 	// Players is null whenever the panel cannot say, on this route as on the socket (E7).
 	Players *int `json:"players"`
 }
@@ -252,6 +255,9 @@ func (h *Instances) stats(w http.ResponseWriter, r *http.Request) {
 		MemLimit:  &latest.MemLimit,
 		MemPct:    latest.MemPct,
 		Players:   latest.Players,
+
+		RxBytesPerSecond: latest.RxBytesPerSecond,
+		TxBytesPerSecond: latest.TxBytesPerSecond,
 	})
 }
 

@@ -157,6 +157,13 @@ func TestStatsAreForwardedWithTheirNulls(t *testing.T) {
 		if got.Players != nil {
 			t.Errorf("players = %v, want null: the fake logs no player lines (E7)", *got.Players)
 		}
+		if got.RxBytesPerSecond != nil || got.TxBytesPerSecond != nil {
+			t.Errorf(
+				"network rates = %v / %v on the first sample, want null",
+				got.RxBytesPerSecond,
+				got.TxBytesPerSecond,
+			)
+		}
 		if got.MemBytes != 1<<20 || got.MemLimit != 1<<30 {
 			t.Errorf("memory = %d / %d", got.MemBytes, got.MemLimit)
 		}

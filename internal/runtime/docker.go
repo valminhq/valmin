@@ -311,13 +311,25 @@ func (d *Docker) Stats(ctx context.Context, id string) (Stats, error) {
 		return Stats{}, fmt.Errorf("decode stats of container %s: %w", id, err)
 	}
 
+	rx, tx := networkTotals(raw.Networks)
 	return Stats{
 		CPUNanos:    raw.CPUStats.CPUUsage.TotalUsage,
 		SystemNanos: raw.CPUStats.SystemUsage,
 		OnlineCPUs:  raw.CPUStats.OnlineCPUs,
 		MemBytes:    workingSet(raw.MemoryStats),
 		MemLimit:    raw.MemoryStats.Limit,
+		RxBytes:     rx,
+		TxBytes:     tx,
 	}, nil
+}
+
+// networkTotals sums received and sent bytes over a container's interfaces.
+func networkTotals(networks map[string]container.NetworkStats) (rx, tx uint64) {
+	for _, n := range networks {
+		rx += n.RxBytes
+		tx += n.TxBytes
+	}
+	return rx, tx
 }
 
 // workingSet subtracts the page cache term, which is what docker stats reports. The

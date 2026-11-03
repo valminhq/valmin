@@ -135,8 +135,10 @@ func TestStatsOfAStoppedInstanceReportsUnavailableRatherThanZeros(t *testing.T) 
 		t.Errorf("a stopped instance reported numbers: %+v", got)
 	}
 	// And the field says null rather than being absent, on this route as on the socket (E7).
-	if !strings.Contains(rec.Body.String(), `"players":null`) {
-		t.Errorf("players is not reported as null: %s", rec.Body)
+	for _, field := range []string{`"players":null`, `"rx_bytes_per_second":null`, `"tx_bytes_per_second":null`} {
+		if !strings.Contains(rec.Body.String(), field) {
+			t.Errorf("%s is not in the body: %s", field, rec.Body)
+		}
 	}
 }
 

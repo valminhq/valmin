@@ -315,3 +315,40 @@ If you added the ufw rules, delete them with `sudo ufw delete deny from <subnet>
 If you loaded `br_netfilter` for [traffic between game servers](#between-game-servers),
 remove `/etc/modules-load.d/br_netfilter.conf` and `/etc/sysctl.d/90-br-netfilter.conf`;
 it unloads at the next reboot.
+
+## See where a game server sends traffic
+
+The **Network** line in a server's **Resources** card shows how much it sends and receives,
+not where. To find out, run these on the host as root; Valmin calls none of them.
+Packet-capture tools such as `nethogs`, `iftop` or `tcpdump` work too, but need root on the
+host for the same reason.
+<!-- UNVERIFIED: every command and output claim in this section. Run each against a running server, and conntrack while a player is connected. -->
+
+Find the server's container and its address on the game network:
+
+```sh
+docker ps --filter label=io.valmin.managed=true --format '{{.Names}}'
+C=<container name>
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$C"
+```
+
+List its open connections, running the host's `ss` inside the server's network:
+
+```sh
+sudo nsenter -t "$(docker inspect -f '{{.State.Pid}}' "$C")" -n ss -tunp
+```
+
+A connection to an address you do not recognise, while nobody plays, is worth a look.
+The game's own UDP port has no fixed peer, so players do not appear here as connections.
+
+Count bytes per destination with connection tracking, from the `conntrack` package:
+
+```sh
+sudo sysctl -w net.netfilter.nf_conntrack_acct=1
+sudo conntrack -L -s <container IP> -o extended
+```
+
+In each entry, the first `bytes=` is what the server sent and the second what it
+received. Only connections that start after you turn accounting on are counted, and the
+setting lasts until a reboot; turn it off again with
+`sudo sysctl -w net.netfilter.nf_conntrack_acct=0`.

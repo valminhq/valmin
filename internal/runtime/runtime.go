@@ -204,4 +204,8 @@ type Stats struct {
 	// (E11, Q24).
 	MemBytes uint64
 	MemLimit uint64
+	// RxBytes and TxBytes are received and sent since the container started, summed over its
+	// interfaces. They restart from zero with the container.
+	RxBytes uint64
+	TxBytes uint64
 }
