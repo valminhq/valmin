@@ -13,6 +13,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | [Backups, restore, and upgrades](operations.md) | World backups, schedules, auto-stop, power cuts, full installation copies, keys, and updates.  |
 | [Remote backups](remote-backups.md)             | Copy world backups to WebDAV or any rclone remote, and recover after losing the host.          |
 | [Configuration](configuration.md)               | Daemon settings, environment variables, and host/container paths.                              |
+| [Advanced network setup](advanced-network-setup.md) | Docker subnets, restricting the panel's ports, and keeping game servers off the LAN.    |
 | [Troubleshooting](troubleshooting.md)           | Diagnostics page, support bundle, logs, startup failures, and password recovery.               |
 
 ## Find a feature
@@ -29,6 +30,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | Delete a server                                 | [Delete a server](usage.md#delete-a-server)                                                |
 | Read the console or send commands               | [Send server commands](usage.md#send-server-commands)                                      |
 | Install, update, lock or downgrade mods         | [Manage mods](usage.md#manage-mods)                                                        |
+| Stop mods reaching my LAN or the host           | [Keep game servers off your LAN](advanced-network-setup.md#keep-game-servers-off-your-lan) |
 | Read what a mod update changes                  | [Read what changed in a mod](usage.md#read-what-changed-in-a-mod)                          |
 | Give players the mod list they need             | [Tell players which mods they need](usage.md#tell-players-which-mods-they-need)            |
 | Edit mod settings                               | [Edit mod configuration](usage.md#edit-mod-configuration)                                  |

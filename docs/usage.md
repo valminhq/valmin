@@ -600,6 +600,20 @@ operation result after each change.
 A mod the author has marked deprecated says so on its row. It may not work on the
 current game build.
 
+### What a mod can reach
+
+A mod runs its own code inside the game server, with full access to that server. It can
+read and change the server's files, world and mod configuration, including the console
+password the panel uses for that server, and it writes to the server log the panel reads. It runs as the server's unprivileged user,
+without Linux capabilities, and cannot see the host's files, other servers' files,
+world backups, Docker or the panel's database.
+
+Its network is not restricted: a mod can open connections to the internet, to other
+devices on your LAN, to the host, to other game servers on this panel, and on a cloud VPS
+to the provider's metadata service. To block all but the internet, see
+[keep game servers off your LAN](advanced-network-setup.md#keep-game-servers-off-your-lan).
+Install mods only from authors you trust.
+
 ### Choosing a registry
 
 The catalogue is fed by two registries, **Thunderstore** and **Hexium**, and the

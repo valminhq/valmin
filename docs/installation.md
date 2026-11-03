@@ -64,7 +64,7 @@ curl -fsSL https://github.com/valminhq/valmin/releases/latest/download/install.s
 | `--version`       | The latest release  | Release tag to install, such as `v1.7.0`.                                              |
 | `--http-port`     | `80`                | Host port for HTTP.                                                                    |
 | `--https-port`    | `443`               | Host port for HTTPS. The script also sets the matching browser origin.                 |
-| `--subnet-prefix` | `10.89`             | First two octets of the [Docker subnets](#check-network-access), such as `172.30`.     |
+| `--subnet-prefix` | `10.89`             | First two octets of the [Docker subnets](advanced-network-setup.md#change-the-docker-subnets), such as `172.30`. |
 | `--upgrade`       | Off                 | [Upgrade](operations.md#update-the-panel-or-game) an install made by this script.      |
 | `--restore FILE`  | Off                 | Install from an [installation export](operations.md#move-to-a-new-host) of another host. |
 
@@ -148,6 +148,9 @@ VALMIN_TLS=
 Point the domain's DNS records to your server's public address. With the default
 Caddy configuration, certificate validation needs inbound access on port 80 or 443. Behind a router, forward the required ports to the server. This can also make
 the panel reachable from the internet.
+
+A public domain may not be reachable from inside your LAN if the router lacks NAT
+loopback. Point the name at the server's LAN IP in local DNS or the hosts file.
 
 A domain can use a publicly trusted certificate while the panel stays LAN-only,
 using DNS validation. That requires a DNS-provider plugin and credentials in
@@ -240,19 +243,15 @@ Valmin allocates port pairs starting at `2456–2457`, advancing by five:
 pair through the host firewall. For direct game connections from outside your LAN,
 forward that pair on the router as well.
 
-Compose reserves `10.89.13.0/24` and `10.89.14.0/24` for the panel's networks and
-`10.89.15.0/24` for the game network. If any of them overlaps your LAN, a VPN or
-another Docker network, set `VALMIN_SUBNET_PREFIX=172.30` (or any free pair of
-octets) in `.env` before the first start; it moves all three subnets and every fixed
-address together. Compose does not change the subnet of a network that already exists.
-
 Docker publishes ports through its own firewall rules, so `ufw` does not filter ports
-80 and 443 or the game ports. To keep the panel off the internet, do not forward its
-ports on the router, or restrict them in the `DOCKER-USER` chain. See
-[Docker's packet filtering documentation](https://docs.docker.com/engine/network/packet-filtering-firewalls/).
+80 and 443 or the game ports; see [restrict the panel's ports](advanced-network-setup.md#restrict-the-panels-ports).
+Valmin's Docker networks use `10.89.13.0/24` to `10.89.15.0/24`; to move them, see
+[change the Docker subnets](advanced-network-setup.md#change-the-docker-subnets).
 
-A public domain may not be reachable from inside your LAN if the router lacks NAT
-loopback. Point the name at the server's LAN IP in local DNS or the hosts file.
+Mods run their own code with the game server's network access. To stop them reaching
+your LAN, the host or a cloud provider's metadata service, follow
+[keep game servers off your LAN](advanced-network-setup.md#keep-game-servers-off-your-lan).
+This is recommended on a cloud VPS.
 
 Next: [create your first server](usage.md#create-a-server) or check
 [restart behavior after a reboot](operations.md#restart-after-a-reboot).
