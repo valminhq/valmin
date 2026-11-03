@@ -117,6 +117,24 @@ func archiveFilesOf(t *testing.T, rt *Server, instanceID string) []string {
 	return out
 }
 
+// waitArchiveGone waits for a pruned archive file to leave the disk. Pruning removes files in
+// the job's AfterFinish, so the job reads as succeeded slightly before they are gone.
+func waitArchiveGone(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for {
+		_, err := os.Stat(path)
+		if os.IsNotExist(err) {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("pruned archive %s remains on disk: %v", path, err)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
 // Asserts a backup of a stopped instance archives, records a consistent row, and leaves the
 // instance stopped without entering a transient state it never needed.
 func TestBackupOfAStoppedInstanceRecordsAConsistentArchive(t *testing.T) {
