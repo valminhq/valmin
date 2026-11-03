@@ -7,7 +7,8 @@
 		isTransient,
 		type DiskUsage,
 		type CommandCapabilities,
-		type Instance
+		type Instance,
+		type StatsReading
 	} from '#lib/api/instances.js';
 	import { installOutstanding, operations, type Operation } from '#lib/api/operations.js';
 	import type { Job } from '#lib/api/types.js';
@@ -194,6 +195,15 @@
 		return `${v.toFixed(u === 0 ? 0 : 1)} ${units[u]}`;
 	}
 
+	const primary = 'var(--color-primary, currentColor)';
+
+	/** Received and sent as rates, or null while either is unknown. */
+	function traffic(r: StatsReading | null): string | null {
+		const rx = bytes(r?.rx_bytes_per_second);
+		const tx = bytes(r?.tx_bytes_per_second);
+		return rx === null || tx === null ? null : `↓ ${rx}/s ↑ ${tx}/s`;
+	}
+
 	function pct(n: number | null | undefined): string | null {
 		return n === null || n === undefined ? null : `${n.toFixed(1)}%`;
 	}
@@ -330,7 +340,7 @@
 						{#if inst.state === 'running'}
 							Sampled every 2 seconds.
 						{:else}
-							CPU, memory and players show here while the server runs.
+							CPU, memory, network and players show here while the server runs.
 						{/if}
 					</Card.Description>
 				</Card.Header>
@@ -341,16 +351,30 @@
 						{#if inst.state === 'running'}
 							<Sparkline
 								samples={stats.samples}
-								pick={(s) => s.cpu}
+								series={[{ key: 'cpu', label: 'CPU', color: primary, pick: (s) => s.cpu }]}
 								label="CPU"
 								value={pct(stats.latest?.cpu_pct)}
 								max={100}
 							/>
 							<Sparkline
 								samples={stats.samples}
-								pick={(s) => s.mem}
+								series={[{ key: 'mem', label: 'Memory', color: primary, pick: (s) => s.mem }]}
 								label="Memory"
 								value={bytes(stats.latest?.mem_bytes)}
+							/>
+							<Sparkline
+								samples={stats.samples}
+								series={[
+									{
+										key: 'rx',
+										label: 'Received',
+										color: 'var(--color-chart-rx)',
+										pick: (s) => s.rx
+									},
+									{ key: 'tx', label: 'Sent', color: 'var(--color-chart-tx)', pick: (s) => s.tx }
+								]}
+								label="Network"
+								value={traffic(stats.latest)}
 							/>
 							<!--
 								Null reads "unknown", never 0: the daemon sends null when it cannot tell, and

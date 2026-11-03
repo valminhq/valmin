@@ -6,6 +6,8 @@ export interface Sample {
 	t: number;
 	cpu: number | null;
 	mem: number | null;
+	rx: number | null;
+	tx: number | null;
 }
 
 /** Four minutes at the sampler's 2 s cadence (`14 §4.3`). A sparkline, not a history. */
@@ -40,9 +42,7 @@ export class StatsWindow {
 			const reading = await api.stats(this.instanceId);
 			// A live sample that arrived first wins: it is newer by construction.
 			if (!this.latest) this.latest = reading;
-			if (reading.available && reading.ts) {
-				this.record(Date.parse(reading.ts), reading.cpu_pct, reading.mem_bytes);
-			}
+			if (reading.available && reading.ts) this.record(reading.ts, reading);
 		} catch {
 			// A seed that fails is not an error to show: the socket is the live source and
 			// this only fills the first two seconds.
@@ -58,14 +58,24 @@ export class StatsWindow {
 			mem_bytes: m.mem_bytes,
 			mem_limit: m.mem_limit,
 			mem_pct: m.mem_pct,
-			players: m.players
+			players: m.players,
+			rx_bytes_per_second: m.rx_bytes_per_second,
+			tx_bytes_per_second: m.tx_bytes_per_second
 		};
-		this.record(Date.parse(m.ts), m.cpu_pct, m.mem_bytes);
+		this.record(m.ts, m);
 	}
 
-	private record(t: number, cpu: number | null, mem: number | null): void {
+	private record(ts: string, r: Omit<StatsReading, 'available' | 'ts'>): void {
+		const t = Date.parse(ts);
 		if (Number.isNaN(t)) return;
-		const next = [...this.samples, { t, cpu, mem }];
+		const sample = {
+			t,
+			cpu: r.cpu_pct,
+			mem: r.mem_bytes,
+			rx: r.rx_bytes_per_second,
+			tx: r.tx_bytes_per_second
+		};
+		const next = [...this.samples, sample];
 		this.samples = next.length > WINDOW ? next.slice(next.length - WINDOW) : next;
 	}
 }

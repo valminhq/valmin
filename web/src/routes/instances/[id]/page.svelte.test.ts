@@ -81,7 +81,9 @@ async function open(
 			mem_bytes: 1024 ** 3,
 			mem_limit: 4 * 1024 ** 3,
 			mem_pct: 25,
-			players: null
+			players: null,
+			rx_bytes_per_second: 2048,
+			tx_bytes_per_second: 512
 		})
 	);
 	daemon.on('GET', '/instances/inst-a/logs', () => Response.json({ items: [] }));
@@ -296,9 +298,36 @@ describe('the server page', () => {
 			mem_bytes: 1024 ** 3,
 			mem_limit: 4 * 1024 ** 3,
 			mem_pct: 25,
-			players: 3
+			players: 3,
+			rx_bytes_per_second: 2048,
+			tx_bytes_per_second: 512
 		});
 		await vi.waitFor(() => expect(text(players).trim()).toBe('3'));
+	});
+
+	// The rates come from the seed read, and a sample that cannot tell (the first after a
+	// restart) reads as unknown rather than as a quiet server.
+	it('shows network traffic as rates, and unknown when a sample cannot tell', async () => {
+		await open([actions.view, actions.statsRead], { row: instance({ state: 'running' }) });
+
+		const network = (await screen.findByText('Network')).nextElementSibling;
+		await vi.waitFor(() => expect(text(network).trim()).toBe('↓ 2.0 KiB/s ↑ 512 B/s'));
+		expect(screen.getByText('Received')).toBeTruthy();
+		expect(screen.getByText('Sent')).toBeTruthy();
+
+		push('stats', {
+			type: 'stats',
+			instance: 'inst-a',
+			ts: '2026-09-24T12:00:02Z',
+			cpu_pct: 10,
+			mem_bytes: 1024 ** 3,
+			mem_limit: 4 * 1024 ** 3,
+			mem_pct: 25,
+			players: null,
+			rx_bytes_per_second: null,
+			tx_bytes_per_second: null
+		});
+		await vi.waitFor(() => expect(text(network).trim()).toBe('unknown'));
 	});
 
 	// Below its own floor the server stops saving the world without an error, so free
@@ -403,9 +432,10 @@ describe('the operation history', () => {
 
 		expect(await screen.findByText('Free')).toBeTruthy();
 		expect(
-			screen.getByText('CPU, memory and players show here while the server runs.')
+			screen.getByText('CPU, memory, network and players show here while the server runs.')
 		).toBeTruthy();
 		expect(screen.queryByText('CPU')).toBeNull();
+		expect(screen.queryByText('Network')).toBeNull();
 		expect(screen.queryByText('Players')).toBeNull();
 	});
 

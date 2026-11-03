@@ -62,6 +62,7 @@ func (s *sockets) stats(instanceID string, send func(ws.Message)) (replay []ws.M
 			Type: "stats", Instance: instanceID, TS: sm.TS,
 			CPUPct: sm.CPUPct, MemBytes: sm.MemBytes, MemLimit: sm.MemLimit,
 			MemPct: sm.MemPct, Players: sm.Players,
+			RxBytesPerSecond: sm.RxBytesPerSecond, TxBytesPerSecond: sm.TxBytesPerSecond,
 		}})
 	})
 	return nil, cancel

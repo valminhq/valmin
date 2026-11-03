@@ -28,6 +28,10 @@ type Sample struct {
 	// unlimited container would otherwise report a meaningless fraction of host RAM. It is
 	// nil when the runtime reports no limit at all.
 	MemPct *float64
+	// RxBytesPerSecond and TxBytesPerSecond are network traffic since the previous sample.
+	// Like CPUPct they are nil without a predecessor, and after a restart reset the counters.
+	RxBytesPerSecond *float64
+	TxBytesPerSecond *float64
 	// Players is the count derived from the log, and nil whenever the panel cannot say — a
 	// container whose log it has not read, or a session whose evidence broke (E7, ADR-154).
 	Players *int
@@ -42,6 +46,8 @@ type Sampler struct {
 	// CPU percentage is a delta and belongs to the caller that holds both readings
 	// (internal/runtime deliberately derives nothing).
 	prev *runtime.Stats
+	// prevAt is when prev was taken, for the network rates.
+	prevAt time.Time
 	// latest is the last published Sample, for the one-shot read of 04 §3.
 	latest *Sample
 	loop   loop
@@ -68,8 +74,8 @@ func (s *Sampler) Subscribe(fn func(Sample)) (cancel func()) {
 // sample converts one raw reading into a Sample, against the previous one.
 func (s *Sampler) sample(raw runtime.Stats, now time.Time) Sample {
 	s.mu.Lock()
-	prev := s.prev
-	s.prev = &raw
+	prev, prevAt := s.prev, s.prevAt
+	s.prev, s.prevAt = &raw, now
 	s.mu.Unlock()
 
 	out := Sample{TS: now, MemBytes: raw.MemBytes, MemLimit: raw.MemLimit}
@@ -82,6 +88,15 @@ func (s *Sampler) sample(raw runtime.Stats, now time.Time) Sample {
 	}
 	if pct, ok := cpuPercent(prev, raw); ok {
 		out.CPUPct = &pct
+	}
+	if prev != nil {
+		seconds := now.Sub(prevAt).Seconds()
+		if rate, ok := byteRate(prev.RxBytes, raw.RxBytes, seconds); ok {
+			out.RxBytesPerSecond = &rate
+		}
+		if rate, ok := byteRate(prev.TxBytes, raw.TxBytes, seconds); ok {
+			out.TxBytesPerSecond = &rate
+		}
 	}
 
 	s.mu.Lock()
@@ -110,10 +125,20 @@ func cpuPercent(prev *runtime.Stats, cur runtime.Stats) (float64, bool) {
 	return cpuDelta / sysDelta * cpus * 100, true
 }
 
-func (s *Sampler) publish(sm Sample) {
+// byteRate is the per-second rate of a cumulative byte counter between two samples. A counter
+// that dropped was reset by a restart, and is unknown rather than a negative rate; an unchanged
+// one is a real zero.
+func byteRate(prev, cur uint64, seconds float64) (float64, bool) {
+	if cur < prev || seconds <= 0 {
+		return 0, false
+	}
+	return float64(cur-prev) / seconds, true
+}
+
+func (s *Sampler) publish(sm *Sample) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.subs.send(sm)
+	s.subs.send(*sm)
 }
 
 // subscribers is a set of callbacks, guarded by its owner's lock. The owner calls them on its
@@ -147,7 +172,8 @@ func (s *Sampler) run(ctx context.Context, rt runtime.Runtime, instanceID, conta
 		raw, err := rt.Stats(ctx, containerID)
 		switch {
 		case err == nil:
-			s.publish(s.sample(raw, time.Now()))
+			sm := s.sample(raw, time.Now())
+			s.publish(&sm)
 		case ctx.Err() != nil:
 			return
 		default:
@@ -173,7 +199,7 @@ func (s *Sampler) halt() {
 	s.loop.halt()
 	// A stopped server has no current sample; the last one would read as live.
 	s.mu.Lock()
-	s.prev, s.latest = nil, nil
+	s.prev, s.prevAt, s.latest = nil, time.Time{}, nil
 	s.mu.Unlock()
 }
 

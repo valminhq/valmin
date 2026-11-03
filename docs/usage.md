@@ -268,7 +268,11 @@ the host allows them, and a Steam listing only shows that the server registered,
 players can connect. Joining from a connection outside your network is the final test.
 
 **Resources** shows CPU and memory, sampled every two seconds, and the current player
-count while the server runs. Disk use is always shown, split into world, server files
+count while the server runs. **Network** shows the traffic the server received and sent
+per second, summed over its network interfaces; it reads **unknown** on the first sample
+and after a restart. Steady upload while nobody plays can mean a mod is sending data
+somewhere; [see where a game server sends traffic](advanced-network-setup.md#see-where-a-game-server-sends-traffic).
+Disk use is always shown, split into world, server files
 and backups, with the free space left on the host. When free space drops below the
 alarm level, the card says so in red: the game stops saving the world when the disk
 fills and does not report it, so free space before playing further.
