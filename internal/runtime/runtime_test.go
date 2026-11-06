@@ -482,6 +482,21 @@ func TestInspectNetwork(t *testing.T) {
 	}
 }
 
+// Docker names the default runtime on a container that never asked for one; that reads back
+// as the empty spec field, and a named runtime reads back as itself.
+func TestInspectOCIRuntime(t *testing.T) {
+	for name, want := range map[string]string{
+		"":                      "",
+		"runc":                  "",
+		"runsc":                 "runsc",
+		"io.containerd.kata.v2": "io.containerd.kata.v2",
+	} {
+		if got := inspectOCIRuntime(name); got != want {
+			t.Errorf("inspectOCIRuntime(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
 func TestPortMapsPublishesTheRequestedProtocol(t *testing.T) {
 	exposed, bindings := portMaps([]Port{{HostPort: 2456, ContainerPort: 2456, Proto: "udp"}})
 

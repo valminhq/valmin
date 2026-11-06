@@ -53,8 +53,11 @@ func waitJob(t *testing.T, rt *Server, u *store.User, jobID string) jobView {
 
 // lifecycleWorld is world()'s shape, but it hands the test the *runtime.Fake behind the
 // router so containers can be scripted, and it seeds one instance with a real fake
-// container already attached — every lifecycle handler requires one.
-func lifecycleWorld(t *testing.T) (rt *Server, db *store.DB, fake *runtime.Fake, admin, member *store.User) {
+// container already attached — every lifecycle handler requires one. Each configure func
+// adjusts the config before the server is built.
+func lifecycleWorld(
+	t *testing.T, configure ...func(*config.Config),
+) (rt *Server, db *store.DB, fake *runtime.Fake, admin, member *store.User) {
 	t.Helper()
 	dir := t.TempDir()
 
@@ -66,6 +69,9 @@ func lifecycleWorld(t *testing.T) (rt *Server, db *store.DB, fake *runtime.Fake,
 	// every start/restart test here wait it out for real.
 	cfg.Jobs.ReadySettle = config.Duration(20 * time.Millisecond)
 	cfg.Jobs.ReadyTimeout = config.Duration(2 * time.Second)
+	for _, c := range configure {
+		c(&cfg)
+	}
 
 	k, err := crypto.NewKeeper(bytes.Repeat([]byte{7}, crypto.MasterKeyLen), []byte("salt"), "1")
 	if err != nil {

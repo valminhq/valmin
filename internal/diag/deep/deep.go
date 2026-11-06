@@ -74,6 +74,13 @@ func run(ctx context.Context, jh *jobs.Handle, s *Submission) jobs.Outcome {
 
 	probeEgresses(ctx, jh, rt, cfg, observed)
 
+	jh.Progress(ctx, 75, "Looking up a public name from the game network")
+	lookup := probeLookup(ctx, rt, cfg)
+	if !lookup.OK {
+		jh.Log(lookup.Detail)
+	}
+	observed[diag.NameLookupKey] = lookup
+
 	jh.Progress(ctx, 80, "Asking Steam for the public build")
 	steamBuild, steamErr := instance.QueryBuilds(ctx, rt, cfg.Game.SteamCMDImage, cfg.Data.HostRoot)
 	if steamErr != nil {

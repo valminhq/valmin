@@ -256,13 +256,7 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 	if d.docker, err = runtime.NewDocker(ctx, cfg.Docker.Endpoint, cfg.Docker.APIVersion); err != nil {
 		return nil, fmt.Errorf("container engine: %w", err)
 	}
-	if err := config.VerifyHostRoot(ctx, d.docker, cfg); err != nil {
-		return nil, fmt.Errorf("startup gate: %w", err)
-	}
-	if err := config.VerifyDataRoot(ctx, cfg); err != nil {
-		return nil, fmt.Errorf("startup gate: %w", err)
-	}
-	if err := config.VerifyGameNetwork(ctx, d.docker, cfg, command.DefaultRCONPort); err != nil {
+	if err := verifyHost(ctx, d.docker, cfg); err != nil {
 		return nil, fmt.Errorf("startup gate: %w", err)
 	}
 	// Every gate check above is fatal, so reaching here means they all passed. Recording
@@ -273,6 +267,21 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 
 	ok = true
 	return d, nil
+}
+
+// verifyHost runs the gate checks that follow the engine connection: the data paths, the game
+// resolv.conf every game container mounts, and the game network under game.runtime.
+func verifyHost(ctx context.Context, rt runtime.Runtime, cfg *config.Config) error {
+	if err := config.VerifyHostRoot(ctx, rt, cfg); err != nil {
+		return err
+	}
+	if err := config.VerifyDataRoot(ctx, cfg); err != nil {
+		return err
+	}
+	if err := config.WriteGameResolv(cfg); err != nil {
+		return err
+	}
+	return config.VerifyGameNetwork(ctx, rt, cfg, command.DefaultRCONPort)
 }
 
 // migrate copies the database into the backups directory when a migration is pending, then

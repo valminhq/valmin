@@ -43,6 +43,8 @@ mounts, ports, and the browser address.
 | `VALMIN_HTTP_PORT`          | Host TCP port for HTTP redirects; defaults to `80`.                                                |
 | `VALMIN_HTTPS_PORT`         | Host TCP and UDP port for HTTPS; defaults to `443`. Also requires an origin override when changed. |
 | `VALMIN_SUBNET_PREFIX`      | First two octets of the three Docker subnets; defaults to `10.89`. Set before the first start.     |
+| `VALMIN_GAME_RUNTIME`       | Docker runtime for game servers, such as `runsc`; unset. See [sandboxed game servers](sandboxed-game-servers.md). |
+| `VALMIN_GAME_DNS`           | Resolvers for game servers, such as `1.1.1.1,9.9.9.9`; unset. Required with `VALMIN_GAME_RUNTIME`. |
 
 Keep `.env` valid shell syntax: quote values containing spaces, and put no spaces
 around `=`. `prepare-host.sh` reads the same file to select images. The default images
@@ -65,6 +67,8 @@ override should name a digest too.
 | `VALMIN_GAME_IMAGE`                         | Runtime image already present on the Docker host.                                  |
 | `VALMIN_GAME_STEAMCMD_IMAGE`                | Download helper image; `steamcmd/steamcmd:latest`.                                 |
 | `VALMIN_GAME_NETWORK`                       | Docker network shared by game containers and the daemon; `valmin-games`.           |
+| `VALMIN_GAME_RUNTIME`                       | Docker runtime game containers run under, such as `runsc` or `kata`; empty is Docker's default. See [sandboxed game servers](sandboxed-game-servers.md). |
+| `VALMIN_GAME_DNS`                           | Up to three resolver addresses, comma-separated, mounted as each game container's `/etc/resolv.conf`; empty keeps Docker's DNS. Required with `VALMIN_GAME_RUNTIME`. |
 | `VALMIN_GAME_PUBLIC_IP_URL`                 | Service that answers with the host's public IP; `https://api.ipify.org`. See [reachability](#check-that-players-can-reach-a-server). |
 | `VALMIN_GAME_LAN_PROBE_ADDRESS`             | IPv4 address and port on your LAN, such as `192.168.1.1:80`, that the deep diagnostics try to reach from a game server; empty. See [the diagnostics page](troubleshooting.md#check-the-diagnostics-page). |
 | `VALMIN_GAME_DEFAULT_MEM_MB`                | Default per-server memory limit; `4096`.                                           |

@@ -190,6 +190,7 @@ export interface DiagnosticInstance {
 	server_free_bytes: number | null;
 	port_issue?: string;
 	image_issue?: string;
+	runtime_issue?: string;
 }
 
 export interface DiagnosticsReport {

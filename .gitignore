@@ -60,6 +60,7 @@ AGENTS.md
 !/docs/api.md
 !/docs/architecture.md
 !/docs/advanced-network-setup.md
+!/docs/sandboxed-game-servers.md
 
 # Lint tooling output, written into the working tree by a `make lint` run.
 /jscpd-report/

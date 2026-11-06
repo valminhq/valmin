@@ -108,6 +108,15 @@ type Game struct {
 	// reaches them on for the command channel (ADR-190, 07 §2.2). It is created outside the
 	// panel; empty leaves containers on Docker's default bridge.
 	Network string `yaml:"network"`
+	// Runtime is the Docker OCI runtime game containers run under, such as `runsc` (gVisor) or
+	// `kata`. It must be registered with the Docker daemon by the operator. Empty uses the
+	// daemon's default runtime. Game containers and the checks that stand in for one use it;
+	// SteamCMD and the host data path check do not.
+	Runtime string `yaml:"runtime"`
+	// DNS lists the resolver addresses written to the resolv.conf mounted into every game
+	// container. A sandboxed runtime cannot reach Docker's embedded resolver on a user-defined
+	// network, so Runtime requires it. Empty leaves the container's resolv.conf to Docker.
+	DNS []string `yaml:"dns"`
 	// PublicIPURL is the service the reachability check asks for the host's public IPv4
 	// address. It must answer with the address as plain text; empty turns the lookup off.
 	PublicIPURL string `yaml:"public_ip_url"`

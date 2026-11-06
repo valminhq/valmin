@@ -87,6 +87,11 @@ type ContainerSpec struct {
 	// RestartPolicy is the Docker policy name. Empty means no restart policy.
 	RestartPolicy string
 
+	// OCIRuntime names a runtime registered with the Docker daemon, such as runsc or kata.
+	// Empty is the daemon's default, reads back empty on inspection, and is left out of the
+	// spec hash.
+	OCIRuntime string `json:",omitempty"`
+
 	MemoryBytes int64
 	NanoCPUs    int64
 

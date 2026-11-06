@@ -74,6 +74,7 @@
 			row.inspection_error ||
 			row.port_issue ||
 			row.image_issue ||
+			row.runtime_issue ||
 			row.oom_killed ||
 			(row.exit_code != null && row.exit_code !== 0) ||
 			(row.restart_count ?? 0) > 0 ||
@@ -282,7 +283,7 @@
 								{#if check.docs}
 									<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
 									<a class="text-sm underline" href={check.docs} target="_blank" rel="noreferrer"
-										>How to block this</a
+										>How to fix this</a
 									>
 								{/if}
 							</div>
@@ -326,6 +327,9 @@
 												>
 												{#if row.image_issue}
 													<div class="text-destructive">{row.image_issue}</div>
+												{/if}
+												{#if row.runtime_issue}
+													<div class="text-destructive">{row.runtime_issue}</div>
 												{/if}</td
 											>
 											<td class="py-2 pr-4">

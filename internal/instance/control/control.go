@@ -93,9 +93,10 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	d.Engine.Announce(func(_ context.Context, instanceID string) { states.notify(instanceID) })
 	builds := instance.NewBuildCache()
 	c := &Components{Worlds: d.Worlds}
+	sandbox := instance.SandboxOf(cfg)
 	c.Starter = &Starter{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Streams: d.Streams, Keeper: d.Keeper,
-		HostRoot: hostRoot, Image: cfg.Game.Image, Network: cfg.Game.Network,
+		HostRoot: hostRoot, Image: cfg.Game.Image, Network: cfg.Game.Network, Sandbox: sandbox,
 		StopTimeout: stopTimeout, ReadySettle: cfg.Jobs.ReadySettle.Std(), ReadyTimeout: readyTimeout,
 		PluginLoadWindow: defaultPluginLoadWindow,
 	}
@@ -116,15 +117,15 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	c.Provisioner = &Provisioner{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Builds: builds,
 		DataRoot: dataRoot, HostRoot: hostRoot, SteamCMDImage: cfg.Game.SteamCMDImage,
-		Image: cfg.Game.Image, Network: cfg.Game.Network, StopTimeout: stopTimeout,
+		Image: cfg.Game.Image, Network: cfg.Game.Network, Sandbox: sandbox, StopTimeout: stopTimeout,
 		AdvanceChain: c.Operations.Advance,
 	}
 	c.Operations.Provisioner = c.Provisioner
 	c.Deleter = &Deleter{Engine: d.Engine, Runtime: d.Runtime, DataRoot: dataRoot, StopTimeout: stopTimeout}
 	c.Cloner = &Cloner{
 		DB: d.DB, Engine: d.Engine, Keeper: d.Keeper, Runtime: d.Runtime, Worlds: d.Worlds,
-		HostRoot: hostRoot, Image: cfg.Game.Image, Network: cfg.Game.Network, StopTimeout: stopTimeout,
-		ReadMods: d.ReadMods,
+		HostRoot: hostRoot, Image: cfg.Game.Image, Network: cfg.Game.Network, Sandbox: sandbox,
+		StopTimeout: stopTimeout, ReadMods: d.ReadMods,
 	}
 	c.Restorer = &Restorer{Worlds: d.Worlds}
 	c.GameUpdater = &GameUpdater{

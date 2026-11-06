@@ -616,6 +616,8 @@ Its network is not restricted: a mod can open connections to the internet, to ot
 devices on your LAN, to the host, to other game servers on this panel, and on a cloud VPS
 to the provider's metadata service. To block all but the internet, see
 [keep game servers off your LAN](advanced-network-setup.md#keep-game-servers-off-your-lan).
+A mod shares the host's kernel with every other process; to put a second kernel boundary in
+its way, see [sandboxed game servers](sandboxed-game-servers.md).
 Install mods only from authors you trust.
 
 ### Choosing a registry

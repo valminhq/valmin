@@ -121,6 +121,7 @@ func (d *Docker) Create(ctx context.Context, spec *ContainerSpec) (string, error
 	}
 
 	host := &container.HostConfig{
+		Runtime:      spec.OCIRuntime,
 		Binds:        binds(spec.Binds),
 		PortBindings: bindings,
 		CapDrop:      dropAllCaps,
@@ -466,6 +467,7 @@ func toContainer(resp container.InspectResponse) (Container, error) {
 		c.Spec.Ports, c.Security.HostIPs = inspectPorts(exposed, resp.HostConfig.PortBindings)
 		c.Spec.NetworkDisabled, c.Spec.Network = inspectNetwork(resp.HostConfig.NetworkMode)
 		c.Spec.RestartPolicy = string(resp.HostConfig.RestartPolicy.Name)
+		c.Spec.OCIRuntime = inspectOCIRuntime(resp.HostConfig.Runtime)
 		c.Spec.MemoryBytes = resp.HostConfig.Memory
 		c.Spec.NanoCPUs = resp.HostConfig.NanoCPUs
 		c.Spec.LogMaxBytes, c.Spec.LogMaxFiles = inspectLogLimit(resp.HostConfig.LogConfig)
@@ -490,6 +492,18 @@ func toContainer(resp container.InspectResponse) (Container, error) {
 		}
 	}
 	return c, nil
+}
+
+// defaultOCIRuntime is the name Docker reports for a container created without a runtime.
+const defaultOCIRuntime = "runc"
+
+// inspectOCIRuntime recovers ContainerSpec.OCIRuntime from HostConfig.Runtime, reading the
+// default's name as empty.
+func inspectOCIRuntime(name string) string {
+	if name == defaultOCIRuntime {
+		return ""
+	}
+	return name
 }
 
 // inspectNetwork recovers ContainerSpec's network fields from Docker's NetworkMode. Docker

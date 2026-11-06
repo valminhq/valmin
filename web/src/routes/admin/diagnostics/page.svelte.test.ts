@@ -117,9 +117,9 @@ describe('the diagnostics screen', () => {
 		session.permissions = permissions('', [], [actions.panelSettings]);
 		render(Page);
 
-		const link = await screen.findByRole('link', { name: 'How to block this' });
+		const link = await screen.findByRole('link', { name: 'How to fix this' });
 		expect(link.getAttribute('href')).toBe(docs);
-		expect(screen.queryAllByRole('link', { name: 'How to block this' })).toHaveLength(1);
+		expect(screen.queryAllByRole('link', { name: 'How to fix this' })).toHaveLength(1);
 	});
 
 	it('denies that a published port is a reachable one', async () => {
@@ -135,6 +135,43 @@ describe('the diagnostics screen', () => {
 		await click(screen.getByLabelText('Show problems only'));
 		expect(screen.queryByText('Container engine')).toBeNull();
 		expect(screen.getByText('Steam reachable')).toBeTruthy();
+	});
+
+	it('keeps a server on another runtime among the problems, saying why', async () => {
+		const issue = 'runs under Docker’s default, not game.runtime runsc';
+		daemon.on('GET', '/admin/diagnostics', () =>
+			Response.json({
+				...report,
+				instances: [
+					{
+						id: 'i1',
+						name: 'Viking Hall',
+						state: 'stopped',
+						image: 'valmin/valheim:dev',
+						base_port: 2456,
+						expected_ports: [2456, 2457],
+						bound_ports: null,
+						mods: 0,
+						exit_code: null,
+						oom_killed: null,
+						restart_count: 0,
+						restart_required: false,
+						pending_restart: false,
+						running: false,
+						log_reader_attached: false,
+						server_free_bytes: null,
+						runtime_issue: issue
+					}
+				]
+			})
+		);
+		session.permissions = permissions('', [], [actions.panelSettings]);
+		render(Page);
+		await screen.findByText('Container engine');
+
+		await click(screen.getByLabelText('Show problems only'));
+		expect(screen.getByText('Viking Hall')).toBeTruthy();
+		expect(screen.getByText(issue)).toBeTruthy();
 	});
 
 	it('opens a failed operation to its error, code and who started it', async () => {

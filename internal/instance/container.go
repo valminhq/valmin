@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/runtime"
 )
 
@@ -45,6 +46,8 @@ type LaunchSpec struct {
 	Backups    int
 	MemLimitMB int
 	CPULimit   *float64
+	// Sandbox is panel-wide, so the caller fills it from config rather than from the instance.
+	Sandbox Sandbox
 }
 
 // 08 §1's four labels. Named rather than spelled inline because reconciliation reads them
@@ -87,12 +90,12 @@ func ContainerName(instanceID string) string {
 	return "valmin-" + instanceID
 }
 
-// BuildSpec assembles the exact container 08 §5 fixes for one instance. image, network and
-// stopTimeout come from config rather than LaunchSpec, being panel-wide. The set-once
-// properties are all applied here and vary by no caller: the labels, OpenStdin/StdinOnce/Tty
-// and the UID (08 §9).
+// BuildSpec assembles the exact game container for one instance. image, network and stopTimeout
+// are panel-wide and come from config, as do the runtime and resolv.conf in s.Sandbox. The
+// set-once properties are all applied here and vary by no caller: the labels,
+// OpenStdin/StdinOnce/Tty and the UID.
 //
-// It re-validates the launch and resource rules before creating a container (G2).
+// It re-validates the launch and resource rules before creating a container.
 func BuildSpec(
 	s *LaunchSpec, image, network string, stopTimeout time.Duration,
 ) (*runtime.ContainerSpec, error) {
@@ -147,7 +150,10 @@ func BuildSpec(
 
 		LogMaxBytes: logFileBytes,
 		LogMaxFiles: logFiles,
+
+		OCIRuntime: s.Sandbox.Runtime,
 	}
+	spec.Binds = append(spec.Binds, config.ResolvBinds(s.Sandbox.ResolvConf)...)
 
 	// Stamped last, so the digest covers the spec without it and a freshly built spec hashes
 	// to what a live container's label holds.

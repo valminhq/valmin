@@ -56,6 +56,11 @@ A game container mounts its installation, worlds, and logs. The backup archive
 directory is not mounted into it. All managed processes use UID/GID `10000:10000`
 so the daemon and containers can work with the same files.
 
+Game containers, and the startup and deep checks that stand in for one, run under
+`game.runtime` when it is set, with `game-resolv.conf` from the data directory mounted as
+`/etc/resolv.conf`. SteamCMD and the host path check use Docker's default runtime. See
+[sandboxed game servers](sandboxed-game-servers.md).
+
 The daemon can see a different absolute path from Docker's host. For example,
 `/mnt/games/valmin` on the host can be mounted at `/srv/valmin` in the panel. At
 startup, a temporary container verifies that both paths reach the same data.

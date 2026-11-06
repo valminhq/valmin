@@ -39,8 +39,8 @@ probe waits at most five seconds, so a Docker engine or registry that hangs show
 rather than stalling the page. An entry marked
 `unknown` was never measured. Read it as a missing answer, not as a pass.
 
-**Run deep checks** repeats the host data path, game network, and Steam checks, and tries
-two addresses from the game network. Each starts a temporary container, so it runs as a job
+**Run deep checks** repeats the host data path, game network, and Steam checks, looks up a
+public name and tries two addresses from the game network. Each starts a temporary container, so it runs as a job
 instead of during a page load. The job succeeds even when a check fails, so no failed-job
 alert fires; the result is on this page.
 
@@ -61,6 +61,11 @@ nothing may be listening there. Outside a cloud, the metadata check usually gets
 A firewall rule that rejects rather than drops looks like a refusal. Any other answer, such
 as a network that reports no route to the address, reads as unknown with the message shown
 beneath it.
+
+**Name lookups from game servers** resolves `api.steampowered.com` from a temporary game
+container set up as a game server is. A failure is a warning: crossplay and mods that look up
+names fail too. Under a [sandboxed runtime](sandboxed-game-servers.md#dns), check
+`VALMIN_GAME_DNS` and that a firewall on the game network lets those resolvers through.
 
 Published ports are not proof that players can connect. The page compares the ports a
 server was allocated against the ports Docker publishes for it, inside this host. It cannot
@@ -373,6 +378,15 @@ the database was set up with.
 For both key errors, restore the `secret.key` backed up with this `panel.db`. If the
 key is lost for good, see
 [Recover from a lost master key](operations.md#recover-from-a-lost-master-key).
+
+## Panel does not start with a sandboxed runtime
+
+`startup gate: game network self-check: could not run a probe container under runtime ...`
+means Docker cannot run `VALMIN_GAME_RUNTIME`. `unknown or invalid runtime name` says the
+runtime is not registered: compare `docker info --format '{{json .Runtimes}}'` with the
+setting, and see [sandboxed game servers](sandboxed-game-servers.md). Any other message is
+the runtime failing to start a container; for Kata, check that `/dev/kvm` exists. To start
+the panel meanwhile, remove the setting and run `docker compose up -d`.
 
 ## The data disk is full
 

@@ -252,6 +252,8 @@ Mods run their own code with the game server's network access. To stop them reac
 your LAN, the host or a cloud provider's metadata service, follow
 [keep game servers off your LAN](advanced-network-setup.md#keep-game-servers-off-your-lan).
 This is recommended on a cloud VPS.
+To also run them behind a second kernel boundary, see
+[sandboxed game servers](sandboxed-game-servers.md).
 
 Next: [create your first server](usage.md#create-a-server) or check
 [restart behavior after a reboot](operations.md#restart-after-a-reboot).

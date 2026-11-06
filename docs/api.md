@@ -1529,8 +1529,9 @@ recorded by the deep checks has `source` `job`, and one recorded at startup `sta
 
 Server entries include nullable `exit_code`, `oom_killed`, `restart_count`, and
 `finished_at` values, plus `server_free_bytes` from the last game telemetry sample.
-`image` is the image the server's container runs, empty when it was not inspected, and
-`image_issue` says when that differs from `game.image`.
+`image` is the image the server's container runs, empty when it was not inspected.
+`image_issue` says when that differs from `game.image`, and `runtime_issue` when the container
+runs under another OCI runtime than `game.runtime`.
 `mods_error` and `inspection_error` explain failed reads; clients must not interpret
 the associated zero or empty values as successful measurements. The bundle replaces
 these errors with generic messages.

@@ -115,6 +115,27 @@ func TestDockerCreateAppliesTheFixedSecurityProperties(t *testing.T) {
 	}
 }
 
+// A container created without a runtime reads back without one, and a named runtime reads back
+// as that name, so adoption compares a spec with itself.
+func TestDockerCreateCarriesTheOCIRuntime(t *testing.T) {
+	d := dockerRuntime(t)
+	for _, name := range []string{"", "io.containerd.runc.v2"} {
+		id := create(t, d, &ContainerSpec{
+			User:       testContainerUser,
+			Image:      stubImage,
+			Entrypoint: []string{"/bin/true"},
+			OCIRuntime: name,
+		})
+		c, err := d.Inspect(t.Context(), id)
+		if err != nil {
+			t.Fatalf("inspect: %v", err)
+		}
+		if c.Spec.OCIRuntime != name {
+			t.Errorf("created with runtime %q, read back %q", name, c.Spec.OCIRuntime)
+		}
+	}
+}
+
 // A1 is set-once: OpenStdin cannot be added to an existing container, so the adapter has
 // to carry it through unchanged (07 §3).
 func TestDockerCreateCarriesTheSetOnceProperties(t *testing.T) {
