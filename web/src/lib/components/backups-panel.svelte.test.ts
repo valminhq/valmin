@@ -549,4 +549,80 @@ describe('worlds on disk', () => {
 		await click(retry);
 		expect(await screen.findByText('· loaded by this server')).toBeTruthy();
 	});
+
+	it('compares two backups over the window between them, showing only what the viewer may read', async () => {
+		const older = backup({ id: 'bk-old', created_at: '2026-09-20T12:00:00Z', world_bytes: 1024 });
+		const newer = backup({ id: 'bk-new', created_at: '2026-09-21T12:00:00Z', world_bytes: 3072 });
+		daemon.on('GET', '/instances/inst-a/jobs', () =>
+			Response.json({
+				items: [job({ job_id: 'j-restart', kind: 'restart', status: 'succeeded' })],
+				next_cursor: null
+			})
+		);
+		await open([actions.backupsList], { archives: [newer, older] });
+
+		await click(button('Compare two backups'));
+		const boxes = screen.getAllByRole('checkbox');
+		await click(boxes[0]);
+		await click(boxes[1]);
+		await click(button('Show what happened between them'));
+
+		const dialog = await screen.findByRole('dialog');
+		await within(dialog).findByText('Restart');
+		const [sent] = daemon.requests('GET', '/instances/inst-a/jobs');
+		expect(sent.query.get('since')).toBe(older.created_at);
+		expect(sent.query.get('until')).toBe(newer.created_at);
+		expect(within(dialog).getByTestId('compare-world').textContent).toContain('+2.0 KB');
+		expect(within(dialog).queryByTestId('compare-players')).toBeNull();
+		expect(within(dialog).queryByTestId('compare-audit')).toBeNull();
+		expect(daemon.requests('GET', '/audit')).toHaveLength(0);
+	});
+
+	it('lists the non-job audit entries of the window for an administrator', async () => {
+		const older = backup({ id: 'bk-old', created_at: '2026-09-20T12:00:00Z' });
+		const newer = backup({ id: 'bk-new', created_at: '2026-09-21T12:00:00Z' });
+		const entry = (id: string, action: string, jobId: string | null) => ({
+			id,
+			user_id: 'u-1',
+			actor: 'alice',
+			instance_id: 'inst-a',
+			instance: 'Alpha',
+			action,
+			detail: null,
+			ip: null,
+			outcome: null,
+			job_id: jobId,
+			job_error: null,
+			created_at: '2026-09-20T18:00:00Z'
+		});
+		daemon.on('GET', '/instances/inst-a/jobs', () =>
+			Response.json({ items: [], next_cursor: null })
+		);
+		daemon.on('GET', '/audit', () =>
+			Response.json({
+				items: [entry('a-1', 'instances.restart', 'j-1'), entry('a-2', 'configs.write', null)],
+				next_cursor: null
+			})
+		);
+		daemon.on('GET', list, () => Response.json({ items: [newer, older], next_cursor: null }));
+		daemon.on('GET', '/instances/inst-a/worlds', () =>
+			Response.json({ items: [], next_cursor: null })
+		);
+		session.permissions = permissions('inst-a', [actions.backupsList], [actions.auditRead]);
+		render(BackupsPanel, { instance: instance() });
+		await screen.findByText('Newest backup');
+
+		await click(button('Compare two backups'));
+		for (const box of screen.getAllByRole('checkbox')) await click(box);
+		await click(button('Show what happened between them'));
+
+		const audit = await screen.findByTestId('compare-audit');
+		await within(audit).findByRole('listitem');
+		expect(within(audit).getAllByRole('listitem')).toHaveLength(1);
+		expect(audit.textContent).not.toContain('No other changes');
+		expect(screen.getByText('No operations finished between these backups.')).toBeTruthy();
+		const [sent] = daemon.requests('GET', '/audit');
+		expect(sent.query.get('since')).toBe(older.created_at);
+		expect(sent.query.get('until')).toBe(newer.created_at);
+	});
 });

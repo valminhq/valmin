@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/errcode"
@@ -112,6 +113,19 @@ const (
 	DefaultLimit = 50
 	MaxLimit     = 200
 )
+
+// ParseTime reads an RFC 3339 query parameter. An absent parameter is the zero time.
+func ParseTime(r *http.Request, name string) (time.Time, error) {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	at, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, apierr.New(errcode.InvalidParameter).With("parameter", name).Wrap(err)
+	}
+	return at, nil
+}
 
 // ParseLimit reads the limit query parameter. A value over the cap is clamped rather than
 // rejected: a client asking for too much wants as much as it can have.

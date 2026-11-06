@@ -28,10 +28,15 @@ export function jobOutcome(status: JobStatus): AuditOutcome {
 	return status === 'queued' || status === 'running' ? 'requested' : status;
 }
 
-/** A span of milliseconds as "8s", "2m 5s" or "1h 3m". */
+/** A span of milliseconds as "8s", "2m 5s", "1h 3m" or "2d 4h". */
 export function formatDuration(ms: number): string {
 	const total = Math.round(ms / 1000);
 	if (total < 1) return 'under 1s';
+	const days = Math.floor(total / 86400);
+	if (days) {
+		const rest = Math.floor((total % 86400) / 3600);
+		return rest ? `${days}d ${rest}h` : `${days}d`;
+	}
 	const hours = Math.floor(total / 3600);
 	const minutes = Math.floor((total % 3600) / 60);
 	const seconds = total % 60;

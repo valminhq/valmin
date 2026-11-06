@@ -322,8 +322,10 @@ passes its cancellation point.
 
 `GET /api/v1/instances/{id}/jobs` lists a server's jobs, newest first, with the usual
 `cursor` and `limit` pagination. It needs `instance.view` and nothing more. Add
-`scheduled=true` to list only the runs a schedule started. A value that is not a boolean
-returns `400 invalid_parameter`. A skipped scheduled run, such as one that found another
+`scheduled=true` to list only the runs a schedule started. `since` (inclusive) and `until`
+(exclusive), as RFC 3339 timestamps, keep the jobs that finished in that window; a job that
+has not finished counts by when it was created. A `scheduled` that is not a boolean, or a
+timestamp that does not parse, returns `400 invalid_parameter`. A skipped scheduled run, such as one that found another
 job holding the server, is recorded as `cancelled` with an `error_code` and an `error`
 that explains why. A job an operator cancelled has no `error_code`.
 
@@ -386,7 +388,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `GET`    | `/instances/{id}/operation`               | The unfinished create or import operation, or `null`.                 |
 | `POST`   | `/instances/{id}/operation/resume`        | Continue an interrupted operation; returns a job.                     |
 | `POST`   | `/instances/{id}/operation/abandon`       | Drop the steps that never ran; returns the operation.                 |
-| `GET`    | `/instances/{id}/jobs`                    | Server job history; `scheduled=true` lists scheduled runs only.       |
+| `GET`    | `/instances/{id}/jobs`                    | Server job history; `scheduled=true` lists scheduled runs only, `since`/`until` bound it. |
 | `GET`    | `/instances/{id}/backups`                 | World backup catalog, with each archive's `world_bytes` and `world_attention`. |
 | `POST`   | `/instances/{id}/backups?mode=quiesced`   | Stop, back up, and resume a previously running server; returns a job. |
 | `POST`   | `/instances/{id}/backups?mode=hot`        | Best-effort backup without stopping; returns a job.                   |

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
@@ -83,16 +82,12 @@ func parseAuditFilter(r *http.Request, extra ...string) (store.AuditFilter, erro
 		UserID:     q.Get("user_id"),
 		Action:     q.Get("action"),
 	}
-	for name, dest := range map[string]*time.Time{"since": &filter.Since, "until": &filter.Until} {
-		raw := q.Get(name)
-		if raw == "" {
-			continue
-		}
-		at, err := time.Parse(time.RFC3339, raw)
-		if err != nil {
-			return store.AuditFilter{}, apierr.New(errcode.InvalidParameter).With("parameter", name).Wrap(err)
-		}
-		*dest = at
+	var err error
+	if filter.Since, err = ParseTime(r, "since"); err != nil {
+		return store.AuditFilter{}, err
+	}
+	if filter.Until, err = ParseTime(r, "until"); err != nil {
+		return store.AuditFilter{}, err
 	}
 	return filter, nil
 }

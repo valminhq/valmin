@@ -38,6 +38,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | Back up and restore a world                     | [Back up or restore a world](operations.md#back-up-or-restore-a-world)                     |
 | Keep backups off the host                       | [Remote backups](remote-backups.md)                                                        |
 | Find out when a backup holds a broken world     | [World check](operations.md#world-check)                                                   |
+| See what happened between two backups           | [Compare two backups](operations.md#compare-two-backups)                                   |
 | Undo a bad mod or config change                 | [Save and restore a setup](usage.md#save-and-restore-a-setup)                              |
 | Share a server's setup with another panel       | [Share a server as a template](usage.md#share-a-server-as-a-template)                      |
 | See how two servers differ                      | [Compare two servers](usage.md#compare-two-servers)                                        |

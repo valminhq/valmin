@@ -3,7 +3,7 @@
 	import { unsaved } from '#lib/state/dirty.svelte.js';
 	import { scheduleKinds, formatInstant } from '#lib/api/schedules.js';
 	import { backups, type Backup, type BackupMode } from '#lib/api/backups.js';
-	import { backupAge, recoveryPoints } from '#lib/backup-points.js';
+	import { backupAge, formatSize, recoveryPoints } from '#lib/backup-points.js';
 	import { actions, instances, stateSentence, type Instance } from '#lib/api/instances.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { Badge } from '#lib/components/ui/badge/index.js';
@@ -14,6 +14,7 @@
 	import { Switch } from '#lib/components/ui/switch/index.js';
 	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import WorldsOnDisk from '#lib/components/worlds-on-disk.svelte';
+	import BackupCompare from '#lib/components/backup-compare.svelte';
 	import RemoteBackupsPanel from '#lib/components/remote-backups-panel.svelte';
 	import WorldImport from '#lib/components/world-import.svelte';
 	import { remoteBackups } from '#lib/api/remote-backups.js';
@@ -22,6 +23,7 @@
 	import Download from '@lucide/svelte/icons/download';
 	import History from '@lucide/svelte/icons/history';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import GitCompare from '@lucide/svelte/icons/git-compare';
 
 	let { instance, onchange }: { instance: Instance; onchange?: () => void } = $props();
 
@@ -54,6 +56,21 @@
 	let restoreOpen = $state(false);
 	let deleting = $state<Backup | null>(null);
 	let deleteOpen = $state(false);
+
+	let comparing = $state(false);
+	let pickedIds = $state<string[]>([]);
+	let compareOpen = $state(false);
+	/** The picked archives as the catalogue holds them now; a deleted one drops out. */
+	const picked = $derived(list.filter((b) => pickedIds.includes(b.id)));
+	/** Closes the comparison when a picked archive leaves the catalogue. */
+	$effect(() => {
+		if (picked.length < 2) compareOpen = false;
+	});
+	/** Keeps at most the two newest picks, so a third tick replaces the oldest. */
+	function pick(archive: Backup, on: boolean) {
+		const rest = pickedIds.filter((id) => picked.some((b) => b.id === id) && id !== archive.id);
+		pickedIds = on ? [...rest, archive.id].slice(-2) : rest;
+	}
 
 	let keepCold = $state<number | null>(0);
 	let keepHot = $state<number | null>(0);
@@ -251,17 +268,6 @@
 		return null;
 	});
 
-	function bytes(n: number): string {
-		const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-		let v = n;
-		let u = 0;
-		while (v >= 1024 && u < units.length - 1) {
-			v /= 1024;
-			u += 1;
-		}
-		return `${v.toFixed(u === 0 ? 0 : 1)} ${units[u]}`;
-	}
-
 	function when(iso: string): string {
 		return formatInstant(iso);
 	}
@@ -277,7 +283,7 @@
 			</span>
 		</span>
 		<span class="text-xs text-muted-foreground">
-			{note} · {bytes(archive.size_bytes)} · {archive.trigger.replaceAll('_', ' ')}
+			{note} · {formatSize(archive.size_bytes)} · {archive.trigger.replaceAll('_', ' ')}
 		</span>
 	</div>
 {/snippet}
@@ -422,6 +428,31 @@
 						narrow widths and replaced by the column header above md, so a row cannot say one
 						thing on a phone and another on a laptop.
 					-->
+					{#if list.length > 1}
+						<div class="flex flex-wrap items-center gap-2">
+							<Button
+								variant="outline"
+								size="sm"
+								onclick={() => {
+									comparing = !comparing;
+									pickedIds = [];
+								}}
+							>
+								<GitCompare />
+								<span>{comparing ? 'Cancel comparing' : 'Compare two backups'}</span>
+							</Button>
+							{#if comparing}
+								<Button
+									size="sm"
+									disabled={picked.length !== 2}
+									onclick={() => (compareOpen = true)}
+								>
+									Show what happened between them
+								</Button>
+								<span class="text-sm text-muted-foreground">{picked.length} of 2 selected</span>
+							{/if}
+						</div>
+					{/if}
 					<div class="grid gap-2 md:grid-cols-[minmax(0,1.3fr)_9rem_minmax(0,1fr)_5rem]">
 						<div
 							class="hidden gap-3 px-3 text-xs font-medium text-muted-foreground md:col-span-full md:grid md:grid-cols-subgrid"
@@ -438,7 +469,18 @@
 								>
 									<div class="grid gap-0.5">
 										<span class="text-xs text-muted-foreground md:hidden">Created</span>
-										<span>{when(archive.created_at)}</span>
+										{#if comparing}
+											<label class="flex items-center gap-2">
+												<input
+													type="checkbox"
+													checked={picked.some((b) => b.id === archive.id)}
+													onchange={(e) => pick(archive, e.currentTarget.checked)}
+												/>
+												<span>{when(archive.created_at)}</span>
+											</label>
+										{:else}
+											<span>{when(archive.created_at)}</span>
+										{/if}
 										<span class="font-mono text-xs text-muted-foreground">{archive.world_name}</span
 										>
 									</div>
@@ -468,10 +510,10 @@
 									</div>
 									<div class="grid gap-0.5">
 										<span class="text-xs text-muted-foreground md:hidden">Size</span>
-										<span class="tabular-nums">{bytes(archive.size_bytes)}</span>
+										<span class="tabular-nums">{formatSize(archive.size_bytes)}</span>
 										{#if archive.world_bytes !== null}
 											<span class="text-xs text-muted-foreground tabular-nums"
-												>world {bytes(archive.world_bytes)}</span
+												>world {formatSize(archive.world_bytes)}</span
 											>
 										{/if}
 									</div>
@@ -671,6 +713,15 @@
 	back. What is there is archived first, and the server is left stopped afterwards.
 -->
 <WorldImport {instance} />
+
+{#if picked.length === 2}
+	<BackupCompare
+		instanceId={instance.id}
+		pair={[picked[0], picked[1]]}
+		{list}
+		bind:open={compareOpen}
+	/>
+{/if}
 
 <RemoteBackupsPanel {instance} {onchange} refreshKey={remoteRefresh} />
 

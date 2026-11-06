@@ -518,18 +518,33 @@ func collectJobs(rows *sql.Rows, what string) ([]Job, error) {
 	return out, nil
 }
 
-// ListJobsForInstance reads an instance's job history, newest first, one keyset page at a time
-// (ADR-035). beforeCreatedAt and beforeID are the previous page's last row; zero values start at
-// the newest. The comparison is spelled out rather than written as a row value, which is outside
-// `10 §4.3`'s portable subset. scheduledOnly keeps only the rows a schedule started, including
-// those of a schedule since deleted.
+// JobFilter narrows an instance's job history. ScheduledOnly keeps the rows a schedule started,
+// including those of a schedule since deleted. Since is inclusive and Until exclusive, both on
+// when the job finished, or when it was created while it has not; a zero time leaves that side
+// open.
+type JobFilter struct {
+	ScheduledOnly bool
+	Since         time.Time
+	Until         time.Time
+}
+
+// ListJobsForInstance reads an instance's job history, newest first, one keyset page at a time.
+// beforeCreatedAt and beforeID are the previous page's last row; empty values start at the newest.
 func (db *DB) ListJobsForInstance(
-	ctx context.Context, instanceID string, beforeCreatedAt, beforeID string, limit int, scheduledOnly bool,
+	ctx context.Context, instanceID string, beforeCreatedAt, beforeID string, limit int, filter JobFilter,
 ) ([]Job, error) {
 	where := "instance_id = ?"
 	args := []any{instanceID}
-	if scheduledOnly {
+	if filter.ScheduledOnly {
 		where += " AND scheduled = TRUE"
+	}
+	if !filter.Since.IsZero() {
+		where += " AND COALESCE(finished_at, created_at) >= ?"
+		args = append(args, FormatTime(filter.Since))
+	}
+	if !filter.Until.IsZero() {
+		where += " AND COALESCE(finished_at, created_at) < ?"
+		args = append(args, FormatTime(filter.Until))
 	}
 	if beforeCreatedAt != "" {
 		where += " AND (created_at < ? OR (created_at = ? AND id < ?))"
