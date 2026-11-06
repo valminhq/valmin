@@ -193,6 +193,10 @@ names still resolve. If the host resolves through a resolver Docker cannot reach
 [containers cannot reach Steam or Thunderstore](troubleshooting.md#containers-cannot-reach-steam-or-thunderstore);
 pointing Docker's `dns` setting at your router is the case that needs a `DNS` entry here.
 
+With [`VALMIN_GAME_DNS`](sandboxed-game-servers.md#dns) set, as a sandboxed runtime requires,
+game servers skip Docker's resolver and query those addresses themselves. List any private one
+in `DNS`.
+
 ### IPv6
 
 Valmin's Compose file does not turn on IPv6 for any of its networks, so game servers

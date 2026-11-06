@@ -215,13 +215,14 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 // recordedChecks reads the outcomes the startup gate and the diagnose job stamped. One that
 // cannot be read is left out, and its check reads as not recorded.
 func (d *Diagnostics) recordedChecks(ctx context.Context) map[string]diag.Observation {
-	out := make(map[string]diag.Observation, 5)
+	out := make(map[string]diag.Observation, 6)
 	for key, id := range map[string]string{
 		diag.HostRootKey:       diag.CheckHostRoot,
 		diag.DataRootKey:       diag.CheckDataRootWrite,
 		diag.GameNetworkKey:    diag.CheckGameNetwork,
 		diag.MetadataEgressKey: diag.CheckMetadataEgress,
 		diag.LANEgressKey:      diag.CheckLANEgress,
+		diag.NameLookupKey:     diag.CheckNameLookup,
 	} {
 		var obs diag.Observation
 		found, err := d.Instances.DB.KVGet(ctx, key, &obs)
@@ -291,6 +292,10 @@ func (d *Diagnostics) inspectContainer(ctx context.Context, id *string, row *dia
 	if configured := d.Instances.Cfg.Game.Image; row.Image != configured {
 		row.ImageIssue = "runs " + row.Image + ", not game.image " + configured +
 			"; recreate the container to move it to the configured image"
+	}
+	if configured := d.Instances.Cfg.Game.Runtime; configured != "" && c.Spec.OCIRuntime != configured {
+		row.RuntimeIssue = "runs under " + instance.RuntimeName(c.Spec.OCIRuntime) + ", not game.runtime " +
+			instance.RuntimeName(configured) + "; its next start recreates the container under game.runtime"
 	}
 	row.RestartCount = &c.RestartCount
 	if !c.FinishedAt.IsZero() {

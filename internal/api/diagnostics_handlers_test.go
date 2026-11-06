@@ -323,6 +323,50 @@ func TestAnUnreadableDataRootIsAFailingRowNotAnError(t *testing.T) {
 	}
 }
 
+// TestAServerReportsARuntimeOtherThanTheGameRuntime asserts a container created under Docker's
+// default runtime is flagged once game.runtime names another.
+func TestAServerReportsARuntimeOtherThanTheGameRuntime(t *testing.T) {
+	t.Parallel()
+	rt, db, _ := bootstrappedRouter(t)
+	inst := seedStoppedInstance(t, db, "Unsandboxed")
+	id := "container-id"
+	inst.ContainerID = &id
+	h := rt.diagnostics.Instances
+	h.Cfg.Game.Runtime = "runsc"
+	h.Runtime = &diagnosticRuntime{
+		Runtime:   h.Runtime,
+		container: runtime.Container{Spec: runtime.ContainerSpec{Image: h.Cfg.Game.Image}},
+	}
+
+	row := rt.diagnostics.summarise(t.Context(), []store.Instance{*inst})[0]
+	if !strings.Contains(row.RuntimeIssue, "Docker's default") || !strings.Contains(row.RuntimeIssue, "runsc") {
+		t.Errorf("runtime issue = %q, want it to name both runtimes", row.RuntimeIssue)
+	}
+	if row.ImageIssue != "" {
+		t.Errorf("image issue = %q, want none for the configured image", row.ImageIssue)
+	}
+}
+
+// TestAServerOnTheDaemonsDefaultRuntimeHasNoIssue asserts that, with no game.runtime, a
+// container reading back the daemon's default under another name than runc is not flagged.
+func TestAServerOnTheDaemonsDefaultRuntimeHasNoIssue(t *testing.T) {
+	t.Parallel()
+	rt, db, _ := bootstrappedRouter(t)
+	inst := seedStoppedInstance(t, db, "GPU host")
+	id := "container-id"
+	inst.ContainerID = &id
+	h := rt.diagnostics.Instances
+	h.Runtime = &diagnosticRuntime{
+		Runtime:   h.Runtime,
+		container: runtime.Container{Spec: runtime.ContainerSpec{Image: h.Cfg.Game.Image, OCIRuntime: "nvidia"}},
+	}
+
+	row := rt.diagnostics.summarise(t.Context(), []store.Instance{*inst})[0]
+	if row.RuntimeIssue != "" {
+		t.Errorf("runtime issue = %q, want none without game.runtime", row.RuntimeIssue)
+	}
+}
+
 // TestAServerReportsTheImageItsContainerRuns asserts a container built from another image
 // than game.image is reported with its own image and an issue.
 func TestAServerReportsTheImageItsContainerRuns(t *testing.T) {

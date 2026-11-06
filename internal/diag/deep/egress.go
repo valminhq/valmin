@@ -101,7 +101,7 @@ func probeEgresses(
 }
 
 // probeEgress opens one TCP connection to t from a throwaway container in the game image on
-// the game network, and grades the outcome.
+// the game network, set up as a game container is, and grades the outcome.
 func probeEgress(ctx context.Context, rt runtime.Runtime, cfg *config.Config, t *egressTarget) diag.Observation {
 	var stderr strings.Builder
 	code, err := runtime.RunThrowaway(ctx, rt, &runtime.ThrowawaySpec{
@@ -113,9 +113,11 @@ func probeEgress(ctx context.Context, rt runtime.Runtime, cfg *config.Config, t 
 			"/usr/bin/timeout", strconv.Itoa(egressSeconds), "/bin/bash", "-c", "</dev/tcp/$0/$1",
 			t.addr.Addr().String(), strconv.Itoa(int(t.addr.Port())),
 		},
-		User:    strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid()),
-		Network: cfg.Game.Network,
-		Stderr:  &stderr,
+		User:       strconv.Itoa(os.Getuid()) + ":" + strconv.Itoa(os.Getgid()),
+		Network:    cfg.Game.Network,
+		OCIRuntime: cfg.Game.Runtime,
+		Binds:      cfg.GameResolvBinds(),
+		Stderr:     &stderr,
 	})
 	obs := diag.Observation{CheckedAt: time.Now().UTC(), Source: diag.SourceJob, Target: t.addr.String()}
 	if err != nil {

@@ -430,6 +430,7 @@ func validateGame(cfg *Config) []error {
 		c.failf("game.network %q is not a Docker network name: %s",
 			cfg.Game.Network, dockerNetworkName)
 	}
+	validateGameRuntime(&cfg.Game, &c)
 	if raw := cfg.Game.PublicIPURL; raw != "" {
 		if !isWebURL(raw) {
 			c.failf("game.public_ip_url must be an absolute http or https URL, got %q", raw)
@@ -443,6 +444,34 @@ func validateGame(cfg *Config) []error {
 	return c
 }
 
+// maxGameDNS is how many nameservers a resolver reads; glibc ignores the rest.
+const maxGameDNS = 3
+
+// validateGameRuntime checks game.runtime and game.dns together, since a runtime is unusable
+// without resolvers.
+func validateGameRuntime(g *Game, c *collector) {
+	switch {
+	case g.Runtime == "":
+	case g.Runtime == "runc":
+		c.failf("game.runtime is %q: leave it empty to use Docker's default runtime", g.Runtime)
+	case !dockerRuntimeName.MatchString(g.Runtime):
+		c.failf("game.runtime %q is not a Docker runtime name: %s", g.Runtime, dockerRuntimeName)
+	case len(g.DNS) == 0:
+		c.failf("game.runtime is %q but game.dns is empty: a sandboxed runtime cannot reach "+
+			"Docker's DNS on game.network, so name the resolvers game servers should use, "+
+			"such as 1.1.1.1,9.9.9.9 or your router's address", g.Runtime)
+	}
+	if len(g.DNS) > maxGameDNS {
+		c.failf("game.dns lists %d addresses but a resolver reads only %d", len(g.DNS), maxGameDNS)
+	}
+	for _, raw := range g.DNS {
+		addr, err := netip.ParseAddr(raw)
+		if err != nil || addr.IsUnspecified() || addr.IsLoopback() || addr.IsMulticast() {
+			c.failf("game.dns entry %q is not a unicast address a game server can reach", raw)
+		}
+	}
+}
+
 // ParseLANProbeAddress reads game.lan_probe_address: a unicast IPv4 address off the probe's
 // own loopback and a non-zero port, and nothing else, since the probe passes it to a shell.
 func ParseLANProbeAddress(raw string) (netip.AddrPort, error) {
@@ -453,6 +482,10 @@ func ParseLANProbeAddress(raw string) (netip.AddrPort, error) {
 	}
 	return addr, nil
 }
+
+// dockerRuntimeName is what a daemon.json runtimes key may look like, which includes a
+// containerd runtime type such as io.containerd.kata.v2.
+var dockerRuntimeName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
 
 // dockerNetworkName is what Docker accepts as a network name. A rejected name would otherwise
 // surface as a container-create failure at provision time.

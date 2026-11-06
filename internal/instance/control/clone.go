@@ -42,6 +42,7 @@ type Cloner struct {
 	Runtime                  runtime.Runtime
 	Worlds                   *Worlds
 	HostRoot, Image, Network string
+	Sandbox                  instance.Sandbox
 	StopTimeout              time.Duration
 	ReadMods                 func(context.Context, *store.Instance) ([]store.InstanceMod, error)
 }
@@ -328,7 +329,7 @@ func restoreCloneWorld(archivePath, live string) error {
 
 func (c *Cloner) cloneSpec(run *CloneRun) (*runtime.ContainerSpec, error) {
 	spec, err := instance.BuildSpec(
-		launchSpecFor(run.Destination, c.HostRoot, run.Password), c.Image, c.Network, c.StopTimeout)
+		launchSpecFor(run.Destination, c.HostRoot, run.Password, c.Sandbox), c.Image, c.Network, c.StopTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("build destination container spec: %w", err)
 	}

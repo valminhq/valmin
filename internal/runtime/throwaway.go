@@ -51,6 +51,8 @@ type ThrowawaySpec struct {
 	Env        []string
 	User       string
 	Binds      []Bind
+	// OCIRuntime is the Docker runtime to run under; empty is the daemon's default.
+	OCIRuntime string
 	// NoNetwork attaches the container to no network at all, and wins over Network.
 	NoNetwork bool
 	// Network names the network to join; empty is Docker's default bridge.
@@ -87,6 +89,7 @@ func RunThrowaway(ctx context.Context, rt Runtime, spec *ThrowawaySpec) (int, er
 		User:            spec.User,
 		Labels:          spec.labels(),
 		Binds:           spec.Binds,
+		OCIRuntime:      spec.OCIRuntime,
 		NetworkDisabled: spec.NoNetwork,
 		Network:         spec.Network,
 	})

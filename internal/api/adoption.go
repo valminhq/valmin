@@ -122,6 +122,7 @@ func (h *Instances) adopt(w http.ResponseWriter, r *http.Request) {
 		Public: *body.Public, Crossplay: *body.Crossplay, CrossplayInstanceID: facts.crossplayID,
 		Preset: *body.Preset, Modifiers: modifiers, ExtraArgs: *body.ExtraArgs,
 		MemLimitMB: *body.MemLimitMB, CPULimit: body.CPULimit.value,
+		Sandbox: instance.SandboxOf(h.Cfg),
 	}
 	if err := instance.ValidateAdoptionLaunch(
 		facts.container, launch, h.Cfg.Game.Image, h.Cfg.Game.Network, h.Cfg.Game.StopTimeout.Std(),

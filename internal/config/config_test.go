@@ -1,11 +1,16 @@
 package config
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/valminhq/valmin/internal/runtime"
 )
 
 // writeFile creates a file under t.TempDir and returns its path.
@@ -327,6 +332,86 @@ func TestGameLANProbeAddressValidation(t *testing.T) {
 				t.Errorf("game.lan_probe_address = %q, want %q", cfg.Game.LANProbeAddress, tc.value)
 			}
 		})
+	}
+}
+
+// A runtime needs resolvers, and each resolver is an address a game server can reach.
+func TestGameRuntimeAndDNSValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name, runtime, dns string
+		refusal            string
+		wantDNS            []string
+	}{
+		{name: "neither"},
+		{name: "gvisor", runtime: "runsc", dns: "1.1.1.1, 9.9.9.9", wantDNS: []string{"1.1.1.1", "9.9.9.9"}},
+		{name: "kata runtime type", runtime: "io.containerd.kata.v2", dns: "192.168.1.1", wantDNS: []string{"192.168.1.1"}},
+		{name: "dns alone", dns: "fd00::1", wantDNS: []string{"fd00::1"}},
+		{name: "runtime without dns", runtime: "runsc", refusal: "game.dns is empty"},
+		{name: "runc by name", runtime: "runc", dns: "1.1.1.1", refusal: "leave it empty"},
+		{name: "not a runtime name", runtime: "run sc", dns: "1.1.1.1", refusal: "not a Docker runtime name"},
+		{name: "hostname resolver", runtime: "runsc", dns: "dns.example.com", refusal: "game.dns entry"},
+		{name: "loopback resolver", runtime: "runsc", dns: "127.0.0.11", refusal: "game.dns entry"},
+		{name: "too many", runtime: "runsc", dns: "1.1.1.1,1.0.0.1,9.9.9.9,8.8.8.8", refusal: "reads only 3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := loadWith(t, minimalYAML, map[string]string{
+				"VALMIN_GAME_RUNTIME": tc.runtime, "VALMIN_GAME_DNS": tc.dns,
+			})
+			switch {
+			case tc.refusal != "":
+				if err == nil || !strings.Contains(err.Error(), tc.refusal) {
+					t.Errorf("error = %v, want one containing %q", err, tc.refusal)
+				}
+			case err != nil:
+				t.Fatalf("Load: %v", err)
+			case cfg.Game.Runtime != tc.runtime || !slices.Equal(cfg.Game.DNS, tc.wantDNS):
+				t.Errorf("game.runtime, game.dns = %q, %q, want %q, %q",
+					cfg.Game.Runtime, cfg.Game.DNS, tc.runtime, tc.wantDNS)
+			}
+		})
+	}
+}
+
+// The resolv.conf lists game.dns in order, and is mounted read-only over the container's own.
+func TestWriteGameResolv(t *testing.T) {
+	root := t.TempDir()
+	cfg := &Config{Data: Data{Root: root, HostRoot: "/host/valmin"}, Game: Game{DNS: []string{"1.1.1.1", "fd00::1"}}}
+	if err := WriteGameResolv(cfg); err != nil {
+		t.Fatalf("WriteGameResolv: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, GameResolvFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var servers []string
+	for line := range strings.Lines(string(raw)) {
+		if addr, ok := strings.CutPrefix(strings.TrimSpace(line), "nameserver "); ok {
+			servers = append(servers, addr)
+		}
+	}
+	if !slices.Equal(servers, cfg.Game.DNS) {
+		t.Errorf("nameservers = %q, want %q", servers, cfg.Game.DNS)
+	}
+	want := []runtime.Bind{
+		{HostPath: "/host/valmin/" + GameResolvFile, ContainerPath: "/etc/resolv.conf", ReadOnly: true},
+	}
+	if got := cfg.GameResolvBinds(); !slices.Equal(got, want) {
+		t.Errorf("GameResolvBinds() = %+v, want %+v", got, want)
+	}
+}
+
+// Without game.dns nothing is written and nothing mounted, so containers keep Docker's DNS.
+func TestWriteGameResolvWithoutDNS(t *testing.T) {
+	root := t.TempDir()
+	cfg := &Config{Data: Data{Root: root, HostRoot: root}}
+	if err := WriteGameResolv(cfg); err != nil {
+		t.Fatalf("WriteGameResolv: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, GameResolvFile)); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("stat %s = %v, want it absent", GameResolvFile, err)
+	}
+	if got := cfg.GameResolvBinds(); got != nil {
+		t.Errorf("GameResolvBinds() = %+v, want none", got)
 	}
 }
 
@@ -690,5 +775,21 @@ func TestValidateRefusesValuesThePanelCannotHonour(t *testing.T) {
 		if _, err := loadWith(t, tc.yaml, tc.vars, tc.args...); err == nil {
 			t.Errorf("%s: Load succeeded, want a refusal", tc.name)
 		}
+	}
+}
+
+// An empty directory Docker left where the file was missing is replaced by the file.
+func TestWriteGameResolvReplacesAnEmptyDirectory(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, GameResolvFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{Data: Data{Root: root, HostRoot: root}, Game: Game{DNS: []string{"1.1.1.1"}}}
+	if err := WriteGameResolv(cfg); err != nil {
+		t.Fatalf("WriteGameResolv: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(root, GameResolvFile))
+	if err != nil || !info.Mode().IsRegular() {
+		t.Errorf("stat %s = %v, %v, want a regular file", GameResolvFile, info, err)
 	}
 }

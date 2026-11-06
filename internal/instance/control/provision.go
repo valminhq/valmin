@@ -21,6 +21,7 @@ type Provisioner struct {
 	Runtime                                           runtime.Runtime
 	Builds                                            *instance.BuildCache
 	DataRoot, HostRoot, SteamCMDImage, Image, Network string
+	Sandbox                                           instance.Sandbox
 	StopTimeout                                       time.Duration
 	AdvanceChain                                      func(context.Context, string)
 }
@@ -84,7 +85,12 @@ func (p *Provisioner) provisionSpec(ctx context.Context, run *ProvisionRun) (*ru
 	if inst == nil {
 		return nil, fmt.Errorf("instance %s is gone", run.InstanceID)
 	}
-	spec, err := instance.BuildSpec(launchSpecFor(inst, p.HostRoot, run.Password), p.Image, p.Network, p.StopTimeout)
+	spec, err := instance.BuildSpec(
+		launchSpecFor(inst, p.HostRoot, run.Password, p.Sandbox),
+		p.Image,
+		p.Network,
+		p.StopTimeout,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("build container spec: %w", err)
 	}

@@ -80,6 +80,8 @@ every server gets its own copy.
   diagnostics page with a redacted support bundle for bug reports.
 - Secrets are encrypted at rest, and every action is checked against the user's
   permissions on that server.
+- Optionally run game servers, and the mods inside them, in a gVisor or Kata Containers
+  sandbox.
 
 ## Get started
 
@@ -106,6 +108,7 @@ the panel and game servers as UID/GID `10000:10000`. The default memory limit is
 | Back up worlds, schedule tasks, and upgrade   | [Backups, restore, and upgrades](docs/operations.md) |
 | Copy backups to cloud storage                 | [Remote backups](docs/remote-backups.md)             |
 | Set paths, images, ports, and daemon options  | [Configuration](docs/configuration.md)               |
+| Sandbox game servers with gVisor or Kata      | [Sandboxed game servers](docs/sandboxed-game-servers.md) |
 | Diagnose a failure or reset a password        | [Troubleshooting](docs/troubleshooting.md)           |
 | Integrate with the panel                      | [HTTP API and WebSockets](docs/api.md)               |
 | Build, run, and test changes                  | [Development](docs/development.md)                   |
