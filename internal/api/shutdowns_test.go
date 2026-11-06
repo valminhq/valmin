@@ -126,7 +126,7 @@ func TestAPlannedShutdownStopsARunningServer(t *testing.T) {
 
 	(&scheduler.Shutdowns{DB: db, Stop: h.Stop, Warn: h.Warn}).Tick(t.Context(), now)
 
-	jobs, err := db.ListJobsForInstance(t.Context(), seededInstanceID, "", "", 10, false)
+	jobs, err := db.ListJobsForInstance(t.Context(), seededInstanceID, "", "", 10, store.JobFilter{})
 	if err != nil || len(jobs) != 1 || jobs[0].Kind != "stop" {
 		t.Fatalf("jobs = %+v, %v; want one stop", jobs, err)
 	}

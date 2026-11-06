@@ -243,25 +243,74 @@ func TestJobHistoryScheduledOnly(t *testing.T) {
 	}
 }
 
-// Asserts a scheduled value that is not a boolean is 400 invalid_parameter naming the parameter.
-func TestJobHistoryRefusesAnUnreadableScheduledFilter(t *testing.T) {
+// Asserts the window holds jobs by when they finished, or were created while unfinished: since
+// includes and until excludes a job exactly on the bound.
+func TestJobHistoryWindow(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _ := world(t)
+	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	at := func(minutes float64) string {
+		return store.FormatTime(base.Add(time.Duration(minutes * float64(time.Minute))))
+	}
+	for _, j := range []struct {
+		id       string
+		created  float64
+		finished any
+	}{
+		{"j-0", 0, nil},
+		{"j-1", 1, nil},
+		{"j-2", 2, nil},
+		{"j-3", 3, nil},
+		{"j-early", 0.5, at(2.5)},
+		{"j-late", 2.5, at(3.5)},
+	} {
+		seed(t, db, `
+			INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name, payload, created_at, finished_at)
+			VALUES (?, 'backup', 'succeeded', ?, 'inst-a', 'a', '{}', ?, ?)`,
+			j.id, "lock-"+j.id, at(j.created), j.finished)
+	}
+
+	path := "/api/v1/instances/inst-a/jobs?since=2026-05-01T12:01:00Z&until=2026-05-01T12:03:00Z"
+	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, path, http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	var page Page[jobView]
+	decodeInto(t, rec, &page)
+	got := make([]string, 0, len(page.Items))
+	for _, j := range page.Items {
+		got = append(got, j.JobID)
+	}
+	if strings.Join(got, ",") != "j-2,j-1,j-early" {
+		t.Errorf("windowed history = %v, want j-2, j-1, j-early", got)
+	}
+}
+
+// Asserts an unreadable filter is 400 invalid_parameter naming the parameter.
+func TestJobHistoryRefusesAnUnreadableFilter(t *testing.T) {
 	t.Parallel()
 	rt, _, admin, _ := world(t)
 
-	rec := as(rt, admin, httptest.NewRequest(
-		http.MethodGet, "/api/v1/instances/inst-a/jobs?scheduled=maybe", http.NoBody))
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("scheduled=maybe = %d, want 400 (%s)", rec.Code, rec.Body)
-	}
-	var env struct {
-		Error struct {
-			Code    string         `json:"code"`
-			Details map[string]any `json:"details"`
-		} `json:"error"`
-	}
-	decodeInto(t, rec, &env)
-	if env.Error.Code != "invalid_parameter" || env.Error.Details["parameter"] != "scheduled" {
-		t.Errorf("error = %+v, want invalid_parameter on scheduled", env.Error)
+	for _, tc := range []struct{ query, parameter string }{
+		{"scheduled=maybe", "scheduled"},
+		{"since=yesterday", "since"},
+		{"until=2026-05-01", "until"},
+	} {
+		rec := as(rt, admin, httptest.NewRequest(
+			http.MethodGet, "/api/v1/instances/inst-a/jobs?"+tc.query, http.NoBody))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s = %d, want 400 (%s)", tc.query, rec.Code, rec.Body)
+		}
+		var env struct {
+			Error struct {
+				Code    string         `json:"code"`
+				Details map[string]any `json:"details"`
+			} `json:"error"`
+		}
+		decodeInto(t, rec, &env)
+		if env.Error.Code != "invalid_parameter" || env.Error.Details["parameter"] != tc.parameter {
+			t.Errorf("%s: error = %+v, want invalid_parameter on %s", tc.query, env.Error, tc.parameter)
+		}
 	}
 }
 

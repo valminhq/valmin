@@ -50,7 +50,7 @@ func jobRowsForSchedule(t *testing.T, db *store.DB, scheduleID string) []store.J
 
 func jobRowsForScheduleOn(t *testing.T, db *store.DB, instanceID, scheduleID string) []store.Job {
 	t.Helper()
-	rows, err := db.ListJobsForInstance(t.Context(), instanceID, "", "", 50, true)
+	rows, err := db.ListJobsForInstance(t.Context(), instanceID, "", "", 50, store.JobFilter{ScheduledOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}

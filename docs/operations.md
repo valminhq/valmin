@@ -88,6 +88,31 @@ intended, choose **Acknowledge** on the flagged backup (needs `backups.restore`)
 clears, later backups are compared against it, and the older backup is no longer kept past the
 count.
 
+### Compare two backups
+
+To see what happened between two backups, choose **Compare two backups** above the backup
+list, tick two backups, then choose **Show what happened between them**. The order you pick
+them in does not matter. The panel builds the report from what it recorded between the two
+backups. It does not open the archives or compare the world files, so it cannot say what was
+built, explored or destroyed.
+
+- **World**: the change in world size between the two backups, how many other backups were
+  taken in between, and any [world check](#world-check) warning the newer backup has that
+  the older did not.
+- **Players** (needs `stats.read`): the peak player count, player-hours, how long at least
+  one player was online, and how much of the period the panel observed. Player counts are
+  kept for 30 days, so for an older period this section says it is not covered.
+- **Operations**: every job that finished on the server in the period, or started and is
+  still running, such as starts, stops, restarts, mod changes, game updates and restores,
+  with who started it and how it ended. A restore, import or game update records the
+  snapshot it took first only as it finishes, so that job is listed in the period that ends
+  at its snapshot, not the one that starts there.
+  Finished jobs are kept for 30 days by default (`jobs.retention_days`) and at most the
+  newest 500 per server, so an old period, or a long one on a busy server, may be incomplete.
+- **Other changes** (administrators only): audit log entries for the server that are not
+  jobs, such as configuration edits. When the period holds more entries than the dialog
+  reads, a link opens the audit log for those days.
+
 ### Restore a backup
 
 To restore, stop the server, select an archive, and confirm the world name. Restore

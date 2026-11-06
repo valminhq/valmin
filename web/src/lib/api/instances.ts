@@ -443,11 +443,19 @@ export const instances = {
 		api
 			.get<Page<Job>>(`/instances/${id}/jobs?limit=${limit}${scheduled ? '&scheduled=true' : ''}`)
 			.then((p) => p.items),
-	/** One page of this instance's job history with the cursor for the next, newest first. */
-	jobPage: (id: string, limit: number, cursor?: string | null) =>
-		api.get<Page<Job>>(
-			`/instances/${id}/jobs?limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
-		),
+	/** One page of this instance's job history with the cursor for the next, newest first.
+	 * `window` keeps jobs that finished from `since` (inclusive) to `until` (exclusive), or
+	 * were created then while unfinished. */
+	jobPage: (
+		id: string,
+		limit: number,
+		cursor?: string | null,
+		window?: { since: string; until: string }
+	) => {
+		const params = new URLSearchParams({ limit: String(limit), ...window });
+		if (cursor) params.set('cursor', cursor);
+		return api.get<Page<Job>>(`/instances/${id}/jobs?${params}`);
+	},
 
 	// Every one of these returns a job, never the resource (ADR-028, `11 §3`). The job holds its
 	// lock, so a second click is `409 job_in_progress` rather than a second run.

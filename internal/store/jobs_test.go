@@ -410,7 +410,7 @@ func TestListJobsForInstancePagesNewestFirst(t *testing.T) {
 		VALUES (?, 'start', 'succeeded', ?, ?, 'test', '{}', ?)`,
 		other, "instance:"+other, theirs, FormatTime(now))
 
-	first, err := db.ListJobsForInstance(t.Context(), mine, "", "", 3, false)
+	first, err := db.ListJobsForInstance(t.Context(), mine, "", "", 3, JobFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +422,7 @@ func TestListJobsForInstancePagesNewestFirst(t *testing.T) {
 	}
 
 	last := first[len(first)-1]
-	second, err := db.ListJobsForInstance(t.Context(), mine, FormatTime(last.CreatedAt), last.ID, 3, false)
+	second, err := db.ListJobsForInstance(t.Context(), mine, FormatTime(last.CreatedAt), last.ID, 3, JobFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,7 +446,7 @@ func TestListJobsForInstancePagesNewestFirst(t *testing.T) {
 		t.Errorf("saw %d distinct jobs across both pages, want 5", len(seen))
 	}
 
-	if rows, err := db.ListJobsForInstance(t.Context(), NewID(), "", "", 10, false); err != nil {
+	if rows, err := db.ListJobsForInstance(t.Context(), NewID(), "", "", 10, JobFilter{}); err != nil {
 		t.Fatal(err)
 	} else if len(rows) != 0 {
 		t.Errorf("an instance with no jobs = %d rows, want 0", len(rows))
@@ -476,7 +476,7 @@ func TestListJobsForInstanceScheduledOnly(t *testing.T) {
 			id, "instance:"+id, mine, sched, sched != nil, FormatTime(now.Add(time.Duration(i)*time.Second)))
 	}
 
-	first, err := db.ListJobsForInstance(t.Context(), mine, "", "", 2, true)
+	first, err := db.ListJobsForInstance(t.Context(), mine, "", "", 2, JobFilter{ScheduledOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +484,14 @@ func TestListJobsForInstanceScheduledOnly(t *testing.T) {
 		t.Fatalf("first page = %d rows, want 2", len(first))
 	}
 	last := first[1]
-	second, err := db.ListJobsForInstance(t.Context(), mine, FormatTime(last.CreatedAt), last.ID, 2, true)
+	second, err := db.ListJobsForInstance(
+		t.Context(),
+		mine,
+		FormatTime(last.CreatedAt),
+		last.ID,
+		2,
+		JobFilter{ScheduledOnly: true},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +523,7 @@ func TestScheduledRunOutlivesItsSchedule(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rows, err := db.ListJobsForInstance(t.Context(), mine, "", "", 10, true)
+	rows, err := db.ListJobsForInstance(t.Context(), mine, "", "", 10, JobFilter{ScheduledOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}

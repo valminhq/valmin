@@ -74,7 +74,9 @@ describe('durations', () => {
 		['minutes and seconds', 125_000, '2m 5s'],
 		['whole minutes', 120_000, '2m'],
 		['hours and minutes', 3_780_000, '1h 3m'],
-		['whole hours', 7_200_000, '2h']
+		['whole hours', 7_200_000, '2h'],
+		['days and hours', 187_200_000, '2d 4h'],
+		['whole days', 172_800_000, '2d']
 	];
 	it.each(cases)('%s', (_, ms, expected) => {
 		expect(formatDuration(ms)).toBe(expected);
