@@ -70,9 +70,9 @@ describe('the power cuts screen', () => {
 	});
 
 	it('cancels a power cut once confirmed', async () => {
-		vi.stubGlobal('confirm', () => true);
 		await open([actions.schedulesGlobal]);
 		await click(await screen.findByRole('button', { name: 'Cancel' }));
+		await click(await screen.findByRole('button', { name: 'Cancel power cut' }));
 		await vi.waitFor(() =>
 			expect(daemon.requests('DELETE', '/admin/shutdowns/cut-1')).toHaveLength(1)
 		);

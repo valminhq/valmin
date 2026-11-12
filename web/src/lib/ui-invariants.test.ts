@@ -610,3 +610,15 @@ describe('warning and success colours', () => {
 		}
 	});
 });
+
+describe('confirming a destructive action', () => {
+	// The browser's own dialog cannot say what is lost in the panel's words or style. The
+	// unsaved-changes guard is the exception: it has to answer before navigation continues.
+	it('uses the panel dialog, never the browser one, outside the navigation guard', () => {
+		const guard = join('src', 'routes', '+layout.svelte');
+		const offenders = sources()
+			.filter(([path, text]) => path !== guard && /(?<!function )\bconfirm\(/.test(text))
+			.map(([path]) => path);
+		expect(offenders).toEqual([]);
+	});
+});

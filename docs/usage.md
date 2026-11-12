@@ -1115,7 +1115,7 @@ and is signed in.
 
 **Invite history** lists every invite with who issued it and whether it is pending,
 redeemed, revoked or expired, with a filter for each. **Revoke invite** cancels a
-pending one.
+pending one after you confirm.
 
 ### Sign in with single sign-on
 
