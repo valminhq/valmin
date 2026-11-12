@@ -790,18 +790,18 @@
 		<Tabs.List aria-label="Mod tasks" class="flex w-fit flex-wrap gap-1 rounded-lg bg-muted p-1">
 			<Tabs.Trigger
 				value="installed"
-				class="rounded-md px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+				class="rounded-md px-2 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm sm:px-4"
 				>Installed {#if !loading}<span class="ml-1 tabular-nums">{installed.length}</span
 					>{/if}</Tabs.Trigger
 			>
 			<Tabs.Trigger
 				value="browse"
-				class="rounded-md px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+				class="rounded-md px-2 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm sm:px-4"
 				>Browse mods</Tabs.Trigger
 			>
 			<Tabs.Trigger
 				value="players"
-				class="rounded-md px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+				class="rounded-md px-2 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm sm:px-4"
 				>Player modpack</Tabs.Trigger
 			>
 		</Tabs.List>
@@ -1283,7 +1283,9 @@
 	</div>
 	{#if canManage}
 		<div class="grid shrink-0 gap-1">
-			<Label class="sr-only" for={`side-${mod.full_name}`}>Client requirement</Label>
+			<Label class="text-xs font-normal text-muted-foreground" for={`side-${mod.full_name}`}
+				>Client requirement</Label
+			>
 			<Select.Root
 				type="single"
 				value={mod.side}
