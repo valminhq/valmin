@@ -254,7 +254,9 @@
 		-->
 		{#if !installOutstanding(operation)}
 			<UpdateNotice instance={inst} onchange={load} />
-			<UpdateTestCard instance={inst} onchange={load} />
+			{#if inst.test_of}
+				<UpdateTestCard instance={inst} onchange={load} />
+			{/if}
 		{/if}
 
 		{#if uncleanStop && !parked && operation?.state !== 'interrupted'}
@@ -386,6 +388,10 @@
 				onmore={loadOlder}
 			/>
 		</div>
+
+		{#if !installOutstanding(operation) && !inst.test_of}
+			<UpdateTestCard instance={inst} onchange={load} />
+		{/if}
 
 		<Card.Root id="console">
 			<Card.Header>
