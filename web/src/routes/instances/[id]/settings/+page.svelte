@@ -714,20 +714,20 @@
 				</div>
 			</div>
 
-			{#if canEdit || canEditLimits}
+			{#if (canEdit || canEditLimits) && (changed.length > 0 || saving)}
 				<div
 					class="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t bg-background/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6"
 				>
 					<p class="text-sm text-muted-foreground">
-						{changed.length === 0
-							? 'Nothing to save.'
-							: `${changed.length} ${changed.length === 1 ? 'setting' : 'settings'} changed. The server picks them up on its next start.`}
+						{changed.length}
+						{changed.length === 1 ? 'setting' : 'settings'} changed. The server picks them up on its next
+						start.
 					</p>
 					<div class="flex gap-2">
 						<Button
 							variant="ghost"
 							size="sm"
-							disabled={changed.length === 0 || saving}
+							disabled={saving}
 							onclick={() => instance && adopt(instance)}
 						>
 							Discard changes

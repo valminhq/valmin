@@ -362,8 +362,8 @@ With the same mod, Valmin also warns players in chat before a
 
 ## Change server settings
 
-Open **Settings**. Changes collect in a bar at the bottom of the page, which counts
-them; **Save changes** stores them and **Discard changes** drops them. Saved settings
+Open **Settings**. Once you change something, a bar appears at the bottom of the page and
+counts the changes; **Save changes** stores them and **Discard changes** drops them. Saved settings
 reach the server on its next start. Accounts without permission to change settings
 see them read-only.
 

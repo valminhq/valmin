@@ -57,7 +57,10 @@ describe('the server settings screen', () => {
 			Response.json(instance({ server_name: 'Renamed' }))
 		);
 
-		expect((saveButton() as HTMLButtonElement).disabled, 'nothing changed yet').toBe(true);
+		expect(
+			screen.queryByRole('button', { name: 'Discard changes' }),
+			'nothing changed yet'
+		).toBeNull();
 		await type('Server name', '  Renamed  ');
 		await click(saveButton());
 
@@ -83,7 +86,7 @@ describe('the server settings screen', () => {
 				'Normalised By Daemon'
 			)
 		);
-		expect(screen.getByText('Nothing to save.')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Discard changes' })).toBeNull();
 	});
 
 	// A new password locks every player out until someone tells them, and the panel
@@ -164,7 +167,7 @@ describe('the server settings screen', () => {
 		await open([actions.view]);
 
 		expect(screen.getByText('You can see these settings but not change them.')).toBeTruthy();
-		expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Discard changes' })).toBeNull();
 		for (const label of ['Server name', 'Server password', 'Memory limit (MB)']) {
 			expect((screen.getByLabelText(label) as HTMLInputElement).disabled, label).toBe(true);
 		}
@@ -248,7 +251,9 @@ describe('the server settings screen', () => {
 			status_notice: '',
 			status_connect_info: 'Join play.example\nAsk for the password.'
 		});
-		await vi.waitFor(() => expect(screen.getByText('Nothing to save.')).toBeTruthy());
+		await vi.waitFor(() =>
+			expect(screen.queryByRole('button', { name: 'Discard changes' })).toBeNull()
+		);
 		expect((screen.getByLabelText('How to join') as HTMLTextAreaElement).value).toBe(
 			'Join play.example\nAsk for the password.'
 		);
