@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { tick } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { type Instance } from '#lib/api/instances.js';
 	import {
@@ -35,6 +36,7 @@
 	import * as Dialog from '#lib/components/ui/dialog/index.js';
 	import Problem from '#lib/components/problem.svelte';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import Pencil from '@lucide/svelte/icons/pencil';
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
 	import ArrowDown from '@lucide/svelte/icons/arrow-down';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -205,7 +207,12 @@
 	};
 	let draft = $state<StepDraft[]>([]);
 	let nextStepId = 0;
-	const isChain = $derived(kind === 'chain');
+	// The schedule whose time is being changed. Its kind, steps and waiting rules stay as they are.
+	let editingId = $state<string | null>(null);
+	const editing = $derived(mine.find((s) => s.id === editingId) ?? null);
+	let formHeading = $state<HTMLElement | null>(null);
+
+	const isChain = $derived(kind === 'chain' && !editing);
 	/** Each step is offered to whoever may do it by hand; the daemon checks it again on write. */
 	const offeredSteps = $derived(
 		chainSteps.filter((c) => c.action === null || allowed.includes(c.action))
@@ -243,7 +250,9 @@
 		[draft[i], draft[j]] = [draft[j], draft[i]];
 	}
 
-	const ready = $derived(kind !== '' && built !== '' && stepsOk && !!zone && !saving);
+	const ready = $derived(
+		(editing !== null || kind !== '') && built !== '' && stepsOk && !!zone && !saving
+	);
 	const playerAware = $derived(
 		isChain
 			? stopsServer(steps)
@@ -335,6 +344,27 @@
 		});
 	}
 
+	/** Turns the form to one schedule's time and moves focus to it. */
+	async function edit(s: Schedule) {
+		editingId = s.id;
+		await tick();
+		formHeading?.focus();
+	}
+
+	function cancelEdit() {
+		editingId = null;
+	}
+
+	/** Writes the time now in the form over the schedule being edited. */
+	function retime() {
+		const target = editing;
+		if (!target) return;
+		void act(async () => {
+			await schedules.patch(target.id, { cron: built, timezone: viewer });
+			cancelEdit();
+		});
+	}
+
 	const toggle = (s: Schedule, enabled: boolean) =>
 		void act(() => schedules.patch(s.id, { enabled }));
 
@@ -421,8 +451,8 @@
 									<p class="text-sm" data-testid="chain-steps">{describeSteps(s.steps)}</p>
 								{/if}
 								<p class="text-sm text-muted-foreground">
-									next {when(s.next_run_at)} · last {when(s.last_run_at)} · shown in {viewer} · schedule
-									uses {s.timezone}
+									next {when(s.next_run_at)} · last {when(s.last_run_at)}
+									{#if s.timezone !== viewer}· shown in {viewer}, schedule uses {s.timezone}{/if}
 									{#if s.created_by_username}· set up by {s.created_by_username}{/if}
 									{#if s.wait_for_empty}· waits up to {deferral(s.max_deferral_seconds)} for players to
 										leave{/if}
@@ -442,6 +472,12 @@
 								onCheckedChange={(v) => toggle(s, v)}
 								aria-label="Enable {label(s.kind)} schedule"
 							/>
+							{#if offered.some((k) => k.kind === s.kind)}
+								<Button variant="ghost" size="sm" disabled={saving} onclick={() => edit(s)}>
+									<Pencil />
+									<span class="sr-only">Change when the {label(s.kind)} schedule runs</span>
+								</Button>
+							{/if}
 							<Button variant="ghost" size="sm" disabled={saving} onclick={() => ask(s)}>
 								<Trash2 />
 								<span class="sr-only">Delete schedule</span>
@@ -452,7 +488,10 @@
 			{/if}
 
 			<div class="grid gap-3 border-t pt-4">
-				<div class="grid gap-2">
+				<h3 class="text-sm font-medium outline-none" tabindex="-1" bind:this={formHeading}>
+					{editing ? `Change when “${label(editing.kind)}” runs` : 'Add a schedule'}
+				</h3>
+				<div class={['grid gap-2', editing && 'hidden']}>
 					<Label for="schedule-kind">What to run</Label>
 					<Select.Root type="single" bind:value={kind}>
 						<Select.Trigger id="schedule-kind">
@@ -673,8 +712,13 @@
 
 				<p class="text-sm text-muted-foreground">
 					{#if zone}
-						New schedules run in {viewer}. Existing schedules keep their original zone. Times on
-						this page are shown in {viewer}.
+						{#if editing}
+							After saving, this schedule runs in {viewer}.
+						{:else}
+							New schedules run in {viewer}. Existing schedules keep their zone until their time is
+							changed.
+						{/if}
+						Times on this page are shown in {viewer}.
 
 						<a class="underline" href={resolve('account/date-time')}>Change time zone</a>
 					{:else}
@@ -682,7 +726,7 @@
 					{/if}
 				</p>
 
-				{#if playerAware}
+				{#if playerAware && !editing}
 					<div class="flex items-center justify-between gap-4">
 						<Label for="schedule-wait">Wait until no players are connected</Label>
 						<Switch id="schedule-wait" bind:checked={waitForEmpty} />
@@ -725,9 +769,18 @@
 					{/if}
 				{/if}
 
-				<Button size="sm" class="justify-self-start" disabled={!ready} onclick={create}>
-					Add schedule
-				</Button>
+				{#if editing}
+					<div class="flex flex-wrap gap-2">
+						<Button size="sm" disabled={!ready} onclick={retime}>Save new time</Button>
+						<Button size="sm" variant="outline" disabled={saving} onclick={cancelEdit}
+							>Cancel</Button
+						>
+					</div>
+				{:else}
+					<Button size="sm" class="justify-self-start" disabled={!ready} onclick={create}>
+						Add schedule
+					</Button>
+				{/if}
 			</div>
 		{/if}
 	</Card.Content>

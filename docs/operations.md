@@ -167,9 +167,9 @@ On **Maintenance**, choose **What to run** and **How often**, then choose
 
 New schedules use the browser's time zone, including across daylight saving changes.
 Existing schedules keep the time zone they were created with (UTC for schedules created
-before this change). Upcoming runs, each schedule's next run, and skipped and failed
-runs are shown in your browser's time zone. Each schedule names the zone its cron
-expression uses.
+before this change) until you change their time. Upcoming runs, each schedule's next run,
+and skipped and failed runs are shown in your browser's time zone. A schedule whose cron
+expression uses another zone names it on its row.
 
 On the days the clocks change, a schedule still runs once. A time in the hour the clocks
 skip runs when they jump past it, and a time in the hour they repeat runs the first time the
@@ -181,6 +181,12 @@ an hour, as may a sequence with a step that stops it. `@every` expressions are n
 A schedule keeps running after its author loses access to the server, and after their
 account is deleted, when it shows an unnamed author. Disable or delete schedules you no
 longer want.
+
+To move a schedule to another time, choose the pencil on its row, set the new time in the
+form below the list and choose **Save new time**. What it runs, its steps and its waiting
+rules stay as they are, and it takes your current time zone. The form does not load the
+schedule's present time: it shows whatever it last held, so set the time you want.
+
 **Upcoming runs** lists the next runs of every enabled schedule, earliest first.
 
 A scheduled restart or backup stops the server and disconnects its players. To avoid that,
