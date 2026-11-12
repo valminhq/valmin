@@ -23,6 +23,10 @@
 	import PackageOpen from '@lucide/svelte/icons/package-open';
 	import LockKeyhole from '@lucide/svelte/icons/lock-keyhole';
 	import Clock from '@lucide/svelte/icons/clock';
+	import Monitor from '@lucide/svelte/icons/monitor';
+	import Sun from '@lucide/svelte/icons/sun';
+	import Moon from '@lucide/svelte/icons/moon';
+	import { setMode, userPrefersMode } from 'mode-watcher';
 	import Stethoscope from '@lucide/svelte/icons/stethoscope';
 	import CloudUpload from '@lucide/svelte/icons/cloud-upload';
 	import Bot from '@lucide/svelte/icons/bot';
@@ -139,6 +143,13 @@
 		}
 	}
 
+	// The colour themes on offer; system follows the device.
+	const themes = [
+		['system', 'System', Monitor],
+		['light', 'Light', Sun],
+		['dark', 'Dark', Moon]
+	] as const;
+
 	const summary =
 		'group inline-flex cursor-pointer list-none items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden';
 	const panel =
@@ -230,6 +241,21 @@
 						<Clock class="size-4" aria-hidden="true" />
 						Date and time
 					</a>
+					<div class="flex items-center gap-1 px-2 py-1" role="group" aria-label="Theme">
+						<span class="mr-auto text-sm">Theme</span>
+						{#each themes as [value, label, Icon] (value)}
+							<button
+								type="button"
+								class="rounded-sm p-1.5 hover:bg-muted focus-visible:bg-muted focus-visible:outline-none aria-pressed:bg-secondary"
+								aria-label={label}
+								title={label}
+								aria-pressed={userPrefersMode.current === value}
+								onclick={() => setMode(value)}
+							>
+								<Icon class="size-4" aria-hidden="true" />
+							</button>
+						{/each}
+					</div>
 					<a
 						class={item}
 						href="https://github.com/valminhq/valmin/issues/new"

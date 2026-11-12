@@ -24,6 +24,21 @@ beforeEach(() => {
 	session.ended = false;
 });
 
+describe('the theme switch', () => {
+	it('marks the chosen theme, keeps the choice and leaves the menu open', async () => {
+		render(AppHeader);
+		const dark = screen.getByRole('button', { name: 'Dark', hidden: true });
+		const menu = dark.closest('details')!;
+		menu.open = true;
+		expect(dark.getAttribute('aria-pressed')).toBe('false');
+
+		await click(dark);
+		expect(dark.getAttribute('aria-pressed')).toBe('true');
+		expect(localStorage.getItem('mode-watcher-mode')).toBe('dark');
+		expect(menu.open).toBe(true);
+	});
+});
+
 describe('signing out', () => {
 	it('opens the sign-in page when the panel owns the sign-in', async () => {
 		daemon.on('POST', '/auth/logout', () => new Response(null, { status: 204 }));

@@ -20,9 +20,11 @@ export function navigationMenu(node: HTMLDetailsElement) {
 		close();
 		node.querySelector('summary')?.focus();
 	}
-	// Every link and button in a menu navigates, and the menu must not cover where it lands.
+	// A link or button in a menu navigates, and the menu must not cover where it lands. A
+	// toggle (aria-pressed) stays on the page, so the menu stays with it.
 	function inside(event: MouseEvent) {
-		if (event.target instanceof Element && event.target.closest('a, button')) close();
+		if (event.target instanceof Element && event.target.closest('a, button:not([aria-pressed])'))
+			close();
 	}
 	function toggle() {
 		if (!node.open) return;
