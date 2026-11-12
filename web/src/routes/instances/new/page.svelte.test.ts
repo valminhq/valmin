@@ -89,6 +89,15 @@ describe('the create wizard', () => {
 		expect(gameplay?.textContent).toContain('World modifiers');
 	});
 
+	it('says which fields a held submit is waiting for', async () => {
+		await open();
+		expect(
+			screen.getByText('Still needed: panel name, server name, world name, server password.')
+		).toBeTruthy();
+		await fillIn();
+		expect(screen.queryByText(/Still needed/)).toBeNull();
+	});
+
 	it('marks a password that breaks the rules beside the password, and holds the submit', async () => {
 		await open();
 		await fillIn();
@@ -98,6 +107,7 @@ describe('the create wizard', () => {
 		expect(password.getAttribute('aria-invalid')).toBe('true');
 		expect(text(document.getElementById('password-error'))).toBe('At least 5 characters.');
 		expect(create().disabled).toBe(true);
+		expect(screen.getByText('Fix the fields marked above.')).toBeTruthy();
 	});
 
 	it('renders a field the daemon rejected beside it, and moves focus there', async () => {

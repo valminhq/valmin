@@ -158,6 +158,19 @@
 		}
 	}
 
+	/** What still keeps the template from being used, as one sentence. */
+	const waiting = $derived.by(() => {
+		if (blocking.length > 0)
+			return 'This template cannot be used until the problems above are fixed.';
+		const missing = [
+			...(name.trim() === '' ? ['a name'] : []),
+			...(password.length < minPassword
+				? [`a server password of at least ${minPassword} characters`]
+				: [])
+		];
+		return missing.length > 0 ? `Still needed: ${missing.join(' and ')}.` : '';
+	});
+
 	// A chosen template or a typed name is lost on leaving; once submitted the daemon owns it.
 	unsaved(() => job === null && (from !== null || name !== '' || password !== ''));
 
@@ -440,9 +453,12 @@
 				</Card.Content>
 			</Card.Root>
 
-			<Button class="justify-self-start" disabled={!ready || busy} onclick={submit}>
-				{busy ? 'Creating…' : 'Create server'}
-			</Button>
+			<div class="flex flex-wrap items-center gap-3">
+				<Button disabled={!ready || busy} onclick={submit}>
+					{busy ? 'Creating…' : 'Create server'}
+				</Button>
+				<p class="text-sm text-muted-foreground" role="status">{busy ? '' : waiting}</p>
+			</div>
 		{/if}
 	{/if}
 </main>

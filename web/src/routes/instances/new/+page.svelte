@@ -131,7 +131,7 @@
 		if (options && memLimitMB < options.min_memory_limit_mb) {
 			problems.mem_limit_mb = `Use at least ${options.min_memory_limit_mb} MB.`;
 		}
-		if (options && seedOn) {
+		if (options && seedOn && worldFiles.length === 0) {
 			const valid = new RegExp(`^[A-Za-z0-9]{1,${options.custom_seed.max_length}}$`);
 			if (seed.trim() !== '' ? !valid.test(seed.trim()) : seedDirect) {
 				problems.seed = `Use 1 to ${options.custom_seed.max_length} letters or digits.`;
@@ -151,6 +151,22 @@
 			password !== '' &&
 			Object.keys(localProblems).length === 0
 	);
+
+	/** What still keeps the form from being submitted, as one sentence. */
+	const waiting = $derived.by(() => {
+		const missing = [
+			[name.trim(), 'panel name'],
+			[serverName.trim(), 'server name'],
+			[worldName.trim(), 'world name'],
+			[password, 'server password']
+		]
+			.filter(([value]) => value === '')
+			.map(([, label]) => label);
+		if (missing.length > 0) return `Still needed: ${missing.join(', ')}.`;
+		return Object.keys(localProblems).length > 0 ? 'Fix the fields marked above.' : '';
+	});
+
+	const shownWaiting = $derived(busy ? '' : waiting);
 
 	// A part-filled form is unsaved work like any editor's. After submission the daemon owns
 	// what was entered, with one exception: the world upload is held in this browser and sent
@@ -206,7 +222,7 @@
 				source: m.source
 			}));
 		}
-		if (seedOn && seed.trim() !== '') body.seed = seed.trim();
+		if (seedOn && worldFiles.length === 0 && seed.trim() !== '') body.seed = seed.trim();
 
 		try {
 			// 202 and a job, never the instance (`11 §3`, ADR-028): nothing about this server is on
@@ -612,6 +628,15 @@
 						{busy ? 'Creating…' : 'Create server'}
 					</Button>
 				</div>
+				<p
+					class={[
+						'basis-full text-right text-sm text-muted-foreground',
+						!shownWaiting && 'sr-only'
+					]}
+					role="status"
+				>
+					{shownWaiting}
+				</p>
 			</div>
 		</form>
 	{/if}
