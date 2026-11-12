@@ -1,4 +1,5 @@
 <script lang="ts">
+	import EmptyState from '#lib/components/empty-state.svelte';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { resolve } from '$app/paths';
@@ -289,9 +290,7 @@
 				Grants given on this server. Administrators are listed separately below.
 			</p>
 			{#if catalogue.items.length === 0}
-				<div class="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-					Nobody has been given access to this server.
-				</div>
+				<EmptyState>Nobody has been given access to this server.</EmptyState>
 			{/if}
 
 			{#each catalogue.items as grant (grant.user_id)}
@@ -395,10 +394,10 @@
 				>
 			{/if}
 			{#if availablePeople.length === 0}
-				<div class="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+				<EmptyState>
 					There is nobody to give access to: administrators already have it and every other user has
 					a grant.
-				</div>
+				</EmptyState>
 			{:else}
 				<Card.Root>
 					<Card.Content class="grid gap-5">

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import EmptyState from '#lib/components/empty-state.svelte';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
@@ -90,10 +91,9 @@
 	{:else if files.length === 0}
 		<!-- The daemon's sentence, rendered as sent. Why a mod has no file yet is Valheim
 		     knowledge, and the SPA holds none of it (F2, ADR-110). -->
-		<div class="grid gap-1 rounded-lg border border-dashed p-6 text-center">
-			<p class="font-medium">Nothing to configure yet</p>
-			<p class="text-sm text-muted-foreground">{note}</p>
-		</div>
+		<EmptyState title="Nothing to configure yet">
+			{note}
+		</EmptyState>
 	{:else}
 		<div class="grid gap-2">
 			<Label for="config-search">Search by filename or plugin</Label>
@@ -104,12 +104,9 @@
 			</p>
 		</div>
 		{#if shown.length === 0}
-			<div class="grid gap-1 rounded-lg border border-dashed p-6 text-center">
-				<p class="font-medium">No files match</p>
-				<p class="text-sm text-muted-foreground">
-					No filename or plugin name contains “{query.trim()}”.
-				</p>
-			</div>
+			<EmptyState title="No files match">
+				No filename or plugin name contains “{query.trim()}”.
+			</EmptyState>
 		{:else}
 			<ul class="divide-y rounded-lg border">
 				{#each shown as file (file.file)}

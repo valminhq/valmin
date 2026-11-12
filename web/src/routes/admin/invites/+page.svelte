@@ -1,4 +1,5 @@
 <script lang="ts">
+	import EmptyState from '#lib/components/empty-state.svelte';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageWide } from '#lib/layout.js';
 	import { formatInstant } from '#lib/api/schedules.js';
@@ -249,9 +250,7 @@
 		{#if loading && invitations.length === 0}
 			<p class="text-sm text-muted-foreground">Loading…</p>
 		{:else if invitations.length === 0}
-			<div class="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-				No invites have been issued.
-			</div>
+			<EmptyState>No invites have been issued.</EmptyState>
 		{:else}
 			<div
 				class="flex w-fit flex-wrap gap-1 rounded-lg bg-muted p-1"
@@ -274,9 +273,9 @@
 				{/each}
 			</div>
 			{#if shown.length === 0}
-				<div class="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+				<EmptyState>
 					No {filters.find(([value]) => value === filter)?.[1].toLowerCase()} invites.
-				</div>
+				</EmptyState>
 			{/if}
 		{/if}
 
