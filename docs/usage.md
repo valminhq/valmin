@@ -108,6 +108,7 @@ version in full. A form with unsaved changes still asks before you leave.
 5. Submit the form and follow the progress. The first server downloads the dedicated
    server through SteamCMD; later servers reuse that download and copy it, which on
    most filesystems is still a copy of about 1 GB.
+   When setup finishes, the panel opens the new server.
 6. Start the server if you did not turn on **Start server after setup**. Wait for
    the panel to report it ready before connecting.
 
@@ -1024,7 +1025,7 @@ are installed on the server too, so check the list in the preview.
 The preview lists the server settings, the pinned mods and the config files. For a code,
 each config file is shown with the settings it changes, and a setting that looks like a
 token or a webhook is marked **looks secret**. A mod no longer in the catalogue is marked,
-and problems that block the template are listed at the top. Choose a panel name and password, then choose **Create server**.
+and problems that block the template are listed at the top. Choose a panel name and password, then choose **Create server**. When setup finishes, the panel opens the new server.
 
 Valmin downloads the game, installs each pinned mod in turn, then writes the
 configuration. A code's settings are applied over the config files the mods create; a

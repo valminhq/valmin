@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { unsaved } from '#lib/state/dirty.svelte.js';
 	import { NativeSelect } from '#lib/components/ui/native-select/index.js';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageNarrow } from '#lib/layout.js';
@@ -39,6 +40,18 @@
 	const formatChanged = $derived(
 		hourCycle !== (session.user?.hour_cycle ?? '') || dateOrder !== (session.user?.date_order ?? '')
 	);
+
+	// On a direct load the session arrives after the page; the form then takes the saved values.
+	let seeded = session.user !== null;
+	$effect(() => {
+		if (seeded || !session.user) return;
+		seeded = true;
+		chosen = session.user.timezone ?? '';
+		hourCycle = session.user.hour_cycle ?? '';
+		dateOrder = session.user.date_order ?? '';
+	});
+
+	unsaved(() => session.user !== null && (chosen !== current || formatChanged));
 
 	const timeOnly = { hour: 'numeric', minute: '2-digit' } as const;
 	const dateOnly = { year: 'numeric', month: '2-digit', day: '2-digit' } as const;

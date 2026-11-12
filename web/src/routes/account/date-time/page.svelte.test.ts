@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { viewerZone } from '#lib/api/schedules.js';
 import type { User } from '#lib/api/types.js';
+import { hasUnsaved } from '#lib/state/dirty.svelte.js';
 import { session } from '#lib/state/session.svelte.js';
 import { FakeDaemon } from '#lib/testing/daemon.js';
 import { click } from '#lib/testing/interact.js';
@@ -83,5 +84,14 @@ describe('the time zone screen', () => {
 		});
 		expect(session.user?.hour_cycle).toBe('h23');
 		expect(session.user?.date_order).toBe('ymd');
+	});
+
+	it('takes the saved values when the session arrives after the page, with nothing unsaved', async () => {
+		session.user = null;
+		render(Page);
+		session.user = { ...ada, timezone: 'Asia/Tokyo' };
+
+		await vi.waitFor(() => expect(zoneInput().value).toBe('Asia/Tokyo'));
+		expect(hasUnsaved()).toBe(false);
 	});
 });
