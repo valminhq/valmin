@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatInstant } from '#lib/api/schedules.js';
 	import { instances, STEAM_NEWS_URL, type PatchNote } from '#lib/api/instances.js';
 
 	let notes = $state<PatchNote[] | null>(null);
@@ -20,7 +21,8 @@
 		}
 	}
 
-	const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
+	const day = (iso: string) =>
+		formatInstant(iso, { year: 'numeric', month: 'numeric', day: 'numeric' });
 </script>
 
 <details

@@ -136,7 +136,7 @@
 	}
 
 	function when(at: string): string {
-		return formatInstant(at);
+		return formatInstant(at, { second: '2-digit' });
 	}
 </script>
 

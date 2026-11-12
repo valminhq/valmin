@@ -231,9 +231,7 @@
 
 	function when(timestamp: string | undefined): string {
 		const date = new Date(timestamp ?? '');
-		return timestamp && !Number.isNaN(date.getTime())
-			? formatInstant(date, { dateStyle: 'medium', timeStyle: 'short' })
-			: '';
+		return timestamp && !Number.isNaN(date.getTime()) ? formatInstant(date) : '';
 	}
 
 	/** The comparisons on offer, labelled by what each version is rather than by age. */

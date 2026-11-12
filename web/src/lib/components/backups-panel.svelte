@@ -3,7 +3,8 @@
 	import { unsaved } from '#lib/state/dirty.svelte.js';
 	import { scheduleKinds, formatInstant } from '#lib/api/schedules.js';
 	import { backups, type Backup, type BackupMode } from '#lib/api/backups.js';
-	import { backupAge, formatSize, recoveryPoints } from '#lib/backup-points.js';
+	import { backupAge, recoveryPoints } from '#lib/backup-points.js';
+	import { formatBytes } from '#lib/format.js';
 	import { actions, instances, stateSentence, type Instance } from '#lib/api/instances.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { Badge } from '#lib/components/ui/badge/index.js';
@@ -284,7 +285,7 @@
 			</span>
 		</span>
 		<span class="text-xs text-muted-foreground">
-			{note} · {formatSize(archive.size_bytes)} · {archive.trigger.replaceAll('_', ' ')}
+			{note} · {formatBytes(archive.size_bytes)} · {archive.trigger.replaceAll('_', ' ')}
 		</span>
 	</div>
 {/snippet}
@@ -511,10 +512,10 @@
 									</div>
 									<div class="grid gap-0.5">
 										<span class="text-xs text-muted-foreground md:hidden">Size</span>
-										<span class="tabular-nums">{formatSize(archive.size_bytes)}</span>
+										<span class="tabular-nums">{formatBytes(archive.size_bytes)}</span>
 										{#if archive.world_bytes !== null}
 											<span class="text-xs text-muted-foreground tabular-nums"
-												>world {formatSize(archive.world_bytes)}</span
+												>world {formatBytes(archive.world_bytes)}</span
 											>
 										{/if}
 									</div>

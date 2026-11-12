@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatBytes } from '#lib/format.js';
 	import { actions, instances, type Instance, type WorldOnDisk } from '#lib/api/instances.js';
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { session } from '#lib/state/session.svelte.js';
@@ -76,17 +77,6 @@
 	const gameBackups = $derived(
 		worlds.filter((w) => w.game_backup).sort((a, b) => b.modified_at.localeCompare(a.modified_at))
 	);
-
-	function size(bytes: number): string {
-		const units = ['B', 'KB', 'MB', 'GB'];
-		let v = bytes;
-		let u = 0;
-		while (v >= 1024 && u < units.length - 1) {
-			v /= 1024;
-			u++;
-		}
-		return `${v.toFixed(u === 0 ? 0 : 1)} ${units[u]}`;
-	}
 </script>
 
 {#snippet row(world: WorldOnDisk)}
@@ -101,7 +91,7 @@
 			<span class="text-xs text-muted-foreground">· loaded by this server</span>
 		{/if}
 		<span class="text-xs text-muted-foreground">
-			· {size(world.bytes)}
+			· {formatBytes(world.bytes)}
 			{#if !world.complete}· incomplete: its {world.db_bytes === null ? 'world data' : 'header'} is missing{/if}
 		</span>
 		<span class="ml-auto flex items-center gap-1">

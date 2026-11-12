@@ -644,9 +644,7 @@
 	function when(timestamp: string | null): string {
 		if (!timestamp) return '';
 		const date = new Date(timestamp);
-		return Number.isNaN(date.getTime())
-			? ''
-			: formatInstant(date, { dateStyle: 'medium', timeStyle: 'short' });
+		return Number.isNaN(date.getTime()) ? '' : formatInstant(date);
 	}
 
 	function hideBrokenIcon(event: Event) {

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatBytes } from '#lib/format.js';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageWide } from '#lib/layout.js';
 	import { formatInstant } from '#lib/api/schedules.js';
@@ -85,13 +86,7 @@
 	}
 	function bytes(value: number | null) {
 		if (value == null) return 'Not measured';
-		const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB'];
-		let unit = 0;
-		while (value >= 1024 && unit < units.length - 1) {
-			value /= 1024;
-			unit++;
-		}
-		return `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })} ${units[unit]}`;
+		return formatBytes(value);
 	}
 	async function openJob(id: string) {
 		selectedJob = null;

@@ -59,6 +59,6 @@ describe('the installation export screen', () => {
 
 		const link = await screen.findByRole('link', { name: /Download/ });
 		expect(link.getAttribute('href')).toBe('/api/v1/admin/export/download');
-		expect(screen.getByText(/30 MB/)).toBeTruthy();
+		expect(screen.getByText(/30\.0 MiB/)).toBeTruthy();
 	});
 });

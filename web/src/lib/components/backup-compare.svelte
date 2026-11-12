@@ -8,7 +8,7 @@
 	import type { Job } from '#lib/api/types.js';
 	import { describe } from '#lib/audit.js';
 	import { localDay, playersRetained, worldChange } from '#lib/backup-compare.js';
-	import { formatSize } from '#lib/backup-points.js';
+	import { formatBytes } from '#lib/format.js';
 	import { formatDuration } from '#lib/job-history.js';
 	import { playerActivity, type PlayerActivity } from '#lib/player-activity.js';
 	import { session } from '#lib/state/session.svelte.js';
@@ -147,7 +147,7 @@
 	}
 
 	function signed(n: number): string {
-		return n < 0 ? `−${formatSize(-n)}` : `+${formatSize(n)}`;
+		return n < 0 ? `−${formatBytes(-n)}` : `+${formatBytes(n)}`;
 	}
 </script>
 
@@ -169,7 +169,7 @@
 					{#if change.deltaBytes === null}
 						World size was not measured for both backups.
 					{:else}
-						{formatSize(change.older.world_bytes ?? 0)} → {formatSize(
+						{formatBytes(change.older.world_bytes ?? 0)} → {formatBytes(
 							change.newer.world_bytes ?? 0
 						)}
 						<span class="text-muted-foreground tabular-nums">({signed(change.deltaBytes)})</span>

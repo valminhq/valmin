@@ -1,3 +1,4 @@
+import { formatInstant } from '#lib/api/schedules.js';
 import { render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { actions } from '#lib/api/instances.js';
@@ -53,9 +54,7 @@ describe('the operation history', () => {
 		const failed = row('Game update');
 		expect(text(failed)).toContain('Failed');
 		expect(text(failed)).toContain('yesterday');
-		expect(failed.querySelector('summary [title]')?.getAttribute('title')).toBe(
-			new Date(at).toLocaleString()
-		);
+		expect(failed.querySelector('summary [title]')?.getAttribute('title')).toBe(formatInstant(at));
 		expect(text(row('Backup'))).toContain('Completed');
 	});
 
