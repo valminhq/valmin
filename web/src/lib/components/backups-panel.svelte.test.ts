@@ -494,7 +494,7 @@ describe('worlds on disk', () => {
 			worlds: [world({ bytes: 40 * 1024 * 1024, db_bytes: 1024 })]
 		});
 
-		expect(await screen.findByText(/40\.0 MB/)).toBeTruthy();
+		expect(await screen.findByText(/40\.0 MiB/)).toBeTruthy();
 	});
 
 	it('lists the game’s backups newest first, each restorable once the server stops', async () => {
@@ -572,7 +572,7 @@ describe('worlds on disk', () => {
 		const [sent] = daemon.requests('GET', '/instances/inst-a/jobs');
 		expect(sent.query.get('since')).toBe(older.created_at);
 		expect(sent.query.get('until')).toBe(newer.created_at);
-		expect(within(dialog).getByTestId('compare-world').textContent).toContain('+2.0 KB');
+		expect(within(dialog).getByTestId('compare-world').textContent).toContain('+2.0 KiB');
 		expect(within(dialog).queryByTestId('compare-players')).toBeNull();
 		expect(within(dialog).queryByTestId('compare-audit')).toBeNull();
 		expect(daemon.requests('GET', '/audit')).toHaveLength(0);

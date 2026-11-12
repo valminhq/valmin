@@ -65,11 +65,11 @@ describe('stopsServer', () => {
 });
 
 describe('formatInstant', () => {
-	const at = '2026-12-31T21:05:00Z';
+	const at = '2026-12-31T21:05Z';
 	it.each([
-		{ hour_cycle: 'h23', date_order: 'dmy', want: '31/12/2026, 21:05:00' },
-		{ hour_cycle: 'h23', date_order: 'ymd', want: '2026-12-31, 21:05:00' },
-		{ hour_cycle: 'h12', date_order: 'mdy', want: '12/31/2026, 9:05:00 PM' }
+		{ hour_cycle: 'h23', date_order: 'dmy', want: '31/12/2026, 21:05' },
+		{ hour_cycle: 'h23', date_order: 'ymd', want: '2026-12-31, 21:05' },
+		{ hour_cycle: 'h12', date_order: 'mdy', want: '12/31/2026, 9:05 PM' }
 	] as const)('reads $hour_cycle $date_order', ({ hour_cycle, date_order, want }) => {
 		expect(formatInstant(at, { timeZone: 'UTC' }, { hour_cycle, date_order })).toBe(want);
 	});
@@ -77,6 +77,14 @@ describe('formatInstant', () => {
 	it('reads the zone given in the options', () => {
 		const format = { hour_cycle: 'h23', date_order: 'ymd' } as const;
 		expect(formatInstant(at, { timeZone: 'Asia/Tokyo', timeStyle: 'short' }, format)).toBe('06:05');
+	});
+
+	it('shows only the fields a caller names, and adds seconds to the default', () => {
+		const format = { hour_cycle: 'h23', date_order: 'dmy' } as const;
+		const utc = { timeZone: 'UTC' };
+		expect(formatInstant(at, { ...utc, hour: '2-digit', minute: '2-digit' }, format)).toBe('21:05');
+		expect(formatInstant(at, { ...utc, month: 'short', day: 'numeric' }, format)).toBe('31 Dec');
+		expect(formatInstant(at, { ...utc, second: '2-digit' }, format)).toBe('31/12/2026, 21:05:00');
 	});
 });
 

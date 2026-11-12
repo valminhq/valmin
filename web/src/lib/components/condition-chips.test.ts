@@ -33,17 +33,17 @@ describe('condition chips', () => {
 	it('renders the explanation as content, not only as a title attribute', () => {
 		const html = body([item('low_disk', { detail: { Free: '1073741824', Alarm: '5368709120' } })]);
 		expect(html).toContain('The host is running out of disk space');
-		expect(html).toContain('1.0 GB free, below the 5.0 GB floor');
+		expect(html).toContain('1.0 GiB free, below the 5.0 GiB floor');
 		expect(html, 'a hover-only tooltip is what this replaced').not.toContain('title=');
 	});
 
 	it('separates the sentence from its detail', () => {
 		const html = body([item('low_disk', { detail: { Free: '1073741824', Alarm: '5368709120' } })]);
 		// The whitespace around a block tag is trimmed, so a separator written as markup runs the
-		// sentence into the detail: "…disk space· 1.0 GB free". The space the bug removed is the
+		// sentence into the detail: "…disk space· 1.0 GiB free". The space the bug removed is the
 		// one before the separator, and it survives the block boundary SSR writes between them,
 		// so the assertion reads the output as rendered rather than editing it first.
-		expect(html).toContain(' · 1.0 GB free, below the 5.0 GB floor');
+		expect(html).toContain(' · 1.0 GiB free, below the 5.0 GiB floor');
 		expect(html, 'nothing runs into a separator').not.toMatch(/\S·/);
 	});
 

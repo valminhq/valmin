@@ -190,11 +190,21 @@ export function viewerZone(): string {
 
 const dateOrderLocale = { mdy: 'en-US', dmy: 'en-GB', ymd: 'en-SE' } as const;
 
+/** A numeric date, which keeps the account's date order, and a time without seconds. */
+const minuteFields: Intl.DateTimeFormatOptions = {
+	year: 'numeric',
+	month: 'numeric',
+	day: 'numeric',
+	hour: 'numeric',
+	minute: '2-digit'
+};
+
 /**
  * An instant as the viewer reads it: in their zone, hour cycle and date order, each the one
- * chosen on their account or else the browser's. options default to the locale's date and time;
- * a timeZone among them replaces the viewer's. format replaces the account's hour cycle and date
- * order.
+ * chosen on their account or else the browser's. It is a numeric date and a time to the minute
+ * unless options name a style or any date or time field down to the minute, which then decide
+ * what is shown. A timeZone among them replaces the viewer's. format replaces the account's
+ * hour cycle and date order.
  */
 export function formatInstant(
 	value: string | number | Date,
@@ -205,16 +215,20 @@ export function formatInstant(
 	const hourCycle =
 		format?.hour_cycle ||
 		new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hourCycle;
+	const chosen = ['dateStyle', 'timeStyle', ...Object.keys(minuteFields)].some(
+		(field) => field in options
+	);
 	return new Date(value).toLocaleString(order ? dateOrderLocale[order] : undefined, {
 		timeZone: viewerZone(),
 		hourCycle,
+		...(chosen ? {} : minuteFields),
 		...options
 	});
 }
 
 /** An instant as a date and time on the clock of timeZone. */
 export function inZone(iso: string, timeZone: string): string {
-	return formatInstant(iso, { timeZone, dateStyle: 'medium', timeStyle: 'short' });
+	return formatInstant(iso, { timeZone });
 }
 
 export const schedules = {

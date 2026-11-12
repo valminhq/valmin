@@ -1,4 +1,5 @@
 import type { InboxItem, InboxKind } from '#lib/api/inbox.js';
+import { formatBytes } from '#lib/format.js';
 import { formatInstant } from '#lib/api/schedules.js';
 import { jobLabel } from '#lib/job-history.js';
 
@@ -72,17 +73,11 @@ export function bandItems(items: InboxItem[], listedIds: string[]): InboxItem[] 
 		.sort(compare);
 }
 
-export function formatBytes(value: string | undefined): string {
+/** A byte count the daemon sent as text, or nothing when it is not a number. */
+function bytesFromText(value: string | undefined): string {
 	const n = Number(value);
 	if (!Number.isFinite(n)) return '';
-	const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-	let size = n;
-	let unit = 0;
-	while (size >= 1024 && unit < units.length - 1) {
-		size /= 1024;
-		unit++;
-	}
-	return `${size < 10 ? size.toFixed(1) : Math.round(size)} ${units[unit]}`;
+	return formatBytes(n);
 }
 
 /**
@@ -91,7 +86,7 @@ export function formatBytes(value: string | undefined): string {
  */
 export function conditionDetail(item: InboxItem): string {
 	if (item.kind === 'low_disk') {
-		return `${formatBytes(item.detail?.Free)} free, below the ${formatBytes(item.detail?.Alarm)} floor`;
+		return `${bytesFromText(item.detail?.Free)} free, below the ${bytesFromText(item.detail?.Alarm)} floor`;
 	}
 	if (item.kind === 'job_failed' || item.kind === 'job_stuck') {
 		const job = item.detail?.Job ? jobLabel(item.detail.Job) : '';

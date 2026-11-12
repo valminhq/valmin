@@ -4,7 +4,7 @@
 	import { installExport, type ExportMode, type InstallExport } from '#lib/api/admin.js';
 	import { actions } from '#lib/api/instances.js';
 	import { formatInstant } from '#lib/api/schedules.js';
-	import { formatBytes } from '#lib/conditions.js';
+	import { formatBytes } from '#lib/format.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
@@ -119,7 +119,7 @@
 			<Card.Header>
 				<Card.Title>Latest export</Card.Title>
 				<Card.Description>
-					{latest.mode === 'full' ? 'Full' : 'Light'} · {formatBytes(String(latest.size_bytes))} · made
+					{latest.mode === 'full' ? 'Full' : 'Light'} · {formatBytes(latest.size_bytes)} · made
 					{formatInstant(latest.created_at)}. A new export replaces it.
 				</Card.Description>
 			</Card.Header>

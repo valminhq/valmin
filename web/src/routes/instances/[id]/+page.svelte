@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatBytes } from '#lib/format.js';
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import {
@@ -185,14 +186,7 @@
 
 	function bytes(n: number | null | undefined): string | null {
 		if (n === null || n === undefined) return null;
-		const units = ['B', 'KiB', 'MiB', 'GiB'];
-		let v = n;
-		let u = 0;
-		while (v >= 1024 && u < units.length - 1) {
-			v /= 1024;
-			u += 1;
-		}
-		return `${v.toFixed(u === 0 ? 0 : 1)} ${units[u]}`;
+		return formatBytes(n);
 	}
 
 	const primary = 'var(--color-primary, currentColor)';

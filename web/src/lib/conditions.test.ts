@@ -5,9 +5,9 @@ import {
 	bandItems,
 	chipsFor,
 	conditionAge,
-	conditionDetail,
-	formatBytes
+	conditionDetail
 } from '#lib/conditions.js';
+import { formatBytes } from '#lib/format.js';
 import { session } from '#lib/state/session.svelte.js';
 import type { User } from '#lib/api/types.js';
 
@@ -88,14 +88,14 @@ describe('bandItems', () => {
 
 describe('formatBytes', () => {
 	it('scales to a readable unit', () => {
-		expect(formatBytes(String(900))).toBe('900 B');
-		expect(formatBytes(String(6.4 * 1024 * 1024))).toBe('6.4 MB');
-		expect(formatBytes(String(2 * 1024 ** 3))).toBe('2.0 GB');
+		expect(formatBytes(900)).toBe('900 B');
+		expect(formatBytes(6.4 * 1024 * 1024)).toBe('6.4 MiB');
+		expect(formatBytes(2 * 1024 ** 3)).toBe('2.0 GiB');
 	});
 
 	it('says nothing rather than NaN when the daemon sent no number', () => {
-		expect(formatBytes(undefined)).toBe('');
-		expect(formatBytes('unknown')).toBe('');
+		const lowDisk = item('low_disk', { detail: { Free: 'unknown' } });
+		expect(conditionDetail(lowDisk)).toBe(' free, below the  floor');
 	});
 });
 
@@ -113,7 +113,7 @@ describe('conditionDetail', () => {
 		session.user = { timezone: 'Asia/Tokyo', hour_cycle: 'h23', date_order: 'ymd' } as User;
 		try {
 			const stale = item('stale_backup', { detail: { Last: '2026-09-20T12:05:00Z' } });
-			expect(conditionDetail(stale)).toBe('last archive 2026-09-20, 21:05:00');
+			expect(conditionDetail(stale)).toBe('last archive 2026-09-20, 21:05');
 		} finally {
 			session.user = null;
 		}

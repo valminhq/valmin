@@ -1,3 +1,4 @@
+import { formatInstant } from '#lib/api/schedules.js';
 import { render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Invite } from '#lib/api/admin.js';
@@ -16,7 +17,7 @@ vi.mock('$app/state', () => app);
 const hour = 3_600_000;
 const day = 24 * hour;
 const at = (offset: number) => new Date(Date.now() + offset).toISOString();
-const shown = (iso: string) => new Date(iso).toLocaleString();
+const shown = (iso: string) => formatInstant(iso);
 
 function user(id: string, username: string): User {
 	return {

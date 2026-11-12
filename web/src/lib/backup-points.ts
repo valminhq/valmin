@@ -38,15 +38,3 @@ export function backupAge(createdAt: string, now: number): string {
 	}
 	return 'just now';
 }
-
-/** A byte count in binary units: "512 B", "3.4 MB". */
-export function formatSize(n: number): string {
-	const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-	let v = n;
-	let u = 0;
-	while (v >= 1024 && u < units.length - 1) {
-		v /= 1024;
-		u += 1;
-	}
-	return `${v.toFixed(u === 0 ? 0 : 1)} ${units[u]}`;
-}
