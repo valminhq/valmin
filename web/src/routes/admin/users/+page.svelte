@@ -1,4 +1,5 @@
 <script lang="ts">
+	import EmptyState from '#lib/components/empty-state.svelte';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageWide } from '#lib/layout.js';
 	import { formatInstant } from '#lib/api/schedules.js';
@@ -326,9 +327,7 @@
 		{#if loading}
 			<p class="text-sm text-muted-foreground">Loading…</p>
 		{:else if people.length === 0}
-			<div class="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-				No users exist.
-			</div>
+			<EmptyState>No users exist.</EmptyState>
 		{/if}
 
 		{#each people as person (person.id)}

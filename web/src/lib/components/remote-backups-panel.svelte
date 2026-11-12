@@ -159,7 +159,7 @@
 		>
 		<Card.Content class="grid gap-5">
 			<Problem error={failure} />
-			{#if loading}<p class="text-sm">Loading remote copies…</p>{/if}
+			{#if loading}<p class="text-sm text-muted-foreground">Loading remote copies…</p>{/if}
 			{#if summary}
 				{#if !summary.destination_id}
 					<p class="text-sm">

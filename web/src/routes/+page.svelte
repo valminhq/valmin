@@ -1,4 +1,5 @@
 <script lang="ts">
+	import EmptyState from '#lib/components/empty-state.svelte';
 	import { pageWide } from '#lib/layout.js';
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { resolve } from '$app/paths';
@@ -255,23 +256,17 @@
 				>Retry loading servers</Button
 			>
 		{:else if instanceList.items.length === 0}
-			<div class="grid justify-items-center gap-2 rounded-lg border border-dashed p-8 text-center">
-				<p class="font-medium">No servers yet</p>
-				<p class="text-sm text-muted-foreground">
-					{canCreate
-						? 'Create a server from scratch, or start from a template someone shared.'
-						: 'Servers you are given access to show here.'}
-				</p>
-				{#if canCreate}
-					<div class="mt-2 flex flex-wrap justify-center gap-2">
-						<Button href={resolve('instances/new')}><Plus />New server</Button>
-
-						<Button variant="outline" href={resolve('instances/import')}
-							><Upload />New from template</Button
-						>
-					</div>
-				{/if}
-			</div>
+			{#snippet createActions()}
+				<Button href={resolve('instances/new')}><Plus />New server</Button>
+				<Button variant="outline" href={resolve('instances/import')}
+					><Upload />New from template</Button
+				>
+			{/snippet}
+			<EmptyState title="No servers yet" actions={canCreate ? createActions : undefined}>
+				{canCreate
+					? 'Create a server from scratch, or start from a template someone shared.'
+					: 'Servers you are given access to show here.'}
+			</EmptyState>
 		{:else}
 			{#if filterable}
 				<div class="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
@@ -382,13 +377,12 @@
 					</Card.Footer>
 				</Card.Root>
 			{:else}
-				<div
-					class="grid justify-items-center gap-2 rounded-lg border border-dashed p-6 text-center"
-				>
-					<p class="font-medium">No servers match</p>
-					<p class="text-sm text-muted-foreground">No server matches this search and state.</p>
-					<Button variant="outline" size="sm" onclick={clearFilters}>Clear filters</Button>
-				</div>
+				<EmptyState title="No servers match">
+					No server matches this search and state.
+					{#snippet actions()}
+						<Button variant="outline" size="sm" onclick={clearFilters}>Clear filters</Button>
+					{/snippet}
+				</EmptyState>
 			{/each}
 		{/if}
 	</main>

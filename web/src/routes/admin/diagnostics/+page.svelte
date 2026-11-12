@@ -232,7 +232,7 @@
 							</div>
 						{/each}
 						<Problem error={jobFailure} />
-						{#if jobLoading}<p class="text-sm">Loading job details…</p>{/if}
+						{#if jobLoading}<p class="text-sm text-muted-foreground">Loading job details…</p>{/if}
 						{#if selectedJob}
 							<div class="grid gap-2 rounded border p-3 text-sm" aria-live="polite">
 								<p>{selectedJob.kind.replaceAll('_', ' ')} · {selectedJob.status}</p>

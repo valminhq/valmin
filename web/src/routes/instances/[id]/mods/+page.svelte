@@ -1,4 +1,5 @@
 <script lang="ts">
+	import EmptyState from '#lib/components/empty-state.svelte';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { Tabs } from 'bits-ui';
@@ -837,17 +838,12 @@
 				{#if loading}
 					<p class="text-sm text-muted-foreground">Loading…</p>
 				{:else if installed.length === 0}
-					<div class="grid gap-1 rounded-lg border border-dashed p-6 text-center">
-						<p class="font-medium">No mods yet</p>
-						<p class="text-sm text-muted-foreground">
-							Browse the catalogue to find mods for this server.
-						</p>
-						<Button
-							variant="outline"
-							class="mt-2 justify-self-center"
-							onclick={() => (activeTab = 'browse')}>Browse mods</Button
-						>
-					</div>
+					<EmptyState title="No mods yet">
+						Browse the catalogue to find mods for this server.
+						{#snippet actions()}
+							<Button variant="outline" onclick={() => (activeTab = 'browse')}>Browse mods</Button>
+						{/snippet}
+					</EmptyState>
 				{:else}
 					<ul class="divide-y rounded-lg border">
 						{#each chosen as mod (mod.full_name)}
