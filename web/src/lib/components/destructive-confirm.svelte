@@ -10,19 +10,22 @@
 		title,
 		description,
 		confirmLabel = 'Delete',
+		cancelLabel = 'Cancel',
 		onconfirm
 	}: {
 		open?: boolean;
-		/** The thing being destroyed. It must be typed back, exactly. */
-		name: string;
+		/** The thing being destroyed, to be typed back exactly. Leave it out for an action
+		 * that loses no world or server, and the dialog asks for a click alone. */
+		name?: string;
 		title: string;
 		description: string;
 		confirmLabel?: string;
+		cancelLabel?: string;
 		onconfirm: () => void;
 	} = $props();
 
 	let typed = $state('');
-	const matches = $derived(typed === name);
+	const matches = $derived(name === undefined || typed === name);
 
 	$effect(() => {
 		if (!open) typed = '';
@@ -30,10 +33,8 @@
 </script>
 
 <!--
-	Every destructive action names the thing being destroyed, and here the operator
-	has to name it back. A dialog whose only content is "Are you sure?" is one an admin
-	dismisses by reflex, and on this panel the thing on the other side of the reflex is
-	somebody's world.
+	Confirms a destructive action. Given a name, the operator has to type it back, which
+	is for anything that loses a world or a server. Without one it is a plain confirmation.
 -->
 <Dialog.Root bind:open>
 	<Dialog.Content>
@@ -41,14 +42,16 @@
 			<Dialog.Title>{title}</Dialog.Title>
 			<Dialog.Description>{description}</Dialog.Description>
 		</Dialog.Header>
-		<div class="grid gap-2">
-			<Label for="confirm-name"
-				>Type <span class="font-mono font-semibold">{name}</span> to confirm</Label
-			>
-			<Input id="confirm-name" bind:value={typed} autocomplete="off" />
-		</div>
+		{#if name !== undefined}
+			<div class="grid gap-2">
+				<Label for="confirm-name"
+					>Type <span class="font-mono font-semibold">{name}</span> to confirm</Label
+				>
+				<Input id="confirm-name" bind:value={typed} autocomplete="off" />
+			</div>
+		{/if}
 		<Dialog.Footer>
-			<Button variant="outline" onclick={() => (open = false)}>Cancel</Button>
+			<Button variant="outline" onclick={() => (open = false)}>{cancelLabel}</Button>
 			<Button
 				variant="destructive"
 				disabled={!matches}

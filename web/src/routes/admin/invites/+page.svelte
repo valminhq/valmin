@@ -9,6 +9,7 @@
 	import type { User } from '#lib/api/types.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import * as Select from '#lib/components/ui/select/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import Problem from '#lib/components/problem.svelte';
@@ -28,6 +29,8 @@
 	let issued = $state<IssuedInvite | null>(null);
 	let loading = $state(true);
 	let busy = $state<string | null>(null);
+	let revokeOpen = $state(false);
+	let revoking = $state<Invite | null>(null);
 	let failure = $state<unknown>(null);
 	let filter = $state<InviteStatus | 'all'>('active');
 
@@ -315,7 +318,14 @@
 				{/if}
 				{#if standing === 'active'}
 					<Card.Footer>
-						<Button variant="ghost" disabled={busy === invite.id} onclick={() => revoke(invite)}>
+						<Button
+							variant="ghost"
+							disabled={busy === invite.id}
+							onclick={() => {
+								revoking = invite;
+								revokeOpen = true;
+							}}
+						>
 							<Trash2 /> Revoke invite
 						</Button>
 					</Card.Footer>
@@ -324,3 +334,14 @@
 		{/each}
 	</section>
 </main>
+
+{#if revoking}
+	{@const invite = revoking}
+	<DestructiveConfirm
+		bind:open={revokeOpen}
+		title="Revoke this invite?"
+		description="Its link stops working. Anyone who has not used it yet needs a new invite."
+		confirmLabel="Revoke invite"
+		onconfirm={() => void revoke(invite)}
+	/>
+{/if}

@@ -177,6 +177,9 @@ describe('unsaved edits while another person changes', () => {
 		await click(extra(card('alice'), /manage mods/i));
 
 		await click(within(card('bob')).getByRole('button', { name: /revoke access/i }));
+		await click(
+			within(await screen.findByRole('dialog')).getByRole('button', { name: /revoke access/i })
+		);
 		await vi.waitFor(() => expect(screen.queryByRole('heading', { name: 'bob' })).toBeNull());
 
 		expect(daemon.requests('DELETE', `${path}/u-b`)).toHaveLength(1);
@@ -340,6 +343,9 @@ describe('the Give access form', () => {
 		expect(screen.queryByRole('button', { name: 'Give access' })).toBeNull();
 
 		await click(within(card('bob')).getByRole('button', { name: /revoke access/i }));
+		await click(
+			within(await screen.findByRole('dialog')).getByRole('button', { name: /revoke access/i })
+		);
 		await vi.waitFor(() =>
 			expect(screen.queryByRole('heading', { name: 'bob', level: 3 })).toBeNull()
 		);

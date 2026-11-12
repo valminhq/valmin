@@ -8,6 +8,7 @@
 	import { unsaved } from '#lib/state/dirty.svelte.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import { Switch } from '#lib/components/ui/switch/index.js';
@@ -30,6 +31,7 @@
 	let loading = $state(true);
 	let saving = $state(false);
 	let failure = $state<unknown>(null);
+	let removeOpen = $state(false);
 	let baseline = $state('');
 	let nextKey = 0;
 	const zones = [...new Set([...Intl.supportedValuesOf('timeZone'), 'UTC'])].sort();
@@ -127,7 +129,6 @@
 	}
 
 	async function remove() {
-		if (!confirm('Remove the Discord bot? Its token and every link are deleted.')) return;
 		failure = null;
 		try {
 			await discordAdmin.remove();
@@ -292,9 +293,19 @@
 					>{saving ? 'Saving…' : 'Save Discord settings'}</Button
 				>
 				{#if settings.configured || settings.links.length > 0}
-					<Button variant="outline" disabled={saving} onclick={remove}>Remove bot</Button>
+					<Button variant="outline" disabled={saving} onclick={() => (removeOpen = true)}
+						>Remove bot</Button
+					>
 				{/if}
 			</div>
 		{/if}
 	{/if}
 </main>
+
+<DestructiveConfirm
+	bind:open={removeOpen}
+	title="Remove the Discord bot?"
+	description="Its token and every link are deleted. Setting it up again needs the token from the Discord Developer Portal."
+	confirmLabel="Remove bot"
+	onconfirm={() => void remove()}
+/>

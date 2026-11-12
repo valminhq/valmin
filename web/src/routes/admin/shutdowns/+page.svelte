@@ -7,6 +7,7 @@
 	import { session } from '#lib/state/session.svelte.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import Problem from '#lib/components/problem.svelte';
@@ -19,6 +20,8 @@
 	let loading = $state(true);
 	let busy = $state(false);
 	let failure = $state<unknown>(null);
+	let cancelOpen = $state(false);
+	let cancelling = $state<PlannedShutdown | null>(null);
 
 	async function load() {
 		loading = true;
@@ -52,8 +55,6 @@
 	}
 
 	async function cancel(item: PlannedShutdown) {
-		const at = inZone(item.power_off_at, zone);
-		if (!confirm(`Cancel the power cut at ${at}? Servers will keep running through it.`)) return;
 		failure = null;
 		try {
 			await shutdowns.remove(item.id);
@@ -117,7 +118,14 @@
 									</span>
 									<span class="text-xs text-muted-foreground">Added by {author(item)}</span>
 								</div>
-								<Button variant="outline" size="sm" onclick={() => cancel(item)}>
+								<Button
+									variant="outline"
+									size="sm"
+									onclick={() => {
+										cancelling = item;
+										cancelOpen = true;
+									}}
+								>
 									<Trash2 class="size-4" /> Cancel
 								</Button>
 							</li>
@@ -128,3 +136,15 @@
 		</Card.Root>
 	{/if}
 </main>
+
+{#if cancelling}
+	{@const item = cancelling}
+	<DestructiveConfirm
+		bind:open={cancelOpen}
+		title="Cancel the power cut at {inZone(item.power_off_at, zone)}?"
+		description="Servers will keep running through it."
+		confirmLabel="Cancel power cut"
+		cancelLabel="Keep it"
+		onconfirm={() => void cancel(item)}
+	/>
+{/if}

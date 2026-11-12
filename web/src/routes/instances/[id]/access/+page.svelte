@@ -19,6 +19,7 @@
 	import { Badge } from '#lib/components/ui/badge/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import * as Select from '#lib/components/ui/select/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import { unsaved } from '#lib/state/dirty.svelte.js';
@@ -37,6 +38,8 @@
 	let conflicts = $state<Record<string, Conflict>>({});
 	let loading = $state(true);
 	let busy = $state<string | null>(null);
+	let revokeOpen = $state(false);
+	let revoking = $state<Grant | null>(null);
 	let failure = $state<unknown>(null);
 	let newUser = $state('');
 	let newRole = $state<GrantRole>('viewer');
@@ -366,7 +369,10 @@
 							<Button
 								variant="ghost"
 								disabled={busy === grant.user_id}
-								onclick={() => remove(grant)}
+								onclick={() => {
+									revoking = grant;
+									revokeOpen = true;
+								}}
 							>
 								<Trash2 /> Revoke access
 							</Button>
@@ -445,3 +451,14 @@
 		</section>
 	{/if}
 </div>
+
+{#if revoking}
+	{@const grant = revoking}
+	<DestructiveConfirm
+		bind:open={revokeOpen}
+		title="Revoke {nameOf(grant.user_id)}'s access?"
+		description="They lose this server at once and it disappears from their list. Their account stays."
+		confirmLabel="Revoke access"
+		onconfirm={() => void remove(grant)}
+	/>
+{/if}
