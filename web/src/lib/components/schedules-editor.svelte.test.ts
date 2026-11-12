@@ -290,6 +290,31 @@ describe('the schedules editor', () => {
 		expect(daemon.requests('PATCH', '/schedules/sch-1')[0].body).toEqual({ enabled: false });
 	});
 
+	it('changes when a schedule runs without recreating it', async () => {
+		await open([actions.backupsCreate], { rows: [schedule()] });
+		daemon.on('PATCH', '/schedules/sch-1', () => Response.json(schedule()));
+
+		await click(
+			await screen.findByRole('button', {
+				name: 'Change when the Back up this server schedule runs'
+			})
+		);
+		expect(
+			screen.getByRole('heading', { name: /Change when “Back up this server” runs/ })
+		).toBeTruthy();
+		await click(screen.getByRole('button', { name: 'Save new time' }));
+
+		await vi.waitFor(() => expect(daemon.requests('PATCH', '/schedules/sch-1')).toHaveLength(1));
+		expect(daemon.requests('PATCH', '/schedules/sch-1')[0].body).toEqual({
+			cron: '00 04 * * *',
+			timezone: 'Asia/Kolkata'
+		});
+		expect(created()).toHaveLength(0);
+		await vi.waitFor(() =>
+			expect(screen.getByRole('heading', { name: 'Add a schedule' })).toBeTruthy()
+		);
+	});
+
 	it('deletes a schedule once the dialog naming it is confirmed', async () => {
 		await open([actions.backupsCreate], { rows: [schedule()] });
 		daemon.on('DELETE', '/schedules/sch-1', () => new Response(null, { status: 204 }));
