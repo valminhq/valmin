@@ -259,7 +259,7 @@
 	async function done() {
 		leaving = true;
 		await instanceList.load();
-		await goto(resolve('/'));
+		await goto(newInstanceId ? resolve('/instances/[id]', { id: newInstanceId }) : resolve('/'));
 	}
 </script>
 

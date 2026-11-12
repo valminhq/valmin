@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { unsaved } from '#lib/state/dirty.svelte.js';
 	import { Textarea } from '#lib/components/ui/textarea/index.js';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageNarrow } from '#lib/layout.js';
@@ -157,10 +158,14 @@
 		}
 	}
 
+	// A chosen template or a typed name is lost on leaving; once submitted the daemon owns it.
+	unsaved(() => job === null && (from !== null || name !== '' || password !== ''));
+
 	async function finished(finishedJob: Job) {
 		if (finishedJob.status !== 'succeeded') return;
 		await instanceList.load();
-		await goto(resolve('/'));
+		const id = finishedJob.instance_id;
+		await goto(id ? resolve('/instances/[id]', { id }) : resolve('/'));
 	}
 </script>
 

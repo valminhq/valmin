@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { unsaved } from '#lib/state/dirty.svelte.js';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageNarrow } from '#lib/layout.js';
 	import { goto } from '$app/navigation';
@@ -122,6 +123,9 @@
 			busy = false;
 		}
 	}
+
+	// The fields the form needs typed; the rest start from the container or a default.
+	unsaved(() => job === null && (serverName !== '' || worldName !== '' || password !== ''));
 
 	async function finished(result: Job) {
 		if (result.status !== 'succeeded' || !result.instance_id) return;
