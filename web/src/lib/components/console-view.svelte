@@ -66,6 +66,12 @@
 	const ROW_HEIGHT = 20;
 
 	let scroller = $state<HTMLElement | null>(null);
+	// Whether the log has shown output. The box takes its full height from then on, so a
+	// reconnect that briefly empties the buffer does not shrink the page.
+	let filled = $state(false);
+	$effect(() => {
+		if (buffer.rows.length > 0) filled = true;
+	});
 	let list = $state<VirtualList | null>(null);
 	let following = $state(true);
 
@@ -265,7 +271,10 @@
 		<div
 			bind:this={scroller}
 			{onscroll}
-			class="h-[28rem] overflow-auto rounded-md border bg-muted/30 font-mono text-xs"
+			class={[
+				'overflow-auto rounded-md border bg-muted/30 font-mono text-xs',
+				filled && 'h-[28rem]'
+			]}
 			role="log"
 			aria-label="Server console"
 		>
