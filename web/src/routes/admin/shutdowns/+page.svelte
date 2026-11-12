@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { pageNarrow } from '#lib/layout.js';
 	import { shutdowns, type PlannedShutdown } from '#lib/api/admin.js';
 	import { actions } from '#lib/api/instances.js';
 	import { inZone, viewerZone } from '#lib/api/schedules.js';
@@ -66,7 +67,7 @@
 	}
 </script>
 
-<main class="mx-auto grid w-full max-w-3xl gap-6 p-4 sm:p-6">
+<main class={pageNarrow}>
 	<h1 class="text-2xl font-semibold">Power cuts</h1>
 	{#if !allowed}
 		<p>You do not have permission to plan power cuts.</p>

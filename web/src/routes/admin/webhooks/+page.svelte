@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { pageNarrow } from '#lib/layout.js';
 	import { tick } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { actions, instances, type Instance } from '#lib/api/instances.js';
@@ -96,7 +97,7 @@
 	const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 </script>
 
-<main class="mx-auto grid max-w-3xl gap-6 p-6">
+<main class={pageNarrow}>
 	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
 		<ArrowLeft /> Servers
 	</Button>

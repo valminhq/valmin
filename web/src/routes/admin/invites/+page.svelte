@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { pageWide } from '#lib/layout.js';
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
@@ -149,7 +150,7 @@
 	}
 </script>
 
-<main class="mx-auto grid max-w-4xl gap-6 p-6">
+<main class={pageWide}>
 	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
 		<ArrowLeft /> Servers
 	</Button>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { pageNarrow } from '#lib/layout.js';
 	import { discordAdmin, type DiscordLink, type DiscordSettings } from '#lib/api/admin.js';
 	import { actions, instances, type Instance } from '#lib/api/instances.js';
 	import { viewerZone } from '#lib/api/schedules.js';
@@ -136,7 +137,7 @@
 	}
 </script>
 
-<main class="mx-auto grid w-full max-w-3xl gap-6 p-4 sm:p-6">
+<main class={pageNarrow}>
 	<h1 class="text-2xl font-semibold">Discord bot</h1>
 	{#if !allowed}
 		<p>You do not have permission to manage the Discord bot.</p>

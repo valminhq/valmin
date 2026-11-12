@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { column } from '#lib/layout.js';
 	import { navigationMenu } from '#lib/navigation-menu.js';
 	import { leave } from '#lib/nav.js';
 	import { goto } from '$app/navigation';
@@ -159,87 +160,89 @@
 	</li>
 {/snippet}
 
-<header class="flex flex-wrap items-center gap-2 border-b bg-card px-4 py-3 sm:px-6">
-	<a class="text-lg font-semibold tracking-tight" href={resolve('/')}>Valmin</a>
-	<Button
-		variant={home ? 'secondary' : 'ghost'}
-		size="sm"
-		aria-current={home ? 'page' : undefined}
-		href={resolve('/')}>Servers</Button
-	>
-	<nav
-		aria-label="Administration and account"
-		class="flex w-full min-w-0 flex-wrap items-center justify-end gap-1 sm:ml-auto sm:w-auto"
-	>
-		{#if socketStatus.value !== 'open'}
-			<span role="status" class="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-				{socketStatus.value === 'connecting'
-					? 'reconnecting…'
-					: socketStatus.value === 'ended'
-						? 'disconnected, reload to reconnect'
-						: 'offline'}
-			</span>
-		{/if}
-		{#if adminLinks.length > 0}
+<header class="border-b bg-card">
+	<div class={[column, 'flex flex-wrap items-center gap-2 py-3']}>
+		<a class="text-lg font-semibold tracking-tight" href={resolve('/')}>Valmin</a>
+		<Button
+			variant={home ? 'secondary' : 'ghost'}
+			size="sm"
+			aria-current={home ? 'page' : undefined}
+			href={resolve('/')}>Servers</Button
+		>
+		<nav
+			aria-label="Administration and account"
+			class="flex w-full min-w-0 flex-wrap items-center justify-end gap-1 sm:ml-auto sm:w-auto"
+		>
+			{#if socketStatus.value !== 'open'}
+				<span role="status" class="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+					{socketStatus.value === 'connecting'
+						? 'reconnecting…'
+						: socketStatus.value === 'ended'
+							? 'disconnected, reload to reconnect'
+							: 'offline'}
+				</span>
+			{/if}
+			{#if adminLinks.length > 0}
+				<details use:navigationMenu class="relative">
+					<summary class={summary}>
+						<span class="sm:hidden">Admin</span><span class="hidden sm:inline"
+							>{openAdmin ? openAdmin.label : 'Administration'}</span
+						>
+						<ChevronDown class="size-4 transition-transform group-open:rotate-180" />
+					</summary>
+					<ul class={panel}>
+						{#each groups as group, i (group.name)}
+							<li>
+								{#if i > 0}<Separator class="my-1" />{/if}
+								<p
+									id="admin-{group.name.toLowerCase()}"
+									class="px-2 py-1 text-xs font-medium text-muted-foreground"
+								>
+									{group.name}
+								</p>
+
+								<ul aria-labelledby="admin-{group.name.toLowerCase()}" class="grid gap-0.5">
+									{#each group.links as link (link.href)}
+										{@render adminItem(link)}
+									{/each}
+								</ul>
+							</li>
+						{/each}
+					</ul>
+				</details>
+			{/if}
 			<details use:navigationMenu class="relative">
 				<summary class={summary}>
-					<span class="sm:hidden">Admin</span><span class="hidden sm:inline"
-						>{openAdmin ? openAdmin.label : 'Administration'}</span
-					>
+					<span class="max-w-20 truncate sm:max-w-32">{session.user?.username ?? 'Account'}</span>
 					<ChevronDown class="size-4 transition-transform group-open:rotate-180" />
 				</summary>
-				<ul class={panel}>
-					{#each groups as group, i (group.name)}
-						<li>
-							{#if i > 0}<Separator class="my-1" />{/if}
-							<p
-								id="admin-{group.name.toLowerCase()}"
-								class="px-2 py-1 text-xs font-medium text-muted-foreground"
-							>
-								{group.name}
-							</p>
+				<div class={panel}>
+					<p class="max-w-60 px-2 py-1.5 text-xs break-words text-muted-foreground">
+						Signed in as {session.user?.username ?? ''}
+					</p>
 
-							<ul aria-labelledby="admin-{group.name.toLowerCase()}" class="grid gap-0.5">
-								{#each group.links as link (link.href)}
-									{@render adminItem(link)}
-								{/each}
-							</ul>
-						</li>
-					{/each}
-				</ul>
+					<a class={item} href={resolve('account/password')}>
+						<LockKeyhole class="size-4" aria-hidden="true" />
+						Change password
+					</a>
+
+					<a class={item} href={resolve('account/date-time')}>
+						<Clock class="size-4" aria-hidden="true" />
+						Date and time
+					</a>
+					<a
+						class={item}
+						href="https://github.com/valminhq/valmin/issues/new"
+						target="_blank"
+						rel="noopener noreferrer"
+					>
+						<Bug class="size-4" aria-hidden="true" /> Report an issue
+					</a>
+					<button class={item} type="button" onclick={signOut}>
+						<LogOut class="size-4" aria-hidden="true" /> Sign out
+					</button>
+				</div>
 			</details>
-		{/if}
-		<details use:navigationMenu class="relative">
-			<summary class={summary}>
-				<span class="max-w-20 truncate sm:max-w-32">{session.user?.username ?? 'Account'}</span>
-				<ChevronDown class="size-4 transition-transform group-open:rotate-180" />
-			</summary>
-			<div class={panel}>
-				<p class="max-w-60 px-2 py-1.5 text-xs break-words text-muted-foreground">
-					Signed in as {session.user?.username ?? ''}
-				</p>
-
-				<a class={item} href={resolve('account/password')}>
-					<LockKeyhole class="size-4" aria-hidden="true" />
-					Change password
-				</a>
-
-				<a class={item} href={resolve('account/date-time')}>
-					<Clock class="size-4" aria-hidden="true" />
-					Date and time
-				</a>
-				<a
-					class={item}
-					href="https://github.com/valminhq/valmin/issues/new"
-					target="_blank"
-					rel="noopener noreferrer"
-				>
-					<Bug class="size-4" aria-hidden="true" /> Report an issue
-				</a>
-				<button class={item} type="button" onclick={signOut}>
-					<LogOut class="size-4" aria-hidden="true" /> Sign out
-				</button>
-			</div>
-		</details>
-	</nav>
+		</nav>
+	</div>
 </header>

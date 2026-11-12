@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { pageNarrow } from '#lib/layout.js';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { actions, type GameOptions, instances } from '#lib/api/instances.js';
@@ -162,7 +163,7 @@
 	}
 </script>
 
-<main class="mx-auto grid max-w-2xl gap-4 p-6">
+<main class={pageNarrow}>
 	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
 		<ArrowLeft /> Servers
 	</Button>
