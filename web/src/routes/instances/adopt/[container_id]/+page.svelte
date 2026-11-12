@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { pageNarrow } from '#lib/layout.js';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
@@ -129,7 +130,7 @@
 	}
 </script>
 
-<main class="mx-auto grid max-w-2xl gap-4 p-6">
+<main class={pageNarrow}>
 	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
 		<ArrowLeft /> Servers
 	</Button>

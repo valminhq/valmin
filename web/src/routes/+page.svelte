@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { pageWide } from '#lib/layout.js';
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { resolve } from '$app/paths';
 	import {
@@ -174,7 +175,7 @@
 </script>
 
 <div>
-	<main class="mx-auto grid max-w-4xl gap-4 p-6">
+	<main class={pageWide}>
 		<div class="flex flex-wrap items-center justify-between gap-4">
 			<h1 class="text-2xl font-semibold tracking-tight">Servers</h1>
 			{#if canCreate && !empty}

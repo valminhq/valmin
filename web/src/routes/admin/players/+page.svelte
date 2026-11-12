@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { pageNarrow } from '#lib/layout.js';
 	import { hostPlayers, type HostPlayer } from '#lib/api/players.js';
 	import { actions } from '#lib/api/instances.js';
 	import { formatInstant } from '#lib/api/schedules.js';
@@ -43,7 +44,7 @@
 	});
 </script>
 
-<main class="mx-auto grid w-full max-w-3xl gap-6 p-4 sm:p-6">
+<main class={pageNarrow}>
 	<h1 class="text-2xl font-semibold">Players</h1>
 	{#if !allowed}
 		<p>You do not have permission to see players across servers.</p>

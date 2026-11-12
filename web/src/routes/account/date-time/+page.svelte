@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { pageNarrow } from '#lib/layout.js';
 	import { resolve } from '$app/paths';
 	import { api } from '#lib/api/client.js';
 	import { browserZone, formatInstant } from '#lib/api/schedules.js';
@@ -78,7 +79,7 @@
 	}
 </script>
 
-<main class="mx-auto grid max-w-2xl gap-6 p-6">
+<main class={pageNarrow}>
 	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
 		<ArrowLeft /> Servers
 	</Button>

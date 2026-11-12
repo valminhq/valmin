@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { pageNarrow } from '#lib/layout.js';
 	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -135,7 +136,7 @@
 	const when = (value: string | null | undefined) => (value ? formatInstant(value) : 'Never');
 </script>
 
-<main class="mx-auto grid w-full max-w-3xl gap-6 p-4 sm:p-6">
+<main class={pageNarrow}>
 	<h1 class="text-2xl font-semibold">Remote backups</h1>
 	{#if !allowed}
 		<p>You do not have permission to manage remote storage.</p>
