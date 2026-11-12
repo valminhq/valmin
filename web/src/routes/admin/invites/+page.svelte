@@ -16,6 +16,7 @@
 	import CopyButton from '#lib/components/copy-button.svelte';
 	import Link from '@lucide/svelte/icons/link';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import { warningText } from '#lib/tone.js';
 
 	let invitations = $state<Invite[]>([]);
 	let people = $state<User[]>([]);
@@ -296,7 +297,7 @@
 							class={[
 								'text-sm',
 								expiringSoon(invite.expires_at, now)
-									? 'font-medium text-amber-800 dark:text-amber-300'
+									? ['font-medium', warningText]
 									: 'text-muted-foreground'
 							]}
 						>

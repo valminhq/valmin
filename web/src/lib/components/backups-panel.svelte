@@ -24,6 +24,7 @@
 	import History from '@lucide/svelte/icons/history';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import GitCompare from '@lucide/svelte/icons/git-compare';
+	import { warningBox } from '#lib/tone.js';
 
 	let { instance, onchange }: { instance: Instance; onchange?: () => void } = $props();
 
@@ -327,7 +328,7 @@
 									{@render point('Newest consistent backup', points.newestConsistent, 'Consistent')}
 								{:else}
 									<div
-										class="grid gap-0.5 rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+										class={['grid gap-0.5 rounded-lg border p-4', warningBox]}
 										data-testid="no-consistent-backup"
 									>
 										<span class="text-xs">Newest consistent backup</span>
@@ -519,7 +520,10 @@
 									</div>
 									{#if archive.world_attention.length > 0}
 										<div
-											class="grid justify-items-start gap-1 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 md:col-span-full dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
+											class={[
+												'grid justify-items-start gap-1 rounded-md border p-3 text-sm md:col-span-full',
+												warningBox
+											]}
 										>
 											<span class="font-medium">Attention required</span>
 											<ul class="list-disc pl-5">

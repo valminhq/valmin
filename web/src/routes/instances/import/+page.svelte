@@ -25,6 +25,7 @@
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import { warningText } from '#lib/tone.js';
 
 	let options = $state<GameOptions | null>(null);
 	let failure = $state<unknown>(null);
@@ -387,9 +388,7 @@
 														= {setting.value}
 													</span>
 													{#if setting.secret || setting.suspicious}
-														<span class="shrink-0 text-amber-700 dark:text-amber-300">
-															looks secret
-														</span>
+														<span class={['shrink-0', warningText]}> looks secret </span>
 													{/if}
 												</li>
 											{/each}

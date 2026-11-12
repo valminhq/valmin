@@ -9,6 +9,7 @@
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import CircleQuestionMark from '@lucide/svelte/icons/circle-question-mark';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import { successText, warningText } from '#lib/tone.js';
 
 	let { instance }: { instance: Instance } = $props();
 
@@ -174,9 +175,9 @@
 				<div class="grid gap-2 rounded-md border p-3 text-sm" role="status">
 					<p class="flex items-start gap-2 font-medium">
 						{#if report.status === 'ok'}
-							<CircleCheck class="mt-0.5 size-4 shrink-0 text-green-600 dark:text-green-400" />
+							<CircleCheck class={['mt-0.5 size-4 shrink-0', successText]} />
 						{:else if report.status === 'warn'}
-							<TriangleAlert class="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+							<TriangleAlert class={['mt-0.5 size-4 shrink-0', warningText]} />
 						{:else}
 							<CircleQuestionMark class="mt-0.5 size-4 shrink-0 text-muted-foreground" />
 						{/if}

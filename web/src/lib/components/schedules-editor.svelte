@@ -38,6 +38,7 @@
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
 	import ArrowDown from '@lucide/svelte/icons/arrow-down';
 	import Plus from '@lucide/svelte/icons/plus';
+	import { warningText } from '#lib/tone.js';
 
 	let { instance }: { instance: Instance } = $props();
 
@@ -664,7 +665,7 @@
 						{meaning} · <span class="font-mono">{built}</span>
 					</p>
 					{#if clashes.length > 0}
-						<p class="text-sm text-amber-700 dark:text-amber-400" data-testid="clock-change">
+						<p class={['text-sm', warningText]} data-testid="clock-change">
 							{viewer} changes its clocks at this time. {clashNote} Choose another time to avoid it.
 						</p>
 					{/if}

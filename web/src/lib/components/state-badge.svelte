@@ -12,27 +12,23 @@
 	// attached (F2). `error` is a parking state with one way out (`12 §2.4`), so it is the
 	// one that has to look different.
 	const variant = $derived(
-		state === 'error' ? 'destructive' : state === 'running' ? 'default' : 'secondary'
+		state === 'error'
+			? 'destructive'
+			: state === 'running'
+				? 'success'
+				: isTransient(state)
+					? 'warning'
+					: 'secondary'
 	);
 	const label = $derived(state.replaceAll('_', ' '));
 </script>
 
 <span class="inline-flex flex-wrap items-center gap-2">
-	<Badge
-		{variant}
-		class={state === 'running'
-			? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-			: isTransient(state)
-				? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-				: undefined}
+	<Badge {variant}
 		>{label}{#if isTransient(state)}…{/if}</Badge
 	>
 	{#if restartRequired}
-		<Badge
-			variant="outline"
-			class="border-amber-300 text-amber-800 dark:border-amber-800 dark:text-amber-300"
-			>restart required</Badge
-		>
+		<Badge variant="warning-outline">restart required</Badge>
 	{:else if pendingRestart}
 		<Badge variant="outline">pending restart</Badge>
 	{/if}

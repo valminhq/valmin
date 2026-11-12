@@ -135,7 +135,7 @@
 
 	function badge(status: DiagnosticCheck['status']) {
 		if (status === 'fail') return 'destructive';
-		if (status === 'warn') return 'secondary';
+		if (status === 'warn') return 'warning';
 		return 'outline';
 	}
 

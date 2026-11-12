@@ -44,12 +44,7 @@
 			class="flex cursor-pointer flex-wrap items-center gap-2 rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
 		>
 			{#each items as item (item.kind)}
-				<Badge
-					variant={item.severity === 'critical' ? 'destructive' : 'outline'}
-					class={item.severity === 'critical'
-						? undefined
-						: 'border-amber-300 text-amber-800 dark:border-amber-800 dark:text-amber-300'}
-				>
+				<Badge variant={item.severity === 'critical' ? 'destructive' : 'warning-outline'}>
 					{#if item.severity === 'critical'}
 						<TriangleAlert aria-hidden="true" />
 					{/if}

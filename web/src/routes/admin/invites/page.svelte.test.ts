@@ -185,7 +185,7 @@ describe('active invite expiry', () => {
 
 		const soonLine = within(soon).getByText(/^Expires/);
 		expect(text(soonLine).trim()).toMatch(/^Expires in (1|2) hours? \(/);
-		expect(soonLine.className).toContain('text-amber-800');
+		expect(soonLine.className).toContain('amber');
 	});
 });
 
