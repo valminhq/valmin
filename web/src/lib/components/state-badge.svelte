@@ -28,8 +28,16 @@
 		>{label}{#if isTransient(state)}…{/if}</Badge
 	>
 	{#if restartRequired}
-		<Badge variant="warning-outline">restart required</Badge>
+		<Badge
+			variant="warning-outline"
+			title="A launch setting or the password changed. The server runs with the old values until it restarts."
+			>restart required</Badge
+		>
 	{:else if pendingRestart}
-		<Badge variant="outline">pending restart</Badge>
+		<Badge
+			variant="outline"
+			title="Saved mod or configuration changes are waiting for the next start."
+			>pending restart</Badge
+		>
 	{/if}
 </span>
