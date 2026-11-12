@@ -117,6 +117,23 @@ describe('the backups panel', () => {
 		expect(screen.getByLabelText('Consistent backups to keep')).toBeTruthy();
 	});
 
+	it('offers Upload now only once an off-host destination is set up', async () => {
+		const summary = { destination_id: null, enabled: false, pending: 0, failed: 0 };
+		daemon.on('GET', '/instances/inst-a/remote-copies', () =>
+			Response.json({ items: [], next_cursor: null, summary })
+		);
+		const view = await open([actions.backupsList, actions.backupsCreate]);
+		await vi.waitFor(() =>
+			expect(daemon.requests('GET', '/instances/inst-a/remote-copies')).toHaveLength(1)
+		);
+		expect(screen.queryByRole('button', { name: 'Upload now' })).toBeNull();
+		view.unmount();
+
+		summary.destination_id = 'dest-1' as never;
+		await open([actions.backupsList, actions.backupsCreate]);
+		expect(await screen.findByRole('button', { name: 'Upload now' })).toBeTruthy();
+	});
+
 	// The two controls are not two speeds of one thing: a quiesced archive
 	// stops the server, which is what makes it trustworthy; a hot copy may not restore.
 	it('sends the mode the operator chose, and says what each costs', async () => {
