@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { NativeSelect } from '#lib/components/ui/native-select/index.js';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageNarrow } from '#lib/layout.js';
 	import { api } from '#lib/api/client.js';
@@ -163,33 +164,25 @@
 			<Card.Content class="grid gap-4">
 				<div class="grid gap-2">
 					<Label for="hour-cycle">Clock</Label>
-					<select
-						id="hour-cycle"
-						bind:value={hourCycle}
-						class="h-10 rounded-md border bg-background px-3"
-					>
+					<NativeSelect id="hour-cycle" bind:value={hourCycle}>
 						<option value="">Follow my browser ({example('', '', timeOnly)})</option>
 						{#each hourCycles as option (option.value)}
 							<option value={option.value}
 								>{option.label} ({example(option.value, '', timeOnly)})</option
 							>
 						{/each}
-					</select>
+					</NativeSelect>
 				</div>
 				<div class="grid gap-2">
 					<Label for="date-order">Date</Label>
-					<select
-						id="date-order"
-						bind:value={dateOrder}
-						class="h-10 rounded-md border bg-background px-3"
-					>
+					<NativeSelect id="date-order" bind:value={dateOrder}>
 						<option value="">Follow my browser ({example('', '', dateOnly)})</option>
 						{#each dateOrders as option (option.value)}
 							<option value={option.value}
 								>{option.label} ({example('', option.value, dateOnly)})</option
 							>
 						{/each}
-					</select>
+					</NativeSelect>
 				</div>
 				<p class="text-sm text-muted-foreground">
 					Times will read like {example(hourCycle, dateOrder)}.

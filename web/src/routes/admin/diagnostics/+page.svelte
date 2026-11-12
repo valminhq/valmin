@@ -178,7 +178,8 @@
 				<Download /> Download support bundle
 			</Button>
 			<label class="flex items-center gap-2 text-sm">
-				<input type="checkbox" bind:checked={problemsOnly} /> Show problems only
+				<input type="checkbox" class="size-4 accent-primary" bind:checked={problemsOnly} /> Show problems
+				only
 			</label>
 			{#if report}
 				<span class="text-sm text-muted-foreground">

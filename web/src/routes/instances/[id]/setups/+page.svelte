@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { NativeSelect } from '#lib/components/ui/native-select/index.js';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { page } from '$app/state';
@@ -204,16 +205,12 @@
 					</div>
 					<div class="grid max-w-lg gap-2">
 						<Label for="setup-backup">Associated world backup (optional)</Label>
-						<select
-							id="setup-backup"
-							class="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-							bind:value={worldBackupId}
-						>
+						<NativeSelect id="setup-backup" bind:value={worldBackupId}>
 							<option value="">None</option>
 							{#each linkedBackups as backup (backup.id)}
 								<option value={backup.id}>{when(backup.created_at)} · {backup.world_name}</option>
 							{/each}
-						</select>
+						</NativeSelect>
 						<p class="text-xs text-muted-foreground">
 							Only consistent backups from this server can be linked. A linked backup is kept until
 							the setup is deleted. Linking does not restore the world.

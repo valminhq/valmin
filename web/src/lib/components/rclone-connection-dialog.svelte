@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { NativeSelect } from '#lib/components/ui/native-select/index.js';
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
@@ -233,16 +234,15 @@
 			>
 				<div class="grid gap-2">
 					<Label for="rclone-provider">Provider</Label>
-					<select
+					<NativeSelect
 						id="rclone-provider"
 						value={provider}
 						onchange={(event) => choose(event.currentTarget.value as RcloneProvider)}
-						class="h-10 rounded-md border bg-background px-3"
 					>
 						{#each PROVIDERS as option (option.value)}
 							<option value={option.value}>{option.label}</option>
 						{/each}
-					</select>
+					</NativeSelect>
 				</div>
 				<Field
 					id="rclone-name"

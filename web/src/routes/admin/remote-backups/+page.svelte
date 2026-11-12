@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { NativeSelect } from '#lib/components/ui/native-select/index.js';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageNarrow } from '#lib/layout.js';
 	import { untrack } from 'svelte';
@@ -162,13 +163,9 @@
 					>
 						<div class="grid gap-2">
 							<Label for="remote-kind">Storage connection</Label>
-							<select
-								id="remote-kind"
-								bind:value={kind}
-								class="h-10 rounded-md border bg-background px-3"
-							>
+							<NativeSelect id="remote-kind" bind:value={kind}>
 								<option value="webdav">WebDAV</option><option value="rclone">rclone</option>
-							</select>
+							</NativeSelect>
 						</div>
 						{#if kind === 'webdav'}
 							<div class="grid gap-2">

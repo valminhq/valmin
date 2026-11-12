@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Textarea } from '#lib/components/ui/textarea/index.js';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageNarrow } from '#lib/layout.js';
 	import { goto } from '$app/navigation';
@@ -297,13 +298,14 @@
 			</Card.Header>
 			<Card.Content class="grid gap-2">
 				<Label for="template-code">Template code</Label>
-				<textarea
+				<Textarea
 					id="template-code"
-					rows="4"
+					rows={4}
 					spellcheck="false"
 					placeholder="valmin1:… or a profile code"
-					class="w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs break-all outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-					bind:value={code}></textarea>
+					class="font-mono text-xs break-all md:text-xs"
+					bind:value={code}
+				></Textarea>
 				<Button
 					variant="outline"
 					size="sm"

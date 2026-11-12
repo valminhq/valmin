@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { NativeSelect } from '#lib/components/ui/native-select/index.js';
 	import EmptyState from '#lib/components/empty-state.svelte';
 	import { pageWide } from '#lib/layout.js';
 	import { formatInstant } from '#lib/api/schedules.js';
@@ -276,16 +277,12 @@
 					</div>
 					<div class="grid gap-2">
 						<Label for="server-state">State</Label>
-						<select
-							id="server-state"
-							class="h-8 rounded-lg border border-input bg-background px-2.5 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-							bind:value={stateFilter}
-						>
+						<NativeSelect id="server-state" bind:value={stateFilter}>
 							<option value="all">All</option>
 							<option value="running">Running</option>
 							<option value="stopped">Stopped</option>
 							<option value="attention">Needs attention</option>
-						</select>
+						</NativeSelect>
 					</div>
 				</div>
 				<p class="text-sm text-muted-foreground" role="status">
