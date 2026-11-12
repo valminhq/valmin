@@ -475,6 +475,7 @@
 											<label class="flex items-center gap-2">
 												<input
 													type="checkbox"
+													class="size-4 accent-primary"
 													checked={picked.some((b) => b.id === archive.id)}
 													onchange={(e) => pick(archive, e.currentTarget.checked)}
 												/>

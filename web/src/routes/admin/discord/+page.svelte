@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Textarea } from '#lib/components/ui/textarea/index.js';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageNarrow } from '#lib/layout.js';
 	import { discordAdmin, type DiscordLink, type DiscordSettings } from '#lib/api/admin.js';
@@ -227,6 +228,7 @@
 									<label class="flex items-center gap-2 text-sm">
 										<input
 											type="checkbox"
+											class="size-4 accent-primary"
 											checked={row.instance_ids.includes(server.id)}
 											onchange={(event) =>
 												toggleServer(row, server.id, event.currentTarget.checked)}
@@ -266,11 +268,12 @@
 				<Card.Content class="grid gap-4">
 					<div class="grid gap-2">
 						<Label for="discord-admins">User or role IDs, one per line</Label>
-						<textarea
+						<Textarea
 							id="discord-admins"
-							class="min-h-20 rounded-md border bg-transparent px-3 py-2 font-mono text-sm"
+							class="min-h-20 font-mono"
 							spellcheck="false"
-							bind:value={admins}></textarea>
+							bind:value={admins}
+						></Textarea>
 					</div>
 					<div class="grid gap-2">
 						<Label for="discord-zone">Time zone of typed times</Label>

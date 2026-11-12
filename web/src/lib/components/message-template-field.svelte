@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Textarea } from '#lib/components/ui/textarea/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { MAX_TEMPLATE } from '#lib/message.js';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
@@ -18,7 +19,7 @@
 		placeholders: string[];
 	} = $props();
 
-	let box = $state<HTMLTextAreaElement>();
+	let box = $state<HTMLTextAreaElement | null>(null);
 
 	function insert(name: string) {
 		const at = box?.selectionStart ?? value.length;
@@ -41,13 +42,13 @@
 			</Button>
 		{/if}
 	</div>
-	<textarea
+	<Textarea
 		{id}
-		bind:this={box}
+		bind:ref={box}
 		rows={Math.min(6, Math.max(2, fallback.split('\n').length))}
-		class="w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20"
 		aria-invalid={value.length > MAX_TEMPLATE}
-		bind:value></textarea>
+		bind:value
+	></Textarea>
 	<div class="flex flex-wrap items-center gap-1.5">
 		<span class="text-xs text-muted-foreground">Insert:</span>
 		{#each placeholders as name (name)}

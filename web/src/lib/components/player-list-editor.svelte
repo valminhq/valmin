@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Textarea } from '#lib/components/ui/textarea/index.js';
 	import { ApiError } from '#lib/api/errors.js';
 	import { playerLists, type PlayerList, type PlayerListKind } from '#lib/api/players.js';
 	import { Button } from '#lib/components/ui/button/index.js';
@@ -111,14 +112,14 @@
 		{:else}
 			<label class="grid gap-2">
 				<span class="text-sm font-medium">Player IDs</span>
-				<textarea
+				<Textarea
 					bind:value={text}
-					rows="7"
+					rows={7}
 					spellcheck="false"
-					class="min-h-32 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20"
+					class="min-h-32 font-mono"
 					aria-invalid={fieldErrors.length > 0}
 					aria-describedby={fieldErrors.length > 0 ? `${hintId} ${kind}-errors` : hintId}
-				></textarea>
+				></Textarea>
 			</label>
 
 			{#if fieldErrors.length > 0}

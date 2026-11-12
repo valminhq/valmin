@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Textarea } from '#lib/components/ui/textarea/index.js';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -48,9 +49,6 @@
 	const id = $derived(page.params.id ?? '');
 	// The whole link, so an operator can copy it out of the panel and send it to a friend.
 	const statusURL = $derived(`${page.url.origin}/status/${id}`);
-	const textareaClass =
-		'w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20';
-
 	let instance = $state<Instance | null>(null);
 	let options = $state<GameOptions | null>(null);
 	let failure = $state<unknown>(null);
@@ -535,14 +533,14 @@
 									error={problem('status_notice')}
 								>
 									{#snippet children(field)}
-										<textarea
+										<Textarea
 											id="status_notice"
-											rows="2"
+											rows={2}
 											maxlength={STATUS_TEXT_MAX}
 											disabled={!canEdit}
-											class={textareaClass}
 											bind:value={statusNotice}
-											{...field}></textarea>
+											{...field}
+										></Textarea>
 									{/snippet}
 								</Field>
 
@@ -553,14 +551,14 @@
 									error={problem('status_connect_info')}
 								>
 									{#snippet children(field)}
-										<textarea
+										<Textarea
 											id="status_connect_info"
-											rows="3"
+											rows={3}
 											maxlength={STATUS_TEXT_MAX}
 											disabled={!canEdit}
-											class={textareaClass}
 											bind:value={statusConnectInfo}
-											{...field}></textarea>
+											{...field}
+										></Textarea>
 									{/snippet}
 								</Field>
 							{/if}
@@ -808,13 +806,14 @@
 											: 'Create template code'}
 								</Button>
 								{#if template}
-									<textarea
+									<Textarea
 										readonly
-										rows="4"
+										rows={4}
 										aria-label="Template code"
-										class="{textareaClass} font-mono text-xs break-all"
-										onfocus={(e) => e.currentTarget.select()}>{template.code}</textarea
-									>
+										class="font-mono text-xs break-all md:text-xs"
+										onfocus={(e) => e.currentTarget.select()}
+										value={template.code}
+									></Textarea>
 									<div class="flex flex-wrap items-center gap-3">
 										<CopyButton value={template.code} label="Copy code" size="sm" />
 										<span class="text-sm text-muted-foreground">{codeSummary(template)}</span>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { NativeSelect } from '#lib/components/ui/native-select/index.js';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
@@ -50,16 +51,16 @@
 				<div class="flex flex-wrap items-center gap-x-4 gap-y-2 sm:ml-auto">
 					{#if instance && instanceList.items.length > 1}
 						<label class="sr-only" for="server-switcher">Switch server</label>
-						<select
+						<NativeSelect
 							id="server-switcher"
-							class="h-8 max-w-48 rounded-lg border border-input bg-background px-2.5 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none sm:max-w-64"
+							class="max-w-48 sm:max-w-64"
 							value={id}
 							onchange={switchTo}
 						>
 							{#each instanceList.items as row (row.id)}
 								<option value={row.id}>{row.name}</option>
 							{/each}
-						</select>
+						</NativeSelect>
 					{/if}
 					{#if offerCompare}
 						<a

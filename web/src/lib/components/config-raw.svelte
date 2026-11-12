@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Textarea } from '#lib/components/ui/textarea/index.js';
 	import { configs, type ConfigCopyName } from '#lib/api/configs.js';
 	import { ApiError } from '#lib/api/errors.js';
 	import type { TextResource } from '#lib/api/client.js';
@@ -143,11 +144,12 @@
 					The file changed after you opened it. Review the saved version below. Discard your edits
 					to use that version, or overwrite the saved file with your edits.
 				</p>
-				<textarea
-					class="h-48 w-full rounded-md border bg-background p-3 font-mono text-xs text-foreground"
+				<Textarea
+					class="h-48 font-mono text-xs md:text-xs"
 					readonly
-					aria-label="The file as it is on disk now">{conflict.text}</textarea
-				>
+					aria-label="The file as it is on disk now"
+					value={conflict.text}
+				></Textarea>
 				<div class="flex flex-wrap gap-2">
 					<Button variant="outline" size="sm" onclick={theirs}>Discard my edits</Button>
 					<Button variant="outline" size="sm" onclick={mine}>Overwrite saved file</Button>
@@ -193,13 +195,14 @@
 			No validation and no widgets. The daemon still refuses the write on a running server and
 			still keeps the previous bytes beside the file.
 		-->
-		<textarea
-			class="h-[32rem] w-full resize-y rounded-md border bg-background p-3 font-mono text-xs whitespace-pre disabled:opacity-50"
+		<Textarea
+			class="h-[32rem] font-mono text-xs whitespace-pre md:text-xs"
 			spellcheck="false"
 			autocapitalize="off"
 			aria-label="{file} as text"
 			disabled={!editable}
-			bind:value={text}></textarea>
+			bind:value={text}
+		></Textarea>
 
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<p class="text-sm text-muted-foreground">
