@@ -1,16 +1,11 @@
 <script lang="ts">
+	import ServerControls from '#lib/components/server-controls.svelte';
 	import { NativeSelect } from '#lib/components/ui/native-select/index.js';
 	import EmptyState from '#lib/components/empty-state.svelte';
 	import { pageWide } from '#lib/layout.js';
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { resolve } from '$app/paths';
-	import {
-		actions,
-		instances,
-		isTransient,
-		stateSentence,
-		type Instance
-	} from '#lib/api/instances.js';
+	import { actions, stateSentence, type Instance } from '#lib/api/instances.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { instanceList } from '#lib/state/instances.svelte.js';
 	import { orphans, type Orphan } from '#lib/api/instances.js';
@@ -28,9 +23,6 @@
 	import HostConditions from '#lib/components/host-conditions.svelte';
 	import StateBadge from '#lib/components/state-badge.svelte';
 	import JoinCode from '#lib/components/join-code.svelte';
-	import Play from '@lucide/svelte/icons/play';
-	import Square from '@lucide/svelte/icons/square';
-	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Upload from '@lucide/svelte/icons/upload';
@@ -39,7 +31,6 @@
 	let failure = $state<unknown>(null);
 	let conditionFailure = $state<unknown>(null);
 	let orphanFailure = $state<unknown>(null);
-	let busy = $state<string | null>(null);
 	let orphaned = $state<Orphan[]>([]);
 	let inboxItems = $state<InboxItem[]>([]);
 	let checkedAt = $state<Date | null>(null);
@@ -162,18 +153,6 @@
 	// A reconnect re-reads the list: the socket cannot say what changed while it was gone
 	// (`14 §7.2`), and the state topics were re-subscribed from scratch (ADR-041).
 	$effect(() => socket.onConnected(() => void refresh()));
-
-	async function run(instance: Instance, action: () => Promise<unknown>) {
-		busy = instance.id;
-		failure = null;
-		try {
-			await action();
-		} catch (err) {
-			failure = err;
-		} finally {
-			busy = null;
-		}
-	}
 </script>
 
 <div>
@@ -332,45 +311,7 @@
 						>
 							Open server
 						</Button>
-						{#if allowed.includes(actions.start)}
-							<Button
-								variant={instance.state === 'stopped' ? 'default' : 'outline'}
-								size="sm"
-								disabled={busy === instance.id ||
-									isTransient(instance.state) ||
-									instance.state !== 'stopped'}
-								onclick={() => run(instance, () => instances.start(instance.id))}
-							>
-								<Play />
-								{instance.state === 'starting' ? 'Starting…' : 'Start'}
-							</Button>
-						{/if}
-						{#if allowed.includes(actions.stop)}
-							<Button
-								variant="outline"
-								size="sm"
-								disabled={busy === instance.id ||
-									isTransient(instance.state) ||
-									instance.state !== 'running'}
-								onclick={() => run(instance, () => instances.stop(instance.id))}
-							>
-								<Square />
-								{instance.state === 'stopping' ? 'Stopping…' : 'Stop'}
-							</Button>
-						{/if}
-						{#if allowed.includes(actions.restart)}
-							<Button
-								variant="outline"
-								size="sm"
-								disabled={busy === instance.id ||
-									isTransient(instance.state) ||
-									instance.state !== 'running'}
-								onclick={() => run(instance, () => instances.restart(instance.id))}
-							>
-								<RotateCw />
-								Restart
-							</Button>
-						{/if}
+						<ServerControls {instance} {allowed} onfailure={(error) => (failure = error)} />
 					</Card.Footer>
 				</Card.Root>
 			{:else}

@@ -50,7 +50,7 @@ Opening a server shows its tabs. A tab appears only when your access reaches it.
 
 | Tab               | What it holds                                                                |
 | ----------------- | ---------------------------------------------------------------------------- |
-| **Overview**      | Connection details, controls, alerts, resources, recent operations, console. |
+| **Overview**      | Connection details, alerts, resources, recent operations, console.           |
 | **Mods**          | Installed mods, the catalogue, and the list of mods players need.            |
 | **Mod config**    | BepInEx and plugin configuration files.                                      |
 | **Players**       | Player activity, accounts seen on the server, and the player lists.          |
@@ -203,10 +203,12 @@ match. Recovery never stops, recreates, copies or changes the container or its f
 
 ### Start, stop and restart
 
-Use **Start**, **Stop** and **Restart** on the overview or the server list. A stop asks
-the game to shut down and waits up to two minutes for it to save the world, so a stop
-can take a while on a large world. Each action runs as an operation that you can follow
-on the overview.
+Use **Start**, **Stop** and **Restart** beside the server's name, which stays at the top of
+every one of its pages, or on the server list. Only the buttons that apply are shown: **Start**
+on a stopped server, **Stop** and **Restart** on a running one. Stop and Restart ask you to
+confirm, because both disconnect whoever is playing. A stop asks the game to shut down and
+waits up to two minutes for it to save the world, so a stop can take a while on a large
+world. Each action runs as an operation that you can follow on the overview.
 
 If **Back up when this server restarts** is on under [backup settings](operations.md#backup-settings),
 every restart, including a scheduled one, makes a consistent backup between the stop

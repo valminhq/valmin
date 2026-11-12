@@ -5,7 +5,6 @@
 	import {
 		actions,
 		instances,
-		isTransient,
 		type DiskUsage,
 		type CommandCapabilities,
 		type Instance,
@@ -34,9 +33,6 @@
 	import Sparkline from '#lib/components/sparkline.svelte';
 	import UpdateNotice from '#lib/components/update-notice.svelte';
 	import UpdateTestCard from '#lib/components/update-test-card.svelte';
-	import Play from '@lucide/svelte/icons/play';
-	import Square from '@lucide/svelte/icons/square';
-	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	const id = $derived(page.params.id ?? '');
@@ -165,13 +161,8 @@
 	const parked = $derived(instance?.state === 'error' && !installOutstanding(operation));
 	const failedJob = $derived(lastJob?.status === 'failed' ? lastJob : null);
 
-	/** The control that was pressed, so the button that sent the request is the one that says a
-	 * request is in flight. It clears when the daemon accepts the job; the state the socket then
-	 * reports is what carries the rest of the transition. */
-	let pending = $state('');
-
-	async function run(action: () => Promise<unknown>, label = '') {
-		pending = label;
+	/** Sends one request for this server and shows its error. */
+	async function run(action: () => Promise<unknown>) {
 		busy = true;
 		failure = null;
 		try {
@@ -180,7 +171,6 @@
 			failure = err;
 		} finally {
 			busy = false;
-			pending = '';
 		}
 	}
 
@@ -209,49 +199,6 @@
 	{#if instance}
 		{@const inst = instance}
 		<ConnectionSummary instance={inst} />
-
-		<div
-			aria-label="Server controls"
-			role="group"
-			class="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3"
-		>
-			{#if allowed.includes(actions.start)}
-				<Button
-					variant={inst.state === 'stopped' ? 'default' : 'outline'}
-					size="sm"
-					disabled={busy ||
-						isTransient(inst.state) ||
-						inst.state !== 'stopped' ||
-						operation !== null}
-					onclick={() => run(() => instances.start(inst.id), 'start')}
-				>
-					<Play />
-					{pending === 'start' || inst.state === 'starting' ? 'Starting…' : 'Start'}
-				</Button>
-			{/if}
-			{#if allowed.includes(actions.stop)}
-				<Button
-					variant="outline"
-					size="sm"
-					disabled={busy || isTransient(inst.state) || inst.state !== 'running'}
-					onclick={() => run(() => instances.stop(inst.id), 'stop')}
-				>
-					<Square />
-					{pending === 'stop' || inst.state === 'stopping' ? 'Stopping…' : 'Stop'}
-				</Button>
-			{/if}
-			{#if allowed.includes(actions.restart)}
-				<Button
-					variant="outline"
-					size="sm"
-					disabled={busy || isTransient(inst.state) || inst.state !== 'running'}
-					onclick={() => run(() => instances.restart(inst.id), 'restart')}
-				>
-					<RotateCw />
-					{pending === 'restart' ? 'Restarting…' : 'Restart'}
-				</Button>
-			{/if}
-		</div>
 
 		{#if parked}
 			<!--
