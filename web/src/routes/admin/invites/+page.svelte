@@ -1,7 +1,7 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageWide } from '#lib/layout.js';
 	import { formatInstant } from '#lib/api/schedules.js';
-	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { inviteAdmin, userAdmin, type Invite, type IssuedInvite } from '#lib/api/admin.js';
 	import { grants, type GrantPage, type GrantRole } from '#lib/api/grants.js';
@@ -13,7 +13,6 @@
 	import { Label } from '#lib/components/ui/label/index.js';
 	import Problem from '#lib/components/problem.svelte';
 	import { expiresIn, expiringSoon, inviteStatus, type InviteStatus } from '#lib/invite-status.js';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import CopyButton from '#lib/components/copy-button.svelte';
 	import Link from '@lucide/svelte/icons/link';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
@@ -151,16 +150,9 @@
 </script>
 
 <main class={pageWide}>
-	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
-		<ArrowLeft /> Servers
-	</Button>
-
-	<header class="grid gap-1">
-		<h1 class="text-2xl font-semibold tracking-tight">Invites</h1>
-		<p class="text-sm text-muted-foreground">
-			Create a single-use link so someone can choose their own username and password.
-		</p>
-	</header>
+	<PageHeader title="Invites">
+		Create a single-use link so someone can choose their own username and password.
+	</PageHeader>
 
 	<Problem error={failure} />
 

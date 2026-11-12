@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { page } from '$app/state';
 	import { instances, type Instance } from '#lib/api/instances.js';
 	import { socket } from '#lib/socket/index.svelte.js';
@@ -41,13 +42,10 @@
 </script>
 
 <div class="grid gap-6">
-	<header class="grid gap-1">
-		<h2 class="text-2xl font-semibold tracking-tight">Maintenance</h2>
-		<p class="text-sm text-muted-foreground">
-			Scheduled restarts, backups and game updates for this server, what runs next, runs that did
-			not complete, stopping it when nobody plays, the game version, and world tools.
-		</p>
-	</header>
+	<PageHeader title="Maintenance" level={2}>
+		Scheduled restarts, backups and game updates for this server, what runs next, runs that did not
+		complete, stopping it when nobody plays, the game version, and world tools.
+	</PageHeader>
 
 	<Problem error={failure} />
 

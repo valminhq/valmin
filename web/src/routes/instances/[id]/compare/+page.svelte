@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { instances } from '#lib/api/instances.js';
@@ -118,13 +119,10 @@
 </script>
 
 <div class="grid gap-6">
-	<header class="grid gap-1">
-		<h2 class="text-2xl font-semibold tracking-tight">Compare servers</h2>
-		<p class="text-sm text-muted-foreground">
-			See where this server and another differ in game build, settings, mods and configuration
-			files. Nothing on this page changes either server.
-		</p>
-	</header>
+	<PageHeader title="Compare servers" level={2}>
+		See where this server and another differ in game build, settings, mods and configuration files.
+		Nothing on this page changes either server.
+	</PageHeader>
 
 	{#if !canCompareHere}
 		<p class="text-sm text-muted-foreground">

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageWide } from '#lib/layout.js';
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { resolve } from '$app/paths';
@@ -18,7 +19,6 @@
 	import JobDetail from '#lib/components/job-detail.svelte';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import Problem from '#lib/components/problem.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Download from '@lucide/svelte/icons/download';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 
@@ -162,17 +162,10 @@
 </script>
 
 <main class={pageWide}>
-	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
-		<ArrowLeft /> Servers
-	</Button>
-
-	<header class="grid gap-1">
-		<h1 class="text-2xl font-semibold tracking-tight">Diagnostics</h1>
-		<p class="text-sm text-muted-foreground">
-			What this panel can and cannot reach, and the settings that decide whether it works. Every row
-			says where its answer came from.
-		</p>
-	</header>
+	<PageHeader title="Diagnostics">
+		What this panel can and cannot reach, and the settings that decide whether it works. Every row
+		says where its answer came from.
+	</PageHeader>
 
 	<Problem error={failure} />
 

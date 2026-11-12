@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { page } from '$app/state';
 	import { instances, type Instance } from '#lib/api/instances.js';
 	import { socket } from '#lib/socket/index.svelte.js';
@@ -36,16 +37,9 @@
 </script>
 
 <div class="grid gap-6">
-	<header class="grid gap-3">
-		<div class="flex flex-wrap items-center justify-between gap-3">
-			<div class="grid gap-1">
-				<h2 class="text-2xl font-semibold tracking-tight">Backups</h2>
-				<p class="text-sm text-muted-foreground">
-					What this server has archived, and how much is kept.
-				</p>
-			</div>
-		</div>
-	</header>
+	<PageHeader title="Backups" level={2}>
+		What this server has archived, and how much is kept.
+	</PageHeader>
 
 	<Problem error={failure} />
 

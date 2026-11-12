@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
@@ -176,13 +177,10 @@
 </script>
 
 <div class="grid gap-6">
-	<header class="grid gap-1">
-		<h2 class="text-2xl font-semibold tracking-tight">Saved setups</h2>
-		<p class="text-sm text-muted-foreground">
-			Save exact mod versions and supported configuration, then compare and restore them later.
-			World backups are linked for reference and restored separately.
-		</p>
-	</header>
+	<PageHeader title="Saved setups" level={2}>
+		Save exact mod versions and supported configuration, then compare and restore them later. World
+		backups are linked for reference and restored separately.
+	</PageHeader>
 
 	{#if !canManage}
 		<p class="text-sm text-muted-foreground">You don't have permission to manage saved setups.</p>

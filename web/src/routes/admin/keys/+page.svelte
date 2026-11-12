@@ -1,6 +1,6 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageNarrow } from '#lib/layout.js';
-	import { resolve } from '$app/paths';
 	import { keyAdmin } from '#lib/api/admin.js';
 	import { actions } from '#lib/api/instances.js';
 	import { session } from '#lib/state/session.svelte.js';
@@ -8,7 +8,6 @@
 	import * as Card from '#lib/components/ui/card/index.js';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import Problem from '#lib/components/problem.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import KeyRound from '@lucide/svelte/icons/key-round';
 
 	let jobId = $state<string | null>(null);
@@ -32,17 +31,10 @@
 </script>
 
 <main class={pageNarrow}>
-	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
-		<ArrowLeft /> Servers
-	</Button>
-
-	<header class="grid gap-1">
-		<h1 class="text-2xl font-semibold tracking-tight">Encryption keys</h1>
-		<p class="text-sm text-muted-foreground">
-			Server passwords, RCON passwords and authentication secrets are encrypted with keys derived
-			from the master key on disk.
-		</p>
-	</header>
+	<PageHeader title="Encryption keys">
+		Server passwords, RCON passwords and authentication secrets are encrypted with keys derived from
+		the master key on disk.
+	</PageHeader>
 
 	<Problem error={failure} />
 

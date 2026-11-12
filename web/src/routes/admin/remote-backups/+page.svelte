@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageNarrow } from '#lib/layout.js';
 	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
@@ -137,16 +138,17 @@
 </script>
 
 <main class={pageNarrow}>
-	<h1 class="text-2xl font-semibold">Remote backups</h1>
+	<PageHeader title="Remote backups">
+		Keep world archives on another host. Configure one destination, then enable automatic uploads on
+		each server’s Backups page.
+	</PageHeader>
 	{#if !allowed}
-		<p>You do not have permission to manage remote storage.</p>
-	{:else}
 		<p class="text-sm text-muted-foreground">
-			Keep world archives on another host. Configure one destination, then enable automatic uploads
-			on each server’s Backups page.
+			You do not have permission to manage remote storage.
 		</p>
+	{:else}
 		<Problem error={failure} />
-		{#if loading}<p>Loading remote storage…</p>
+		{#if loading}<p class="text-sm text-muted-foreground">Loading remote storage…</p>
 		{:else}
 			<Card.Root>
 				<Card.Header><Card.Title>Destination</Card.Title></Card.Header>
