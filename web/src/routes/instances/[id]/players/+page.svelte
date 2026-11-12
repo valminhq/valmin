@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { actions, instances, type Instance } from '#lib/api/instances.js';
@@ -56,16 +57,9 @@
 </script>
 
 <div class="grid gap-6">
-	<header class="grid gap-3">
-		<div class="flex flex-wrap items-center justify-between gap-3">
-			<div class="grid gap-1">
-				<h2 class="text-2xl font-semibold tracking-tight">Players</h2>
-				<p class="text-sm text-muted-foreground">
-					Player activity, and who may join and run admin commands.
-				</p>
-			</div>
-		</div>
-	</header>
+	<PageHeader title="Players" level={2}>
+		Player activity, and who may join and run admin commands.
+	</PageHeader>
 
 	<Problem error={failure} />
 

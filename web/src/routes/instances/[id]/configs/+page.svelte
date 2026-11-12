@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { actions } from '#lib/api/instances.js';
@@ -72,18 +73,11 @@
 </script>
 
 <div class="grid max-w-3xl gap-6">
-	<header class="grid gap-3">
-		<div class="flex flex-wrap items-center justify-between gap-3">
-			<div class="grid gap-1">
-				<h2 class="text-2xl font-semibold tracking-tight">Mod configuration</h2>
-				<p class="text-sm text-muted-foreground">
-					{canEdit
-						? 'Configure the mods installed on this server. Stop the server before editing.'
-						: 'Configuration files for the mods installed on this server.'}
-				</p>
-			</div>
-		</div>
-	</header>
+	<PageHeader title="Mod configuration" level={2}>
+		{canEdit
+			? 'Configure the mods installed on this server. Stop the server before editing.'
+			: 'Configuration files for the mods installed on this server.'}
+	</PageHeader>
 
 	<Problem error={failure} />
 

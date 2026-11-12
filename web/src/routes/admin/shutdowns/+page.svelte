@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageNarrow } from '#lib/layout.js';
 	import { shutdowns, type PlannedShutdown } from '#lib/api/admin.js';
 	import { actions } from '#lib/api/instances.js';
@@ -68,16 +69,15 @@
 </script>
 
 <main class={pageNarrow}>
-	<h1 class="text-2xl font-semibold">Power cuts</h1>
+	<PageHeader title="Power cuts">
+		Enter the times the electricity goes off. Every running server is stopped early enough to save
+		its world before the cut, and players online are warned in chat five minutes before that, when
+		the server has the RCON mod. Servers stay stopped after the host comes back; start them from the
+		panel or with Discord's <code>/start</code>.
+	</PageHeader>
 	{#if !allowed}
-		<p>You do not have permission to plan power cuts.</p>
+		<p class="text-sm text-muted-foreground">You do not have permission to plan power cuts.</p>
 	{:else}
-		<p class="text-sm text-muted-foreground">
-			Enter the times the electricity goes off. Every running server is stopped early enough to save
-			its world before the cut, and players online are warned in chat five minutes before that, when
-			the server has the RCON mod. Servers stay stopped after the host comes back; start them from
-			the panel or with Discord's <code>/start</code>.
-		</p>
 		<Problem error={failure} />
 
 		<Card.Root>
@@ -103,7 +103,7 @@
 		<Card.Root>
 			<Card.Header><Card.Title>Planned</Card.Title></Card.Header>
 			<Card.Content>
-				{#if loading}<p>Loading power cuts…</p>
+				{#if loading}<p class="text-sm text-muted-foreground">Loading power cuts…</p>
 				{:else if planned.length === 0}
 					<p class="text-sm text-muted-foreground">No power cuts are planned.</p>
 				{:else}

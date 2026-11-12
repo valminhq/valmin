@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { Tabs } from 'bits-ui';
 	import { modOffer, catalogueStatus, installedUpdateTarget } from '#lib/mod-catalogue.js';
@@ -654,16 +655,9 @@
 </script>
 
 <div class="grid gap-6">
-	<header class="grid gap-3">
-		<div class="flex flex-wrap items-center justify-between gap-3">
-			<div class="grid gap-1">
-				<h2 class="text-2xl font-semibold tracking-tight">Mods</h2>
-				<p class="text-sm text-muted-foreground">
-					What this server loads, and the catalogue to add from.
-				</p>
-			</div>
-		</div>
-	</header>
+	<PageHeader title="Mods" level={2}>
+		What this server loads, and the catalogue to add from.
+	</PageHeader>
 
 	<Problem error={failure} />
 	{#if detail}

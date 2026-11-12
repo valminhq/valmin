@@ -1,6 +1,6 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageNarrow } from '#lib/layout.js';
-	import { resolve } from '$app/paths';
 	import { api } from '#lib/api/client.js';
 	import { ApiError } from '#lib/api/errors.js';
 	import { session } from '#lib/state/session.svelte.js';
@@ -9,7 +9,6 @@
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import Problem from '#lib/components/problem.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 
 	let current = $state('');
 	let next = $state('');
@@ -41,17 +40,10 @@
 </script>
 
 <main class={pageNarrow}>
-	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
-		<ArrowLeft /> Servers
-	</Button>
-
-	<header class="grid gap-1">
-		<h1 class="text-2xl font-semibold tracking-tight">Change password</h1>
-		<p class="text-sm text-muted-foreground">
-			Choose a new password{session.user ? ` for ${session.user.username}` : ''}. Every other place
-			you are signed in is signed out; this one stays signed in.
-		</p>
-	</header>
+	<PageHeader title="Change password">
+		Choose a new password{session.user ? ` for ${session.user.username}` : ''}. Every other place
+		you are signed in is signed out; this one stays signed in.
+	</PageHeader>
 
 	<Problem error={failure} />
 

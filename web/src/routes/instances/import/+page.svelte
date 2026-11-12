@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageNarrow } from '#lib/layout.js';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -23,7 +24,6 @@
 	import { Switch } from '#lib/components/ui/switch/index.js';
 	import Problem from '#lib/components/problem.svelte';
 	import JobProgress from '#lib/components/job-progress.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { warningText } from '#lib/tone.js';
@@ -164,11 +164,7 @@
 </script>
 
 <main class={pageNarrow}>
-	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
-		<ArrowLeft /> Servers
-	</Button>
-
-	<h1 class="text-2xl font-semibold tracking-tight">New server from a template</h1>
+	<PageHeader title="New server from a template" />
 
 	{#if !canCreate}
 		<p class="text-sm text-muted-foreground">You don't have permission to create servers.</p>

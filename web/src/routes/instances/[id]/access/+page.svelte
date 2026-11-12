@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
@@ -268,12 +269,9 @@
 {/snippet}
 
 <div class="grid max-w-3xl gap-6">
-	<header class="grid gap-1">
-		<h2 class="text-2xl font-semibold tracking-tight">Panel access</h2>
-		<p class="text-sm text-muted-foreground">
-			Choose what each person can see and change on {instance?.name ?? 'this server'}.
-		</p>
-	</header>
+	<PageHeader title="Panel access" level={2}>
+		Choose what each person can see and change on {instance?.name ?? 'this server'}.
+	</PageHeader>
 
 	<Problem error={failure} />
 

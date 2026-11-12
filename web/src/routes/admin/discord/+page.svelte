@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageNarrow } from '#lib/layout.js';
 	import { discordAdmin, type DiscordLink, type DiscordSettings } from '#lib/api/admin.js';
 	import { actions, instances, type Instance } from '#lib/api/instances.js';
@@ -138,18 +139,19 @@
 </script>
 
 <main class={pageNarrow}>
-	<h1 class="text-2xl font-semibold">Discord bot</h1>
+	<PageHeader title="Discord bot">
+		Let people in your Discord check and start game servers with <code>/status</code> and
+		<code>/start</code>. Each link decides which servers a Discord server or channel can see, and
+		whether it may start them. Everyone in a linked channel can use both commands. Bot admins can
+		also plan power cuts for every server with <code>/shutdown</code>.
+	</PageHeader>
 	{#if !allowed}
-		<p>You do not have permission to manage the Discord bot.</p>
-	{:else}
 		<p class="text-sm text-muted-foreground">
-			Let people in your Discord check and start game servers with <code>/status</code> and
-			<code>/start</code>. Each link decides which servers a Discord server or channel can see, and
-			whether it may start them. Everyone in a linked channel can use both commands. Bot admins can
-			also plan power cuts for every server with <code>/shutdown</code>.
+			You do not have permission to manage the Discord bot.
 		</p>
+	{:else}
 		<Problem error={failure} />
-		{#if loading}<p>Loading Discord settings…</p>
+		{#if loading}<p class="text-sm text-muted-foreground">Loading Discord settings…</p>
 		{:else if settings}
 			<Card.Root>
 				<Card.Header><Card.Title>Bot</Card.Title></Card.Header>

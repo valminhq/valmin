@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageNarrow } from '#lib/layout.js';
 	import { hostPlayers, type HostPlayer } from '#lib/api/players.js';
 	import { actions } from '#lib/api/instances.js';
@@ -45,14 +46,15 @@
 </script>
 
 <main class={pageNarrow}>
-	<h1 class="text-2xl font-semibold">Players</h1>
+	<PageHeader title="Players">
+		Every account any server has seen, with the names it was seen with. The ID is the account; a
+		name in grey was matched by timing and is believed once it keeps coming back with the same ID.
+	</PageHeader>
 	{#if !allowed}
-		<p>You do not have permission to see players across servers.</p>
-	{:else}
 		<p class="text-sm text-muted-foreground">
-			Every account any server has seen, with the names it was seen with. The ID is the account; a
-			name in grey was matched by timing and is believed once it keeps coming back with the same ID.
+			You do not have permission to see players across servers.
 		</p>
+	{:else}
 		<Problem error={failure} />
 
 		<div class="grid gap-2">

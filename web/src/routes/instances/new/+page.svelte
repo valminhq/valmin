@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageNarrow } from '#lib/layout.js';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -263,7 +264,7 @@
 </script>
 
 <main class={pageNarrow}>
-	<h1 class="text-2xl font-semibold tracking-tight">New server</h1>
+	<PageHeader title="New server" />
 
 	{#if job}
 		<Card.Root>

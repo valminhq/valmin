@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageNarrow } from '#lib/layout.js';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -24,7 +25,6 @@
 	import Problem from '#lib/components/problem.svelte';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import WorldModifiers from '#lib/components/world-modifiers.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
 
 	const containerID = $derived(page.params.container_id ?? '');
@@ -131,11 +131,7 @@
 </script>
 
 <main class={pageNarrow}>
-	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
-		<ArrowLeft /> Servers
-	</Button>
-
-	<h1 class="text-2xl font-semibold tracking-tight">Recover an existing server</h1>
+	<PageHeader title="Recover an existing server" />
 	<Problem error={failure} />
 
 	{#if !canAdopt}

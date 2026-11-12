@@ -1,6 +1,6 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageNarrow } from '#lib/layout.js';
-	import { resolve } from '$app/paths';
 	import { api } from '#lib/api/client.js';
 	import { browserZone, formatInstant } from '#lib/api/schedules.js';
 	import type { User } from '#lib/api/types.js';
@@ -10,7 +10,6 @@
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import Problem from '#lib/components/problem.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 
 	const browser = browserZone();
 	const zones = [...new Set([...Intl.supportedValuesOf('timeZone'), 'UTC'])].sort();
@@ -80,17 +79,10 @@
 </script>
 
 <main class={pageNarrow}>
-	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
-		<ArrowLeft /> Servers
-	</Button>
-
-	<header class="grid gap-1">
-		<h1 class="text-2xl font-semibold tracking-tight">Date and time</h1>
-		<p class="text-sm text-muted-foreground">
-			The zone and format the panel shows times in. They are saved on your account, so they follow
-			you to every browser.
-		</p>
-	</header>
+	<PageHeader title="Date and time">
+		The zone and format the panel shows times in. They are saved on your account, so they follow you
+		to every browser.
+	</PageHeader>
 
 	<Problem error={failure} />
 

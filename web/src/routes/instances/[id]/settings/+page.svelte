@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
@@ -352,16 +353,9 @@
 </script>
 
 <div class="grid gap-6">
-	<header class="grid gap-3">
-		<div class="flex flex-wrap items-center justify-between gap-3">
-			<div class="grid gap-1">
-				<h2 class="text-2xl font-semibold tracking-tight">Server settings</h2>
-				<p class="text-sm text-muted-foreground">
-					Names, connections, the status page, gameplay and resource limits.
-				</p>
-			</div>
-		</div>
-	</header>
+	<PageHeader title="Server settings" level={2}>
+		Names, connections, the status page, gameplay and resource limits.
+	</PageHeader>
 
 	<Problem error={failure} />
 
