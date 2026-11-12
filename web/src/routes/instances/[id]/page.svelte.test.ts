@@ -93,7 +93,7 @@ async function open(
 		await Promise.resolve();
 		session.permissions = permissions('inst-a', held);
 	}
-	await screen.findByRole('group', { name: 'Server controls' });
+	await vi.waitFor(() => expect(document.getElementById('connect-heading')).not.toBeNull());
 	await vi.waitFor(() =>
 		expect(daemon.requests('GET', '/instances/inst-a/operation')).toHaveLength(1)
 	);

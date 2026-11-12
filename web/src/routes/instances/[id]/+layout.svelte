@@ -6,8 +6,11 @@
 	import { canCompare, switchServerPath } from '#lib/nav.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { instanceList } from '#lib/state/instances.svelte.js';
+	import { socket } from '#lib/socket/index.svelte.js';
 	import ServerNav from '#lib/components/server-nav.svelte';
 	import StateBadge from '#lib/components/state-badge.svelte';
+	import ServerControls from '#lib/components/server-controls.svelte';
+	import Problem from '#lib/components/problem.svelte';
 	import GitCompare from '@lucide/svelte/icons/git-compare';
 
 	let { children } = $props();
@@ -19,6 +22,17 @@
 		if (session.user) void instanceList.ensure();
 	});
 	const instance = $derived(instanceList.items.find((row) => row.id === id) ?? null);
+	// The socket cannot say what changed while it was gone, so a reconnect re-reads the list.
+	$effect(() => socket.onConnected(() => void instanceList.load()));
+
+	// A refused request is about one server in one state; it goes when either changes.
+	let failure = $state<unknown>(null);
+	$effect(() => {
+		void id;
+		void instance?.state;
+		failure = null;
+	});
+
 	const compareHref = $derived(resolve('/instances/[id]/compare', { id }));
 	const offerCompare = $derived(
 		canCompare(session.allowed(id)) && page.url.pathname !== compareHref
@@ -47,6 +61,13 @@
 						restartRequired={instance.restart_required}
 						pendingRestart={instance.pending_restart}
 					/>
+					{#key id}
+						<ServerControls
+							{instance}
+							allowed={session.allowed(id)}
+							onfailure={(error) => (failure = error)}
+						/>
+					{/key}
 				{/if}
 				<div class="flex flex-wrap items-center gap-x-4 gap-y-2 sm:ml-auto">
 					{#if instance && instanceList.items.length > 1}
@@ -72,6 +93,7 @@
 					{/if}
 				</div>
 			</div>
+			<Problem error={failure} />
 		</div>
 		<ServerNav {id} />
 	</div>
