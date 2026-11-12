@@ -15,6 +15,7 @@
 	import * as Dialog from '#lib/components/ui/dialog/index.js';
 	import JobHistory from '#lib/components/job-history.svelte';
 	import Problem from '#lib/components/problem.svelte';
+	import { warningText } from '#lib/tone.js';
 
 	let {
 		instanceId,
@@ -180,7 +181,7 @@
 						: 'No other backups taken in between.'}
 				</p>
 				{#if change.newFindings.length}
-					<ul class="list-disc pl-5 text-sm text-amber-900 dark:text-amber-200">
+					<ul class={['list-disc pl-5 text-sm', warningText]}>
 						{#each change.newFindings as finding (finding.code)}
 							<li>{finding.message}</li>
 						{/each}

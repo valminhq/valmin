@@ -31,12 +31,12 @@ export const sourceLabel: Record<ModSource, string> = {
 
 export const sourceText: Record<ModSource, string> = {
 	thunderstore: 'text-sky-700 dark:text-sky-300',
-	hexium: 'text-amber-700 dark:text-amber-300'
+	hexium: 'text-violet-700 dark:text-violet-300'
 };
 
 export const sourceBadge: Record<ModSource, string> = {
 	thunderstore: 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300',
-	hexium: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+	hexium: 'bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300'
 };
 
 /** One package in the cached index, as `GET /mods/search` and `GET /mods/{ns}/{name}`

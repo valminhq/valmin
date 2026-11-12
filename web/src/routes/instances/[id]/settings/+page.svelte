@@ -42,6 +42,7 @@
 	import Lock from '@lucide/svelte/icons/lock';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import { warningText } from '#lib/tone.js';
 
 	const id = $derived(page.params.id ?? '');
 	// The whole link, so an operator can copy it out of the panel and send it to a friend.
@@ -825,10 +826,7 @@
 										<span class="text-sm text-muted-foreground">{codeSummary(template)}</span>
 									</div>
 									{#if flaggedFiles.length > 0}
-										<p
-											class="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-300"
-											role="alert"
-										>
+										<p class={['flex items-start gap-2 text-sm', warningText]} role="alert">
 											<TriangleAlert class="mt-0.5 size-4 shrink-0" />
 											<span>
 												{flaggedFiles.map((c) => c.file).join(', ')}
@@ -882,9 +880,7 @@
 																{#if !carried(config, setting)}
 																	<span class="shrink-0 text-muted-foreground">left out</span>
 																{:else if setting.secret || setting.suspicious}
-																	<span class="shrink-0 text-amber-700 dark:text-amber-300">
-																		looks secret
-																	</span>
+																	<span class={['shrink-0', warningText]}> looks secret </span>
 																{/if}
 															</li>
 														{/each}

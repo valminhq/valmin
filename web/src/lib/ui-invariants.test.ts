@@ -591,3 +591,22 @@ describe('the mod registry switch', () => {
 		}
 	});
 });
+
+describe('warning and success colours', () => {
+	// The theme has no warning or success token, so the palette classes are written once:
+	// in the Badge variants and in `lib/tone.ts`. The console's search highlight and the
+	// public status page's dot are fills, not statuses of text, and keep their own.
+	it('come from the Badge variants or lib/tone.ts', () => {
+		const exempt = [
+			join('src', 'lib', 'tone.ts'),
+			join('src', 'lib', 'components', 'console-view.svelte'),
+			join('src', 'routes', 'status', '[id]', '+page.svelte')
+		];
+		for (const [path, text] of sources()) {
+			if (exempt.includes(path)) continue;
+			expect(text, `${path} spells out a status colour`).not.toMatch(
+				/\b(?:bg|text|border)-(?:amber|emerald|green|yellow|orange)-\d{2,3}\b/
+			);
+		}
+	});
+});
