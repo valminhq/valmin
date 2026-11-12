@@ -210,6 +210,11 @@ confirm, because both disconnect whoever is playing. A stop asks the game to shu
 waits up to two minutes for it to save the world, so a stop can take a while on a large
 world. Each action runs as an operation that you can follow on the overview.
 
+While a job runs on the server, such as a backup, a mod install or an update, its name shows
+beside the server's name on every page and links to the overview. The panel checks every few
+seconds, so a job can take a moment to appear. **Start** waits while a new server's setup is
+unfinished; the overview shows how to resume it.
+
 If **Back up when this server restarts** is on under [backup settings](operations.md#backup-settings),
 every restart, including a scheduled one, makes a consistent backup between the stop
 and the start.

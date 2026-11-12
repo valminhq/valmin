@@ -12,6 +12,11 @@
 	import ServerControls from '#lib/components/server-controls.svelte';
 	import Problem from '#lib/components/problem.svelte';
 	import GitCompare from '@lucide/svelte/icons/git-compare';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+	import { instances } from '#lib/api/instances.js';
+	import { operations, type Operation } from '#lib/api/operations.js';
+	import type { Job } from '#lib/api/types.js';
+	import { jobLabel } from '#lib/job-history.js';
 
 	let { children } = $props();
 
@@ -24,6 +29,41 @@
 	const instance = $derived(instanceList.items.find((row) => row.id === id) ?? null);
 	// The socket cannot say what changed while it was gone, so a reconnect re-reads the list.
 	$effect(() => socket.onConnected(() => void instanceList.load()));
+
+	// The job running on this server and the setup steps it still owes. Polled, because the
+	// socket has a topic per job and none for a server's jobs; a state change re-reads at once.
+	const serverState = $derived(instance?.state);
+	let working = $state<Job | null>(null);
+	let owed = $state<Operation | null>(null);
+	$effect(() => {
+		if (!session.user || !id) return;
+		void serverState;
+		let current = true;
+		async function read() {
+			if (document.hidden) return;
+			try {
+				const [jobs, operation] = await Promise.all([instances.jobs(id), operations.get(id)]);
+				if (!current) return;
+				working = jobs.find((job) => job.status === 'running') ?? null;
+				owed = operation;
+			} catch {
+				// Each section reports its own failed reads; the header only goes quiet.
+			}
+		}
+		void read();
+		const timer = setInterval(read, 5000);
+		document.addEventListener('visibilitychange', read);
+		return () => {
+			current = false;
+			clearInterval(timer);
+			document.removeEventListener('visibilitychange', read);
+		};
+	});
+	$effect(() => {
+		void id;
+		working = null;
+		owed = null;
+	});
 
 	// A refused request is about one server in one state; it goes when either changes.
 	let failure = $state<unknown>(null);
@@ -65,9 +105,29 @@
 						<ServerControls
 							{instance}
 							allowed={session.allowed(id)}
+							owes={owed !== null}
 							onfailure={(error) => (failure = error)}
 						/>
 					{/key}
+					<p class="text-sm text-muted-foreground" role="status">
+						{#if working}
+							<a
+								class="inline-flex items-center gap-1.5 hover:text-foreground hover:underline"
+								href={resolve('/instances/[id]', { id })}
+							>
+								<LoaderCircle class="size-4 motion-safe:animate-spin" aria-hidden="true" />
+								{jobLabel(working.kind, working.changes)}
+								running…
+							</a>
+						{:else if owed}
+							<a
+								class="hover:text-foreground hover:underline"
+								href={resolve('/instances/[id]', { id })}
+							>
+								Setup is unfinished. See the overview.
+							</a>
+						{/if}
+					</p>
 				{/if}
 				<div class="flex flex-wrap items-center gap-x-4 gap-y-2 sm:ml-auto">
 					{#if instance && instanceList.items.length > 1}

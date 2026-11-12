@@ -6,7 +6,8 @@ import { actions, type Instance } from '#lib/api/instances.js';
 import type { MyPermissions } from '#lib/api/types.js';
 import { instanceList } from '#lib/state/instances.svelte.js';
 import { session } from '#lib/state/session.svelte.js';
-import { FakeDaemon, instance } from '#lib/testing/daemon.js';
+import type { Job } from '#lib/api/types.js';
+import { FakeDaemon, instance, job } from '#lib/testing/daemon.js';
 import { socket } from '#lib/testing/socket.js';
 import Layout from './+layout.svelte';
 
@@ -41,6 +42,7 @@ function grants(held: Record<string, string[]>): MyPermissions {
 }
 
 let daemon: FakeDaemon;
+let jobs: Job[] = [];
 
 async function open(
 	pathname: string,
@@ -49,6 +51,10 @@ async function open(
 ) {
 	app.page.url = new URL(`http://localhost${pathname}`);
 	daemon.on('GET', '/instances', () => Response.json({ items: listed, next_cursor: null }));
+	daemon.on('GET', '/instances/inst-a/jobs', () =>
+		Response.json({ items: jobs, next_cursor: null })
+	);
+	daemon.on('GET', '/instances/inst-a/operation', () => Response.json(null));
 	session.permissions = grants(held);
 	render(Layout, {
 		props: { children: createRawSnippet(() => ({ render: () => '<p>section</p>' })) }
@@ -152,5 +158,29 @@ describe('the compare link', () => {
 		await open('/instances/inst-a', { 'inst-a': [actions.settings, actions.modsList] });
 
 		expect(screen.queryByRole('link', { name: 'Compare with another server' })).toBeNull();
+	});
+});
+
+describe('the running job in the server header', () => {
+	const live = [instance({ id: 'inst-a', name: 'Live', state: 'running' })];
+
+	it('names the job and links to the overview', async () => {
+		jobs = [job({ job_id: 'job-1', kind: 'backup', status: 'running' })];
+		try {
+			await open('/instances/inst-a/backups', { 'inst-a': [actions.stop, actions.restart] }, live);
+
+			const running = await screen.findByRole('link', { name: /Backup running/ });
+			expect(running.getAttribute('href')).toBe('/instances/inst-a');
+		} finally {
+			jobs = [];
+		}
+	});
+
+	it('says nothing while no job runs', async () => {
+		await open('/instances/inst-a/backups', { 'inst-a': [actions.stop] }, live);
+		await vi.waitFor(() =>
+			expect(daemon.requests('GET', '/instances/inst-a/jobs').length).toBeGreaterThan(0)
+		);
+		expect(screen.queryByRole('link', { name: /running/ })).toBeNull();
 	});
 });

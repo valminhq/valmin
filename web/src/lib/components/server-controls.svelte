@@ -9,10 +9,13 @@
 	let {
 		instance,
 		allowed,
+		owes = false,
 		onfailure
 	}: {
 		instance: Instance;
 		allowed: string[];
+		/** The server's setup has steps left to run, which holds Start. */
+		owes?: boolean;
 		/** Told each request's error, and null when a new request starts. */
 		onfailure: (error: unknown) => void;
 	} = $props();
@@ -61,7 +64,11 @@
 		class="flex flex-wrap items-center gap-2"
 	>
 		{#if canStart}
-			<Button size="sm" disabled={busy} onclick={() => run(() => instances.start(instance.id))}>
+			<Button
+				size="sm"
+				disabled={busy || owes}
+				onclick={() => run(() => instances.start(instance.id))}
+			>
 				<Play /> Start
 			</Button>
 		{/if}
