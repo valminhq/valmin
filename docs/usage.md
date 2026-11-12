@@ -1206,6 +1206,11 @@ time all year. A run inside the hour a clock change skips is missed that day, an
 the hour it repeats runs twice. The schedule editor warns when the chosen time falls in such
 an hour, which is 02:00 to 03:00 in most of Europe.
 
+### Choose light or dark
+
+The menu under your username has a **Theme** row: **System** follows your device, **Light**
+and **Dark** fix the choice. It is kept in the browser, so each browser has its own.
+
 ## Read the audit log
 
 Administrators open **Audit log** in the header's **Administration** menu. Each entry says who
