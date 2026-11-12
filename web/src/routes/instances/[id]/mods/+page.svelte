@@ -986,7 +986,7 @@
 								<span
 									class="grid size-10 shrink-0 place-items-center rounded-md border bg-muted text-sm font-medium text-muted-foreground"
 								>
-									{mod.name.slice(0, 1).toUpperCase()}
+									<span class="col-start-1 row-start-1">{mod.name.slice(0, 1).toUpperCase()}</span>
 									{#if mod.icon_url}
 										<img
 											src={mod.icon_url}
@@ -1001,8 +1001,10 @@
 
 								<div class="grid min-w-0 flex-1 gap-1">
 									<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-										<span class="font-medium">{mod.name}</span>
-										<span class="text-sm text-muted-foreground">by {mod.namespace}</span>
+										<span class="font-medium wrap-anywhere">{mod.name}</span>
+										<span class="text-sm wrap-anywhere text-muted-foreground"
+											>by {mod.namespace}</span
+										>
 										<Badge variant="outline" class={sourceBadge[mod.source]}>
 											{sourceLabel[mod.source] ?? mod.source}
 										</Badge>
@@ -1018,7 +1020,9 @@
 										{/if}
 									</div>
 									{#if mod.description}
-										<p class="max-w-prose text-sm text-muted-foreground">{mod.description}</p>
+										<p class="max-w-prose text-sm wrap-anywhere text-muted-foreground">
+											{mod.description}
+										</p>
 									{/if}
 									<p class="text-xs text-muted-foreground tabular-nums">
 										<span class={sourceText[mod.source]}>{mod.latest_version}</span>
@@ -1203,11 +1207,11 @@
 
 {#snippet installedRow(mod: InstalledMod)}
 	{@const newer = installedUpdateTarget(mod)}
-	<div class="grid min-w-0 flex-1 gap-1">
+	<div class="grid min-w-0 flex-[1_1_16rem] gap-1">
 		<div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
 			<span
 				class={[
-					'font-medium',
+					'font-medium wrap-anywhere',
 					mod.load_status === 'failed' && 'text-destructive',
 					!mod.enabled && 'text-muted-foreground'
 				]}
@@ -1215,7 +1219,7 @@
 				{mod.name || mod.full_name}
 			</span>
 			{#if mod.namespace}
-				<span class="text-sm text-muted-foreground">by {mod.namespace}</span>
+				<span class="text-sm wrap-anywhere text-muted-foreground">by {mod.namespace}</span>
 			{/if}
 			<span class={['text-sm tabular-nums', sourceText[mod.source] ?? 'text-muted-foreground']}>
 				{mod.version}
@@ -1265,7 +1269,7 @@
 		{#if mod.load_status === 'failed' && mod.load_error}
 			<!-- The loader's own line, verbatim: it names the missing dependency or the
 			     exception, which is the next thing the operator has to go and look up. -->
-			<p class="text-sm break-words text-destructive">{mod.load_error}</p>
+			<p class="text-sm wrap-anywhere text-destructive">{mod.load_error}</p>
 		{/if}
 		{#if mod.not_indexed}
 			<p class="text-sm text-muted-foreground">
