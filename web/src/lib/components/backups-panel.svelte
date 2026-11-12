@@ -18,7 +18,7 @@
 	import BackupCompare from '#lib/components/backup-compare.svelte';
 	import RemoteBackupsPanel from '#lib/components/remote-backups-panel.svelte';
 	import WorldImport from '#lib/components/world-import.svelte';
-	import { remoteBackups } from '#lib/api/remote-backups.js';
+	import { remoteBackups, type RemoteSummary } from '#lib/api/remote-backups.js';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import Problem from '#lib/components/problem.svelte';
 	import Download from '@lucide/svelte/icons/download';
@@ -40,6 +40,7 @@
 	let jobRunning = $state(false);
 	let uploading = $state<string | null>(null);
 	let remoteRefresh = $state(0);
+	let remote = $state<RemoteSummary | null>(null);
 	async function uploadRemote(archive: Backup) {
 		uploading = archive.id;
 		try {
@@ -367,9 +368,8 @@
 						<div class="grid gap-2 rounded-lg border p-4">
 							<p class="text-sm font-medium">Back up now</p>
 							<p class="text-sm text-muted-foreground">
-								If the server is running, Valmin stops it and waits for the world to finish saving
-								before creating a backup, then starts it again. The server is offline for the whole
-								backup. A stopped server stays stopped.
+								A running server is stopped once its world has saved and started again afterwards;
+								it is offline for the whole backup. A stopped server stays stopped.
 							</p>
 							<Button
 								size="sm"
@@ -383,9 +383,8 @@
 						<div class="grid gap-2 rounded-lg border p-4">
 							<p class="text-sm font-medium">Back up without stopping</p>
 							<p class="text-sm text-muted-foreground">
-								Best-effort backup without stopping the server. If the server is running, the backup
-								may contain an incomplete save and may not be restorable. Use Stop and back up when
-								you can allow downtime.
+								Copies the world while the server runs. The backup may contain an incomplete save
+								and may not be restorable.
 							</p>
 							<Button
 								variant="outline"
@@ -554,7 +553,7 @@
 										</div>
 									{/if}
 									<div class="flex flex-wrap gap-1 md:col-span-full md:justify-end">
-										{#if canCreate}
+										{#if canCreate && remote?.destination_id}
 											<Button
 												variant="ghost"
 												size="sm"
@@ -729,7 +728,7 @@
 	/>
 {/if}
 
-<RemoteBackupsPanel {instance} {onchange} refreshKey={remoteRefresh} />
+<RemoteBackupsPanel {instance} {onchange} refreshKey={remoteRefresh} bind:summary={remote} />
 
 <DestructiveConfirm
 	bind:open={restoreOpen}

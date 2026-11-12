@@ -16,8 +16,15 @@
 	let {
 		instance,
 		refreshKey = 0,
-		onchange
-	}: { instance: Instance; refreshKey?: number; onchange?: () => void } = $props();
+		onchange,
+		summary = $bindable(null)
+	}: {
+		instance: Instance;
+		refreshKey?: number;
+		onchange?: () => void;
+		/** What the daemon last said about off-host copies, for the parent to read. */
+		summary?: RemoteSummary | null;
+	} = $props();
 	const allowed = $derived(session.allowed(instance.id));
 	const canList = $derived(allowed.includes(actions.backupsList));
 	// Retention counts and auto-upload decide what is deleted off-host, which is backups.restore.
@@ -25,7 +32,6 @@
 	const canUpload = $derived(allowed.includes(actions.backupsCreate));
 	const canAdmin = $derived(session.allowedGlobally().includes(actions.panelSettings));
 	let copies = $state<RemoteCopy[]>([]);
-	let summary = $state<RemoteSummary | null>(null);
 	const configured = $derived(Boolean(summary?.destination_id));
 	let cursor = $state<string | null>(null);
 	let failure = $state<unknown>(null);
