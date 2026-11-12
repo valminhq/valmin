@@ -76,7 +76,7 @@
 <div class="grid max-w-3xl gap-6">
 	<PageHeader title="Mod configuration" level={2}>
 		{canEdit
-			? 'Configure the mods installed on this server. Stop the server before editing.'
+			? 'Configure the mods installed on this server. Edits to a running server take effect when it restarts.'
 			: 'Configuration files for the mods installed on this server.'}
 	</PageHeader>
 
