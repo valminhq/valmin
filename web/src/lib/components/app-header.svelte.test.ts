@@ -25,17 +25,13 @@ beforeEach(() => {
 });
 
 describe('the theme switch', () => {
-	it('marks the chosen theme, keeps the choice and leaves the menu open', async () => {
+	it('steps through the themes and keeps the choice', async () => {
 		render(AppHeader);
-		const dark = screen.getByRole('button', { name: 'Dark', hidden: true });
-		const menu = dark.closest('details')!;
-		menu.open = true;
-		expect(dark.getAttribute('aria-pressed')).toBe('false');
-
-		await click(dark);
-		expect(dark.getAttribute('aria-pressed')).toBe('true');
+		await click(screen.getByRole('button', { name: /^Theme: System/ }));
+		expect(localStorage.getItem('mode-watcher-mode')).toBe('light');
+		await click(screen.getByRole('button', { name: /^Theme: Light/ }));
 		expect(localStorage.getItem('mode-watcher-mode')).toBe('dark');
-		expect(menu.open).toBe(true);
+		expect(screen.getByRole('button', { name: /^Theme: Dark/ })).toBeTruthy();
 	});
 });
 

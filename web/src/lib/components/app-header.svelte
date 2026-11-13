@@ -143,12 +143,21 @@
 		}
 	}
 
-	// The colour themes on offer; system follows the device.
+	// The colour themes the header button steps through; system follows the device.
 	const themes = [
 		['system', 'System', Monitor],
 		['light', 'Light', Sun],
 		['dark', 'Dark', Moon]
 	] as const;
+	const themeAt = $derived(
+		Math.max(
+			0,
+			themes.findIndex(([value]) => value === userPrefersMode.current)
+		)
+	);
+	const theme = $derived(themes[themeAt]);
+	const nextTheme = $derived(themes[(themeAt + 1) % themes.length]);
+	const ThemeIcon = $derived(theme[2]);
 
 	const summary =
 		'group inline-flex cursor-pointer list-none items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden';
@@ -193,6 +202,15 @@
 							: 'offline'}
 				</span>
 			{/if}
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				aria-label="Theme: {theme[1]}. Switch to {nextTheme[1]}"
+				title="Theme: {theme[1]}"
+				onclick={() => setMode(nextTheme[0])}
+			>
+				<ThemeIcon />
+			</Button>
 			{#if adminLinks.length > 0}
 				<details use:navigationMenu class="relative">
 					<summary class={summary}>
@@ -241,21 +259,6 @@
 						<Clock class="size-4" aria-hidden="true" />
 						Date and time
 					</a>
-					<div class="flex items-center gap-1 px-2 py-1" role="group" aria-label="Theme">
-						<span class="mr-auto text-sm">Theme</span>
-						{#each themes as [value, label, Icon] (value)}
-							<button
-								type="button"
-								class="rounded-sm p-1.5 hover:bg-muted focus-visible:bg-muted focus-visible:outline-none aria-pressed:bg-secondary"
-								aria-label={label}
-								title={label}
-								aria-pressed={userPrefersMode.current === value}
-								onclick={() => setMode(value)}
-							>
-								<Icon class="size-4" aria-hidden="true" />
-							</button>
-						{/each}
-					</div>
 					<a
 						class={item}
 						href="https://github.com/valminhq/valmin/issues/new"
