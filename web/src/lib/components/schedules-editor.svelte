@@ -24,6 +24,7 @@
 		waitConditions
 	} from '#lib/api/schedules.js';
 	import { session } from '#lib/state/session.svelte.js';
+	import { unsaved } from '#lib/state/dirty.svelte.js';
 	import { socket } from '#lib/socket/index.svelte.js';
 	import { topics } from '#lib/socket/messages.js';
 	import { Badge } from '#lib/components/ui/badge/index.js';
@@ -211,6 +212,7 @@
 	let editingId = $state<string | null>(null);
 	const editing = $derived(mine.find((s) => s.id === editingId) ?? null);
 	let formHeading = $state<HTMLElement | null>(null);
+	unsaved(() => draft.length > 0);
 
 	const isChain = $derived(kind === 'chain' && !editing);
 	/** Each step is offered to whoever may do it by hand; the daemon checks it again on write. */
