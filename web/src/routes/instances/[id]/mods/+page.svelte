@@ -4,6 +4,7 @@
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { Tabs } from 'bits-ui';
 	import { modOffer, catalogueStatus, installedUpdateTarget } from '#lib/mod-catalogue.js';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { ApiError } from '#lib/api/errors.js';
@@ -71,8 +72,25 @@
 
 	const id = $derived(page.params.id ?? '');
 
-	// A q in the address opens the browse tab with that search, as an install hint links it.
-	let activeTab = $derived(page.url.searchParams.get('q') ? 'browse' : 'installed');
+	// The address names the open tab. A q without one opens the browse tab with that search,
+	// as an install hint links it.
+	let activeTab = $derived.by(() => {
+		// A tab opened here lives in the shallow address, which Back restores without page.url.
+		const tab = (page.shallow?.url ?? page.url).searchParams.get('tab');
+		if (tab === 'installed' || tab === 'browse' || tab === 'players') return tab;
+		return page.url.searchParams.get('q') ? 'browse' : 'installed';
+	});
+
+	/** Opens a tab and writes it to the address, so a reload or a shared link lands on it. */
+	function showTab(tab: string) {
+		activeTab = tab;
+		const rest = query ? '&q=' + encodeURIComponent(query) : '';
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
+		void goto(`${resolve('/instances/[id]/mods', { id })}?tab=${tab}${rest}`, {
+			shallow: true,
+			replace: true
+		});
+	}
 	let instance = $state<Instance | null>(null);
 	let installed = $state<InstalledMod[]>([]);
 	/** Installs waiting for the server to stop. */
@@ -786,7 +804,7 @@
 			</ul>
 		</section>
 	{/if}
-	<Tabs.Root bind:value={activeTab} class="grid gap-5">
+	<Tabs.Root value={activeTab} onValueChange={showTab} class="grid gap-5">
 		<Tabs.List aria-label="Mod tasks" class="flex w-fit flex-wrap gap-1 rounded-lg bg-muted p-1">
 			<Tabs.Trigger
 				value="installed"
@@ -841,7 +859,7 @@
 					<EmptyState title="No mods yet">
 						Browse the catalogue to find mods for this server.
 						{#snippet actions()}
-							<Button variant="outline" onclick={() => (activeTab = 'browse')}>Browse mods</Button>
+							<Button variant="outline" onclick={() => showTab('browse')}>Browse mods</Button>
 						{/snippet}
 					</EmptyState>
 				{:else}
