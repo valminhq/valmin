@@ -587,7 +587,8 @@ imports, deletions and restores fail without changing the world. Stop it and ret
 
 Open **Mods**. The **Installed** tab lists what the server loads, **Browse mods**
 searches the catalogue, and **Player modpack** lists the mods players need on their
-own computers.
+own computers. The address names the open tab, so a reload or a shared link opens the
+same one.
 
 Search the catalogue, choose **Install**, review the dependency plan, and apply it.
 Mods change only on a stopped server, but you can install one while the server runs.
