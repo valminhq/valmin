@@ -69,6 +69,32 @@ func (l *ContainerLogs) SawSaveLine(ctx context.Context, containerID string, sin
 	return l.matches(ctx, containerID, EventSaveComplete, since)
 }
 
+// SawStatusLineAfter reports whether the log carries the server's periodic status line stamped
+// after the instant after, reading it once and not following it. The watchdog asks before it acts
+// on a silence its log reader reported: a reader whose stream stalled without closing would
+// otherwise report a healthy server as quiet. A line with no timestamp counts, since Docker has
+// already applied the instant to what it returned.
+func (l *ContainerLogs) SawStatusLineAfter(ctx context.Context, containerID string, after time.Time) (bool, error) {
+	rc, err := l.rt.Logs(ctx, containerID, runtime.LogOptions{Since: after, Timestamps: true})
+	if err != nil {
+		return false, fmt.Errorf("read logs of container %s: %w", containerID, err)
+	}
+	defer func() { _ = rc.Close() }()
+
+	found := false
+	if err := DemuxLines(rc, func(line Line) {
+		if found || (!line.TS.IsZero() && !line.TS.After(after)) {
+			return
+		}
+		if ev, ok := l.patterns.Match(line.Text); ok && ev.Kind == EventConnections {
+			found = true
+		}
+	}); err != nil {
+		return false, err
+	}
+	return found, nil
+}
+
 // bootStartMargin is subtracted from a container's StartedAt when scoping a log read to the
 // current boot: the clock stamping each line and the one behind StartedAt need not agree to the
 // nanosecond, and being late by a millisecond drops the boot's first lines. It is far shorter

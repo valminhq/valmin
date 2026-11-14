@@ -76,7 +76,10 @@ type RestartSubmission struct {
 	ContainerID string
 	RequestedBy string
 	ScheduleID  string
-	Audit       *store.AuditEntry
+	// ForceStart starts the server again even when the stop had to be force-killed, for a server
+	// that cannot save because its game loop has stopped.
+	ForceStart bool
+	Audit      *store.AuditEntry
 }
 
 // Submit queues a restart with its running-to-stopping claim.
@@ -89,7 +92,7 @@ func (r *Restarter) Submit(ctx context.Context, input *RestartSubmission) (*stor
 		RequestedBy: input.RequestedBy, ScheduleID: input.ScheduleID,
 		Payload: plan, Audit: input.Audit,
 		OnClaim: transitionClaim(jobs.KindRestart, id, instance.StateRunning, instance.StateStopping),
-	}, r.Run(input.Instance, input.ContainerID, input.RequestedBy, plan))
+	}, r.Run(input, plan))
 	if err != nil {
 		return nil, fmt.Errorf("submit restart for instance %s: %w", id, err)
 	}

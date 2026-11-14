@@ -129,6 +129,8 @@ export interface Instance {
 	backup_on_restart: boolean;
 	/** Minutes with no players after which the running server is stopped; 0 is off. */
 	auto_stop_minutes: number;
+	/** What happens to a running server whose log has gone quiet: nothing, an alert, or a restart. */
+	watchdog: WatchdogMode;
 	remote_backup_enabled?: boolean;
 	remote_keep_cold?: number;
 	remote_keep_hot?: number;
@@ -277,6 +279,8 @@ export interface PatchInstance {
 	status_connect_info?: string;
 	/** 0 turns auto-stop off; otherwise `AUTO_STOP_MIN` to `AUTO_STOP_MAX` minutes. */
 	auto_stop_minutes?: number;
+	/** `restart` needs the right to restart the server as well as to change its settings. */
+	watchdog?: WatchdogMode;
 	/** The branch the next game update installs. Sent with the password for a password branch;
 	 * a branch sent without one clears the stored password. */
 	game_branch?: string;
@@ -286,6 +290,9 @@ export interface PatchInstance {
 /** The range of rolling backups the game may be told to keep. */
 export const GAME_BACKUPS_MIN = 1;
 export const GAME_BACKUPS_MAX = 50;
+
+/** What the daemon does about a running server whose log has gone quiet. */
+export type WatchdogMode = 'off' | 'alert' | 'restart';
 
 /** The range of idle minutes auto-stop accepts when it is on. */
 export const AUTO_STOP_MIN = 5;

@@ -285,8 +285,17 @@ func downDetail(to, reason string, limitMB int) []notify.Field {
 		status = "Running again"
 		next = "Anyone playing was disconnected. Check the server's console log for why it went down."
 	}
-	if reason == instance.ReasonOOMKilled {
+	switch reason {
+	case instance.ReasonOOMKilled:
 		next = memoryAdvice(limitMB)
+	case instance.ReasonUnresponsive:
+		status = "Not responding; still running"
+		next = "Check the server's console log and any mod you added or updated recently. " +
+			"Restart the server if it stays stuck."
+	case instance.ReasonUnresponsiveRestarting:
+		status = "Being restarted"
+		next = "Anyone playing was disconnected. A hung game cannot save, so the world may go back " +
+			"to its last autosave, up to 30 minutes old."
 	}
 	return []notify.Field{
 		{Key: "status", Name: "Status", Value: status},

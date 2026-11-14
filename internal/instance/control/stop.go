@@ -115,6 +115,13 @@ func (s *Stopper) stopContainer(ctx context.Context, containerID string) (clean,
 	return seenClean, false, nil
 }
 
+// stillRunning reports whether containerID is running, or cannot be shown not to be. It is the
+// second look before a server that Docker had to kill is started again.
+func (s *Stopper) stillRunning(ctx context.Context, containerID string) bool {
+	c, err := s.Runtime.Inspect(ctx, containerID)
+	return err != nil || c.Running
+}
+
 // forceKilled reports whether the stop ended in Docker's SIGKILL: exit 137 without the kernel's
 // OOM kill. Without an inspection it falls back to whether the stop took the whole timeout.
 func (s *Stopper) forceKilled(ctx context.Context, containerID string, start time.Time) bool {

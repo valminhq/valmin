@@ -188,6 +188,29 @@ func TestAnOutOfMemoryStopAdvisesOnMemory(t *testing.T) {
 	}
 }
 
+// TestAHungServerIsNotReportedAsRunningAgain asserts the watchdog's two reasons say the server
+// is stuck, and whether it is being restarted, instead of the wording for a server that came
+// back by itself.
+func TestAHungServerIsNotReportedAsRunningAgain(t *testing.T) {
+	for _, tc := range []struct {
+		reason, status, advice string
+	}{
+		{instance.ReasonUnresponsive, "Not responding; still running", "Restart the server if it stays stuck"},
+		{instance.ReasonUnresponsiveRestarting, "Being restarted", "last autosave"},
+	} {
+		fields := downDetail("running", tc.reason, 0)
+		if fields[0].Value != tc.status {
+			t.Errorf("status for %q = %q, want %q", tc.reason, fields[0].Value, tc.status)
+		}
+		if !strings.Contains(fields[1].Value, "probably hung") {
+			t.Errorf("cause for %q = %q, want it to say the server is probably hung", tc.reason, fields[1].Value)
+		}
+		if !strings.Contains(fields[2].Value, tc.advice) {
+			t.Errorf("advice for %q = %q, want it to mention %q", tc.reason, fields[2].Value, tc.advice)
+		}
+	}
+}
+
 // TestALinkPointsAtTheServerOrThePanel asserts where a notification links: the server's page,
 // the front page for a host-wide event, and nowhere without a configured address.
 func TestALinkPointsAtTheServerOrThePanel(t *testing.T) {

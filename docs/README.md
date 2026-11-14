@@ -52,6 +52,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | Sign in with our SSO (Authelia, Authentik)      | [Sign in through a reverse proxy](configuration.md#sign-in-through-a-reverse-proxy)        |
 | Back up, restart or update on a timetable       | [Schedule maintenance](operations.md#schedule-maintenance)                                 |
 | Stop servers nobody is playing on               | [Stop a server when nobody plays](operations.md#stop-a-server-when-nobody-plays)           |
+| Be told about, or restart, a hung server        | [Restart a hung server](operations.md#restart-a-hung-server)                               |
 | Reset or upgrade the world with mods            | [Reset or upgrade the world with mods](operations.md#reset-or-upgrade-the-world-with-mods) |
 | Shut everything down before a power outage      | [Stop every server before a power cut](operations.md#stop-every-server-before-a-power-cut) |
 | Get alerts in Discord or elsewhere              | [Get notified](usage.md#get-notified)                                                      |
