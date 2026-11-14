@@ -7,13 +7,14 @@ import (
 	"io"
 	"os"
 	"path"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
 
 // bepinexLog is BepInEx's own log file, relative to an instance's data directory. Load
@@ -69,22 +70,30 @@ var bepinexPrefix = regexp.MustCompile(`^\[[^\]]*\]\s*`)
 
 // ReadPluginLoad parses the chainloader run in an instance's BepInEx log. A nil result with a
 // nil error is a server with no such log, never started since BepInEx was installed or never
-// modded: an absence of information rather than a failure to report.
+// modded: an absence of information rather than a failure to report. The game writes the log,
+// so it is opened through an os.Root and must be a regular file: a symlink out of the instance
+// or a named pipe in its place is an error, never read.
 func ReadPluginLoad(dataDir string, patterns PatternSet) (*PluginLoad, error) {
-	p := filepath.Join(dataDir, filepath.FromSlash(bepinexLog))
-	f, err := os.Open(p)
+	root, err := os.OpenRoot(dataDir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", p, err)
+		return nil, fmt.Errorf("open instance: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
+	f, info, err := fsutil.OpenRegularIn(root, bepinexLog)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read plugin log: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 
 	load := parsePluginLoad(f, patterns)
-	if info, err := f.Stat(); err == nil {
-		load.ObservedAt = info.ModTime()
-	}
+	load.ObservedAt = info.ModTime()
 	return &load, nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -151,9 +152,11 @@ func (h *Instances) diagnosisEvidence(ctx context.Context, inst *store.Instance)
 		ev.Boot = &boot
 	}
 
+	// An unreadable loader log costs the plugin evidence and nothing else.
 	plugins, err := instance.ReadPluginLoad(inst.DataDir, h.Streams.Patterns())
 	if err != nil {
-		return nil, fmt.Errorf("read loader log of instance %s: %w", inst.ID, err)
+		slog.WarnContext(ctx, "could not read the BepInEx log for the diagnosis",
+			slog.String("instance_id", inst.ID), slog.Any("error", err))
 	}
 	ev.Plugins = plugins
 

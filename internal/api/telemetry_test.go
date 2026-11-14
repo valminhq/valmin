@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -108,6 +110,28 @@ func TestDiagnosisOfAHealthyServerIsEmpty(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"findings":[]`) {
 		t.Errorf("body = %s, want an empty findings list", rec.Body)
+	}
+}
+
+// Asserts a loader log the panel refuses to read, here a symlink out of the instance, costs the
+// diagnosis its plugin evidence and not the page.
+func TestDiagnosisSurvivesAnUnreadableLoaderLog(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _ := world(t)
+	dataDir := t.TempDir()
+	logPath := filepath.Join(dataDir, "server", "BepInEx", "LogOutput.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "elsewhere"), logPath); err != nil {
+		t.Fatal(err)
+	}
+	seed(t, db, `UPDATE instances SET data_dir = ? WHERE id = 'inst-a'`, dataDir)
+
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodGet, "/api/v1/instances/inst-a/diagnosis", http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 (%s)", rec.Code, rec.Body)
 	}
 }
 

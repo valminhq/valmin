@@ -1,12 +1,16 @@
 package instance
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
 
 // bootLog is the measured boot sequence (03 §5.3), with the padding BepInEx actually emits.
@@ -128,6 +132,42 @@ func TestReadPluginLoadOnAServerThatHasNoLog(t *testing.T) {
 	load, err := ReadPluginLoad(t.TempDir(), DefaultPatterns)
 	if load != nil || err != nil {
 		t.Errorf("ReadPluginLoad of a server with no BepInEx log = %+v, %v; want nil, nil", load, err)
+	}
+}
+
+// TestReadPluginLoadRefusesAFileThatIsNotTheInstancesOwn covers a mod replacing the log with a
+// symlink out of the instance or a named pipe: neither is read, and neither blocks.
+func TestReadPluginLoadRefusesAFileThatIsNotTheInstancesOwn(t *testing.T) {
+	outside := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(outside, []byte(bootLog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name   string
+		plant  func(path string) error
+		wantIs error
+	}{
+		{"symlink out of the instance", func(p string) error { return os.Symlink(outside, p) }, nil},
+		{"named pipe", func(p string) error { return syscall.Mkfifo(p, 0o644) }, fsutil.ErrNotRegular},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			p := filepath.Join(dataDir, filepath.FromSlash(bepinexLog))
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := tt.plant(p); err != nil {
+				t.Fatal(err)
+			}
+			load, err := ReadPluginLoad(dataDir, DefaultPatterns)
+			if load != nil || err == nil {
+				t.Fatalf("ReadPluginLoad = %+v, %v; want nil and an error", load, err)
+			}
+			if tt.wantIs != nil && !errors.Is(err, tt.wantIs) {
+				t.Errorf("ReadPluginLoad error = %v, want %v", err, tt.wantIs)
+			}
+		})
 	}
 }
 
