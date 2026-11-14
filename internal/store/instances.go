@@ -48,7 +48,8 @@ type Instance struct {
 	// (02 §4.4 step 7, B12). 0 keeps everything in that class.
 	BackupKeepCold int `json:"backup_keep_cold"`
 	BackupKeepHot  int `json:"backup_keep_hot"`
-	// BackupOnRestart takes a cold archive between a restart's stop and its start.
+	// BackupOnRestart takes a cold archive after the stop of a restart, of an auto-stop and of a
+	// scheduled stop. The name is the column's; a stop a person makes by hand never archives.
 	BackupOnRestart     bool `json:"backup_on_restart"`
 	RemoteBackupEnabled bool `json:"remote_backup_enabled"`
 	RemoteKeepCold      int  `json:"remote_keep_cold"`
@@ -853,13 +854,14 @@ func TxCreateCloneInstance(
 			modded, bepinex_version, FALSE, mem_limit_mb, COALESCE(?, cpu_limit), game_build_id,
 			game_branch, ?, game_backups,
 			CASE WHEN ? THEN ? ELSE auto_stop_minutes END,
-			backup_keep_cold, backup_keep_hot, backup_on_restart,
+			backup_keep_cold, backup_keep_hot, CASE WHEN ? THEN FALSE ELSE backup_on_restart END,
 			CASE WHEN ? THEN id END, ?, ?
 		FROM instances WHERE id = ? AND (state = 'stopped' OR (? AND state = 'running'))`,
 		n.ID, n.Name, n.DataDir, n.BasePort, n.Password,
 		n.UpdateTest, n.UpdateTest, n.CrossplayInstanceID,
 		n.CPULimit, nullIfEmpty(n.GameBranchPassword),
 		n.UpdateTest, updateTestAutoStopMinutes,
+		n.UpdateTest,
 		n.UpdateTest, now, now, sourceID, n.UpdateTest)
 	if err != nil {
 		if !isUniqueViolation(err) {

@@ -82,13 +82,14 @@ type RestartSubmission struct {
 // Submit queues a restart with its running-to-stopping claim.
 func (r *Restarter) Submit(ctx context.Context, input *RestartSubmission) (*store.Job, error) {
 	id := input.Instance.ID
+	plan := r.Backupper.planArchive(input.Instance, true)
 	job, err := r.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindRestart, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: input.Instance.Name,
 		RequestedBy: input.RequestedBy, ScheduleID: input.ScheduleID,
-		Payload: struct{}{}, Audit: input.Audit,
+		Payload: plan, Audit: input.Audit,
 		OnClaim: transitionClaim(jobs.KindRestart, id, instance.StateRunning, instance.StateStopping),
-	}, r.Run(input.Instance, input.ContainerID, input.RequestedBy))
+	}, r.Run(input.Instance, input.ContainerID, input.RequestedBy, plan))
 	if err != nil {
 		return nil, fmt.Errorf("submit restart for instance %s: %w", id, err)
 	}
@@ -171,19 +172,26 @@ type StopSubmission struct {
 	RequestedBy string
 	ScheduleID  string
 	Reason      instance.StopReason
-	Audit       *store.AuditEntry
+	// Archive asks for the instance's stop archive, which it takes only when it opted in and
+	// the stop confirmed the world save.
+	Archive bool
+	Audit   *store.AuditEntry
 }
 
 // Submit claims running to stopping and queues the stop.
 func (s *Stopper) Submit(ctx context.Context, input *StopSubmission) (*store.Job, error) {
 	id := input.Instance.ID
+	plan := s.Backupper.planArchive(input.Instance, input.Archive)
 	job, err := s.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindStop, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: input.Instance.Name, RequestedBy: input.RequestedBy,
 		ScheduleID: input.ScheduleID,
-		Payload:    instance.StopPayload{Reason: input.Reason}, Audit: input.Audit,
+		Payload: instance.StopPayload{
+			Reason: input.Reason, ArchiveID: plan.ArchiveID, ArchivePath: plan.ArchivePath,
+		},
+		Audit:   input.Audit,
 		OnClaim: transitionClaim(jobs.KindStop, id, instance.StateRunning, instance.StateStopping),
-	}, s.Run(id, input.ContainerID))
+	}, s.Run(input.Instance, input.ContainerID, plan))
 	if err != nil {
 		return nil, fmt.Errorf("submit stop for instance %s: %w", id, err)
 	}

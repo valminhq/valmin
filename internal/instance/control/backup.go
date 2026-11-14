@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/valminhq/valmin/internal/backup"
@@ -26,6 +27,10 @@ type Backupper struct {
 	Stopper  *Stopper
 	Starter  *Starter
 	DataRoot string
+	// FreeSpace reads the data root's free bytes. With FreeSpaceFloor, it makes a stop skip its
+	// archive while the disk is below the floor. Nil checks nothing.
+	FreeSpace      func() (uint64, error)
+	FreeSpaceFloor uint64
 }
 
 // BackupRun is one backup job: the server, the archive it writes and how it was asked for.
@@ -358,47 +363,115 @@ func backupMessage(consistent bool) string {
 	return "hot copy complete (taken while the server was running, so it is best-effort)"
 }
 
-// archiveOnRestart takes the cold archive a restart can have almost for free: it runs between
-// the stop and the start, when the world is already flushed and the container already down.
-// Off unless the instance opts in, since it adds its own duration to every restart.
+// noRoom says why a stop must not write an archive, or returns "" when it may. A stop is never
+// refused for want of disk, so unlike a backup job it gives up the archive instead. Free space
+// that cannot be read counts as no room.
+func (b *Backupper) noRoom() string {
+	if b.FreeSpace == nil {
+		return ""
+	}
+	free, err := b.FreeSpace()
+	if err != nil {
+		return fmt.Sprintf("the data root's free space could not be read (%v)", err)
+	}
+	if free < b.FreeSpaceFloor {
+		return fmt.Sprintf("the data root has %d MiB free, below the floor of %d MiB",
+			free>>20, b.FreeSpaceFloor>>20)
+	}
+	return ""
+}
+
+// planArchive names the archive a stop or restart of inst may write, or returns an empty plan
+// when none is owed: the stop did not ask for one, or the instance has not opted in. It is
+// called when the job is queued and the plan stored in the job's payload, so that if the panel
+// dies while the archive is written, the next start can remove exactly that file.
+func (b *Backupper) planArchive(inst *store.Instance, asked bool) ArchivePlan {
+	if b == nil || !asked || !inst.BackupOnRestart {
+		return ArchivePlan{}
+	}
+	id := store.NewID()
+	return ArchivePlan{ArchiveID: id, ArchivePath: ArchivePath(b.DataRoot, inst, id)}
+}
+
+// archiveAfterStop takes the cold archive a stop can have almost for free: it runs once the
+// container is down and the world already flushed, to the file the plan names. what names the
+// stop in the job log, such as "restart" or "stop". An empty plan takes none, since the archive
+// adds its own duration to every stop that has one.
 //
 // clean is the stop's save-complete signal, and gates the whole thing: an archive taken after
-// an unconfirmed save would be recorded consistent when it is not, which is the one thing
-// 12 §3.4 forbids. A restart tolerates a missing save line where a backup does not, so here it
-// costs the archive rather than the job.
+// an unconfirmed save would be recorded consistent when it is not. A stop tolerates a missing
+// save line where a backup does not, so here it costs the archive rather than the job.
 //
 // It returns the Finish callback that records the archive, or nil. A failure never fails the
-// restart: no row is written, the job's log says why, and the server still starts.
-func (b *Backupper) archiveOnRestart(
-	ctx context.Context, jh *jobs.Handle, inst *store.Instance, clean bool,
+// stop: no row is written and the job's log says why.
+func (b *Backupper) archiveAfterStop(
+	ctx context.Context, jh *jobs.Handle, inst *store.Instance, plan ArchivePlan, clean bool, what string,
 ) (finish func(context.Context, *sql.Tx) error, cleanup func(context.Context)) {
-	if !inst.BackupOnRestart {
+	if plan.ArchivePath == "" {
 		return nil, nil
 	}
 	if !clean {
-		jh.Log("no archive was taken on this restart: the server stopped without confirming " +
+		jh.Log("no archive was taken on this " + what + ": the server stopped without confirming " +
 			"it had written the world")
+		return nil, nil
+	}
+	if reason := b.noRoom(); reason != "" {
+		jh.Log("no archive was taken on this " + what + ": " + reason)
 		return nil, nil
 	}
 
 	jh.Progress(ctx, 40, "archiving the world")
-	backupID := store.NewID()
 	row, err := b.archiveAndVerify(
-		ctx,
-		jh,
-		inst,
-		backupID,
-		ArchivePath(b.DataRoot, inst, backupID),
-		store.TriggerManual,
-		true,
+		ctx, jh, inst, plan.ArchiveID, plan.ArchivePath, store.TriggerManual, true,
 	)
 	if err != nil {
-		jh.Log("no archive was taken on this restart: " + err.Error())
+		jh.Log("no archive was taken on this " + what + ": " + err.Error())
 		return nil, nil
 	}
-	pruned, err := (&Pruner{DB: b.DB}).Select(ctx, inst, row)
+	pruner := &Pruner{DB: b.DB}
+	pruned, err := pruner.Select(ctx, inst, row)
 	if err != nil {
 		jh.Log("could not prune old archives: " + err.Error())
 	}
-	return finishBackup(inst.ID, false, row, pruned), (&Pruner{DB: b.DB}).Cleanup(inst.ID, pruned)
+	record := finishBackup(inst.ID, false, row, pruned)
+	var unrecorded atomic.Bool
+	finish = func(ctx context.Context, tx *sql.Tx) error { return recordArchive(ctx, tx, record, &unrecorded) }
+	cleanup = func(ctx context.Context) {
+		if !unrecorded.Load() {
+			if prunedFiles := pruner.Cleanup(inst.ID, pruned); prunedFiles != nil {
+				prunedFiles(ctx)
+			}
+			return
+		}
+		if err := os.Remove(plan.ArchivePath); err != nil && !os.IsNotExist(err) {
+			slog.WarnContext(ctx, "could not remove an archive the catalogue refused",
+				slog.String("instance_id", inst.ID), slog.Any("error", err))
+		}
+	}
+	return finish, cleanup
+}
+
+// recordArchive runs record, which catalogues a stop's archive, in a savepoint of the job's finish
+// transaction. An archive the catalogue cannot take must not keep the stop from finishing, which
+// would leave the server locked in stopping: the savepoint undoes whatever record wrote, unrecorded
+// is set, and the caller removes the file once the transaction has committed.
+func recordArchive(
+	ctx context.Context, tx *sql.Tx, record func(context.Context, *sql.Tx) error, unrecorded *atomic.Bool,
+) error {
+	const savepoint = "stop_archive"
+	if _, err := tx.ExecContext(ctx, "SAVEPOINT "+savepoint); err != nil {
+		return fmt.Errorf("begin the archive savepoint: %w", err)
+	}
+	if err := record(ctx, tx); err != nil {
+		slog.WarnContext(ctx, "the archive a stop wrote could not be recorded; the stop finishes without it",
+			slog.Any("error", err))
+		unrecorded.Store(true)
+		if _, err := tx.ExecContext(ctx, "ROLLBACK TO "+savepoint); err != nil {
+			return fmt.Errorf("undo the archive record: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, "RELEASE "+savepoint); err != nil {
+		return fmt.Errorf("end the archive savepoint: %w", err)
+	}
+	return nil
 }

@@ -42,10 +42,18 @@ backups of that type. Snapshots taken before a restore, import, or update have t
 limit, equal to the consistent count. Older backups are deleted after the next backup or
 scheduled cleanup.
 
-**Back up when this server restarts** makes a consistent backup on every restart,
-including scheduled ones, between the stop and the start. The restart waits for it, so
-large worlds add a few minutes of downtime. If the stop did not confirm the world save,
-no archive is taken and the operation says so.
+**Back up on restarts and automatic stops** makes a consistent backup after the stop of every
+restart, every [auto-stop](#stop-a-server-when-nobody-plays) and every stop a schedule runs,
+including the stop step of a schedule's chain. A restart waits for the backup between the stop
+and the start, so large worlds add a few minutes of downtime; an automatic stop finishes once the
+backup is written, so its notification arrives after the backup. A stop you make by hand, a
+planned power cut and the stops of an update test never back up. If the stop did not confirm the
+world save, or the data root is below the [free-space floor](configuration.md#daemon-settings), no archive is
+taken and the operation says so; the stop itself always goes ahead, and so does one whose finished
+backup cannot be added to the backup list, which removes the file. If Valmin is killed while one
+of these backups is being written, the unfinished file, or a finished one that never reached the
+backup list, is removed when Valmin next starts. A schedule that stops the server and
+then runs its own Back up step makes two backups.
 
 To back up on a schedule, see [Schedule maintenance](#schedule-maintenance). To keep
 copies off the host, see [off-host copies](remote-backups.md) or download archives to
@@ -247,7 +255,8 @@ Skipped and failed runs show the reason under them.
 An idle server keeps using CPU with nobody connected. To save power, open **Maintenance**,
 turn on **Stop when empty** under **Auto-stop**, choose how many minutes (5 to 1440) the
 server may sit empty, and select **Save auto-stop**. Once the server has had no players for
-that long, Valmin stops it the normal way, saving the world first. Players cannot join until
+that long, Valmin stops it the normal way, saving the world first, and makes a backup when
+[**Back up on restarts and automatic stops**](#backup-settings) is on. Players cannot join until
 someone starts it again.
 
 Valmin reads the player count from the server log. While the count is unknown, the server

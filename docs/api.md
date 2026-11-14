@@ -936,6 +936,13 @@ default is 4). It is a launch setting, so it sets `restart_required`.
 It is `0` (off) or 5 to 1440, needs both `instance.settings` and `instance.stop`, and takes effect immediately without
 setting `restart_required`. An unknown player count counts as occupied.
 
+`backup_on_restart` makes a consistent backup after the stop of every restart, every auto-stop
+and every stop a schedule fires, including the stop step of a schedule's chain. A stop a person
+asks for, a planned power cut and the stop steps of an update test never back up. The backup is
+skipped, and the job's log says so, when the stop did not confirm the world save or the data root
+is below `data.free_space_floor_bytes`; the stop itself is never refused. It takes effect
+immediately without setting `restart_required`.
+
 The game password is never part of a server's JSON. Read it with
 `GET /instances/{id}/password`, which returns `{"password": "..."}` and writes an
 `instances.password.read` audit entry on each call. After a password change, a
@@ -1229,9 +1236,9 @@ headline, linking to the same page. A rule's message is the embed's description,
 embed then has no fields.
 
 `stale_backup` opens when a backup schedule has fired `stale_factor` times (2 by default),
-counted on its own clock and days, since the last consistent archive; a hot copy does not count. On a server that backs up
-on restart, its restart schedule counts too, while its latest restart succeeded. A failed
-restart raises `job_failed` instead.
+counted on its own clock and days, since the last consistent archive; a hot copy does not count. On a server with
+`backup_on_restart`, its restart schedule counts too, while its latest restart succeeded. A failed
+restart raises `job_failed` instead. A schedule that only stops the server does not count.
 
 `instance_error` carries the observer's `reason` when the server was parked for something it
 saw, such as `container was killed by the out-of-memory killer; the world may be damaged`, and

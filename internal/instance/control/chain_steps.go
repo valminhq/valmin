@@ -49,7 +49,8 @@ func (c *Chainer) SubmitStep(
 	}
 }
 
-// submitStop stops a running server. A stopped one satisfies the step.
+// submitStop stops a running server. A stopped one satisfies the step. A stop a schedule fires
+// archives the world when the instance opted in; one a person runs in a chain does not.
 func (c *Chainer) submitStop(ctx context.Context, inst *store.Instance, origin StepOrigin) (*store.Job, error) {
 	state := instance.State(inst.State)
 	if state == instance.StateStopped {
@@ -61,6 +62,7 @@ func (c *Chainer) submitStop(ctx context.Context, inst *store.Instance, origin S
 	return c.Stopper.Submit(ctx, &StopSubmission{
 		Instance: inst, ContainerID: deref(inst.ContainerID),
 		RequestedBy: origin.RequestedBy, ScheduleID: origin.ScheduleID,
+		Archive: origin.ScheduleID != "",
 	})
 }
 

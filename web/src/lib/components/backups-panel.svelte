@@ -682,10 +682,10 @@
 						</div>
 						<div class="flex items-center justify-between gap-4">
 							<div class="grid gap-1">
-								<Label for="backup-on-restart">Back up when this server restarts</Label>
+								<Label for="backup-on-restart">Back up on restarts and automatic stops</Label>
 								<p class="text-sm text-muted-foreground">
-									The restart waits for the backup to finish before starting the server again. Large
-									worlds can add several minutes of downtime.
+									Restarts, scheduled stops and auto-stops wait for the backup to finish. Large
+									worlds can add several minutes. A stop you make by hand does not back up.
 								</p>
 							</div>
 							<Switch id="backup-on-restart" disabled={!canSetPolicy} bind:checked={onRestart} />
