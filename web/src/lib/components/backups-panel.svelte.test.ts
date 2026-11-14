@@ -419,14 +419,14 @@ describe('the backups panel', () => {
 			Response.json(instance({ backup_keep_cold: 10, backup_keep_hot: 2, backup_on_restart: true }))
 		);
 
-		expect(screen.getByText(/The restart waits for the backup to finish/)).toBeTruthy();
+		expect(screen.getByText(/A stop you make by hand does not back up/)).toBeTruthy();
 		await fireEvent.input(screen.getByLabelText('Consistent backups to keep'), {
 			target: { value: '10' }
 		});
 		await fireEvent.input(screen.getByLabelText('Best-effort backups to keep'), {
 			target: { value: '2' }
 		});
-		await click(screen.getByRole('switch', { name: 'Back up when this server restarts' }));
+		await click(screen.getByRole('switch', { name: 'Back up on restarts and automatic stops' }));
 		await click(button('Save backup settings'));
 
 		await vi.waitFor(() => expect(daemon.requests('PATCH', '/instances/inst-a')).toHaveLength(1));

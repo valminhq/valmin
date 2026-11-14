@@ -24,10 +24,15 @@ type Stopper struct {
 	Logs         *instance.ContainerLogs
 	StopTimeout  time.Duration
 	ReadyTimeout time.Duration
+	// Backupper plans and takes the archive a stop that asks for one owes the instance. It is
+	// nil where stops never archive.
+	Backupper *Backupper
 }
 
-// Run stops a container and records the resulting instance state in the job transaction.
-func (s *Stopper) Run(instanceID, containerID string) jobs.Runner {
+// Run stops a container and records the resulting instance state in the job transaction. A stop
+// with an archive planned also takes a consistent archive once the save is confirmed.
+func (s *Stopper) Run(inst *store.Instance, containerID string, plan ArchivePlan) jobs.Runner {
+	instanceID := inst.ID
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		jh.Progress(ctx, 30, "stopping container")
 		clean, killed, err := s.stopContainer(ctx, containerID)
@@ -37,25 +42,32 @@ func (s *Stopper) Run(instanceID, containerID string) jobs.Runner {
 		if out := stopFailure(jh, instanceID, killed, err); out != nil {
 			return *out
 		}
+		var archived func(context.Context, *sql.Tx) error
+		var pruneCleanup func(context.Context)
+		if s.Backupper != nil {
+			archived, pruneCleanup = s.Backupper.archiveAfterStop(ctx, jh, inst, plan, clean, "stop")
+		}
 		msg := "stopped"
 		if !clean {
 			msg = "stopped (world save not confirmed)"
 		}
 		jh.Progress(ctx, 100, msg)
 		cleanCopy := clean
+		finish := func(ctx context.Context, tx *sql.Tx) error {
+			ok, err := instance.SetStateTx(ctx, tx, instanceID, instance.StateStopping, instance.StateStopped)
+			if err != nil {
+				return fmt.Errorf("finish stop for instance %s: %w", instanceID, err)
+			}
+			if !ok {
+				return fmt.Errorf("finish stop for instance %s: not in stopping state", instanceID)
+			}
+			return nil
+		}
+		if archived != nil {
+			finish = chainFinish(finish, archived)
+		}
 		return jobs.Outcome{
-			Status: jobs.StatusSucceeded,
-			Clean:  &cleanCopy,
-			OnFinish: func(ctx context.Context, tx *sql.Tx) error {
-				ok, err := instance.SetStateTx(ctx, tx, instanceID, instance.StateStopping, instance.StateStopped)
-				if err != nil {
-					return fmt.Errorf("finish stop for instance %s: %w", instanceID, err)
-				}
-				if !ok {
-					return fmt.Errorf("finish stop for instance %s: not in stopping state", instanceID)
-				}
-				return nil
-			},
+			Status: jobs.StatusSucceeded, Clean: &cleanCopy, OnFinish: finish, AfterFinish: pruneCleanup,
 		}
 	}
 }

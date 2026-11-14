@@ -108,7 +108,10 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	c.Backupper = &Backupper{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, DataRoot: dataRoot,
 		Stopper: c.Stopper, Starter: c.Starter,
+		FreeSpace:      func() (uint64, error) { return instance.FreeSpace(dataRoot) },
+		FreeSpaceFloor: uint64(max(cfg.Data.FreeSpaceFloorBytes, 0)),
 	}
+	c.Stopper.Backupper = c.Backupper
 	c.Restarter = &Restarter{Engine: d.Engine, Starter: c.Starter, Stopper: c.Stopper, Backupper: c.Backupper}
 	c.Operations = &Operations{DB: d.DB, Engine: d.Engine, Starter: c.Starter, Keeper: d.Keeper}
 	if d.Installer != nil {

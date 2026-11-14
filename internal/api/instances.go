@@ -251,9 +251,8 @@ type patchInstanceRequest struct {
 	ExtraArgs  *string            `json:"extra_args"`
 	// GameBackups is how many rolling backups the game keeps, minGameBackups to maxGameBackups.
 	GameBackups *int `json:"game_backups"`
-	// Backup retention and the restart archive. Not launch fields: they shape no container,
-	// so changing one sets no restart_required (ADR-118's drift check would not see it
-	// either).
+	// Backup retention and the archive after restarts and automatic stops. Not launch fields:
+	// they shape no container, so changing one sets no restart_required.
 	BackupKeepCold      *int  `json:"backup_keep_cold"`
 	BackupKeepHot       *int  `json:"backup_keep_hot"`
 	BackupOnRestart     *bool `json:"backup_on_restart"`

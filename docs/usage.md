@@ -215,9 +215,9 @@ beside the server's name on every page and links to the overview. The panel chec
 seconds, so a job can take a moment to appear. **Start** waits while a new server's setup is
 unfinished; the overview shows how to resume it.
 
-If **Back up when this server restarts** is on under [backup settings](operations.md#backup-settings),
+If **Back up on restarts and automatic stops** is on under [backup settings](operations.md#backup-settings),
 every restart, including a scheduled one, makes a consistent backup between the stop
-and the start.
+and the start. Auto-stops and stops a schedule runs back up too; a stop you make by hand does not.
 
 ### Restart notices
 

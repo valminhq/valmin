@@ -60,7 +60,7 @@ func (s *Supervisor) players(instanceID string) *int {
 // submitAutoStop queues the stop and records who asked for it.
 func (s *Supervisor) submitAutoStop(ctx context.Context, inst *store.Instance) {
 	_, err := s.Stopper.Submit(ctx, &StopSubmission{
-		Instance: inst, ContainerID: *inst.ContainerID, Reason: instance.StopNoPlayers,
+		Instance: inst, ContainerID: *inst.ContainerID, Reason: instance.StopNoPlayers, Archive: true,
 		Audit: &store.AuditEntry{
 			InstanceID: inst.ID, Action: "instances.stop", ActorName: "Auto-stop",
 			Detail: fmt.Sprintf(`{"reason":"no_players","minutes":%d}`, inst.AutoStopMinutes),

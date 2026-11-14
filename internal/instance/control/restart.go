@@ -11,7 +11,8 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// Restarter owns the stop-to-start transition. Archive is an optional snapshot callback.
+// Restarter owns the stop-to-start transition. Backupper takes the archive a restart owes an
+// instance that archives on restart, and may be nil.
 type Restarter struct {
 	Engine    *jobs.Engine
 	Starter   *Starter
@@ -22,8 +23,9 @@ type Restarter struct {
 }
 
 // Run stops the server and starts it again. With mod installs queued it stops there instead,
-// and the mod queue installs them and gives the server the start it is owed.
-func (r *Restarter) Run(inst *store.Instance, containerID, requestedBy string) jobs.Runner {
+// and the mod queue installs them and gives the server the start it is owed. plan is the archive
+// an instance that archives on restart takes between the stop and the start.
+func (r *Restarter) Run(inst *store.Instance, containerID, requestedBy string, plan ArchivePlan) jobs.Runner {
 	instanceID := inst.ID
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		jh.Progress(ctx, 10, "stopping container")
@@ -35,7 +37,7 @@ func (r *Restarter) Run(inst *store.Instance, containerID, requestedBy string) j
 		var archived func(context.Context, *sql.Tx) error
 		var pruneCleanup func(context.Context)
 		if r.Backupper != nil {
-			archived, pruneCleanup = r.Backupper.archiveOnRestart(ctx, jh, inst, clean)
+			archived, pruneCleanup = r.Backupper.archiveAfterStop(ctx, jh, inst, plan, clean, "restart")
 		}
 		var queued []store.QueuedModInstall
 		if r.ModQueue != nil {
