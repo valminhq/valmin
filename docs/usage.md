@@ -57,7 +57,7 @@ Opening a server shows its tabs. A tab appears only when your access reaches it.
 | **Notifications** | The server's own channels and the rules that post about it.                  |
 | **Backups**       | World backups, retention, world import, and the worlds on disk.              |
 | **Saved setups**  | Named snapshots of mods, configuration and settings.                         |
-| **Maintenance**   | Schedules, auto-stop, upcoming or skipped runs, and world tools.             |
+| **Maintenance**   | Schedules, auto-stop, watchdog, upcoming or skipped runs, and world tools.   |
 | **Panel access**  | Who can use this server and what they can do.                                |
 | **Settings**      | Names, password, connections, status page, gameplay, limits, and management. |
 
@@ -241,8 +241,9 @@ crossplay server, and the server password behind **Show**. On a running server,
 
 **Check reachability** on the connection card answers "my friends can't connect". It looks up
 the host's public IP address, asks Steam whether a server is registered there, and sends the
-server a query on its public address from the panel host. A server answers these queries, and
-is listed by Steam, only while public listing is on, so the last two steps run only then. It
+server a query on its public address from the panel host. A server answers these queries only
+while public listing is on and crossplay is off, and Steam lists it only while public listing is
+on, so the last two steps run only then. It
 usually takes a few seconds and at most about twelve, and each person can run it five times a
 minute. The card then shows one
 of these:
@@ -1282,7 +1283,7 @@ Select **Add rule** and choose the event:
 | ---------------------- | ------------------------------------- | -------------------------------------------------------------------- |
 | Server status          | **Server started**                    | Valmin started or restarted a server and its world loaded.           |
 | Server status          | **Server stopped**                    | Valmin stopped a server: by hand, by auto-stop or for a power cut.   |
-| Server status          | **Stopped unexpectedly**              | A server stopped or restarted on its own: a crash, running out of memory or a host reboot. |
+| Server status          | **Stopped unexpectedly**              | A server stopped or restarted on its own: a crash, running out of memory or a host reboot. Also a server the [watchdog](operations.md#restart-a-hung-server) found hung. |
 | Server status          | **Server updated**                    | A game update installed a new build, or applying tested updates updated mods. |
 | Server status          | **Power cut soon**                    | A planned power cut is close: players are being warned. Administration page only. |
 | Problems               | **Crash loop**                        | A server is crashing repeatedly.                                     |

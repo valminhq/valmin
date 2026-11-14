@@ -269,6 +269,48 @@ An auto-stop appears in the job history as requested by **Panel**, in the audit 
 **Auto-stop**, and sends `server_stopped` with the reason **No players for N minutes** to the
 channels of the **Server stopped** [rules](usage.md#add-a-rule) that cover that server.
 
+## Restart a hung server
+
+A mod can leave the game process alive while its main loop is stuck. Docker still reports the
+server as running, and players cannot join. To be told, or to have Valmin restart it, open
+**Maintenance** and choose under **Watchdog**:
+
+- **Do nothing**, the default.
+- **Alert me** sends one **Server stopped unexpectedly** notification when the server stops
+  responding, and leaves it running.
+- **Alert me and restart the server** sends the same notification and restarts the server. It
+  needs the right to restart the server as well as to change its settings, and Valmin restarts a
+  server this way at most once an hour. A server that hangs again inside the hour is reported at
+  once and restarted when the hour is up. The hour is counted in memory, so it starts again when
+  Valmin does.
+
+The game writes a status line (`Connections N ZDOS:N …`) to its log every 10 minutes while its
+main loop runs, with or without players. A running server counts as not responding when it has
+logged none for 15 minutes, or for 25 minutes after it starts, which leaves room for the first
+line. The watchdog reads this from the log, so it works for private and crossplay servers and
+needs no open port. Before it acts, Valmin reads the server's log once more, and it counts silence
+only from the moment it could last read the log, so a log stream that stalled or a Docker outage
+does not make a healthy server look hung. A server that has logged no status line since it started
+is only reported, never restarted, because how long a large world takes to load is not known. A
+server whose log never shows the line, for example because a mod filters the log, is reported 25
+minutes after every start; turn the watchdog off for it. A host or Valmin that was suspended does
+not count as silence: the clock restarts when Valmin runs again, and also when Valmin starts, so a
+hung server is noticed up to 15 minutes after Valmin comes up. A restart waits for the next check
+while another task is working on the server; the hang is reported meanwhile.
+
+A stuck game may not be able to save, so a restart may wait the whole stop timeout, after which
+Docker kills the server. If Docker still shows the container running after that, Valmin does not start it again: the
+server is held in the error state until someone checks it. Otherwise the server starts again and
+the world goes back to its last autosave, up to 30 minutes old. The restart records
+that the save was not confirmed, so **Unclean stop** opens in the operations inbox, and no backup
+is taken even with [**Back up on restarts and automatic stops**](#backup-settings) on. The
+restart appears in the job history as requested by **Panel** and in the audit log as
+**Watchdog**. Each report also counts toward the **Crash loop** alert.
+
+Valmin does not use a query to the game's port for this. In a test, a server answered it only
+while public listing was on and crossplay was off, and it kept answering with the game's main
+loop stopped for several minutes, so it cannot tell a stuck game from a healthy one.
+
 ## Reset or upgrade the world with mods
 
 **World tools** on **Maintenance** runs two world-maintenance mods from the panel:

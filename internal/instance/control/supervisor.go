@@ -48,9 +48,12 @@ type Supervisor struct {
 	GameUpdater *GameUpdater
 	// Stopper submits the stops auto-stop owes.
 	Stopper *Stopper
+	// Restarter submits the restarts the watchdog owes.
+	Restarter *Restarter
 	// ModQueue may be nil, in which case queued mod installs wait.
 	ModQueue  *ModQueue
 	idle      idleClock
+	hang      hangWatch
 	crash     *instance.CrashLoop
 	owedStops map[string]string
 
@@ -149,8 +152,8 @@ func (s *Supervisor) interruptOperations(ctx context.Context) {
 	}
 }
 
-// Run is the observer loop: the same reconciliation pass, then the auto-stop check, on a timer,
-// for the life of the process. It returns when ctx is cancelled.
+// Run is the observer loop: the same reconciliation pass, then the auto-stop and watchdog
+// checks, on a timer, for the life of the process. It returns when ctx is cancelled.
 func (s *Supervisor) Run(ctx context.Context) {
 	ticker := time.NewTicker(observeInterval)
 	defer ticker.Stop()
@@ -163,13 +166,20 @@ func (s *Supervisor) Run(ctx context.Context) {
 			s.stops.Wait()
 			return
 		case <-ticker.C:
+			reconciled := true
 			if err := s.Reconcile(ctx); err != nil && ctx.Err() == nil {
 				slog.WarnContext(ctx, "observer pass failed, will retry", slog.Any("error", err))
+				reconciled = false
 			}
 			if s.ModQueue != nil {
 				s.ModQueue.Drain(ctx)
 			}
-			s.autoStop(ctx, time.Now())
+			now := time.Now()
+			s.autoStop(ctx, now)
+			// A pass that could not see Docker says nothing about whether a server is quiet.
+			if reconciled {
+				s.watchdog(ctx, now)
+			}
 		}
 	}
 }

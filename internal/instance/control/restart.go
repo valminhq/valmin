@@ -23,14 +23,22 @@ type Restarter struct {
 }
 
 // Run stops the server and starts it again. With mod installs queued it stops there instead,
-// and the mod queue installs them and gives the server the start it is owed. plan is the archive
-// an instance that archives on restart takes between the stop and the start.
-func (r *Restarter) Run(inst *store.Instance, containerID, requestedBy string, plan ArchivePlan) jobs.Runner {
+// and the mod queue installs them and gives the server the start it is owed. A stop that ended
+// in Docker's SIGKILL parks the server in error, unless the submission forces the start and the
+// container is shown to be down. plan is the archive an instance that archives on restart takes
+// between the stop and the start.
+func (r *Restarter) Run(input *RestartSubmission, plan ArchivePlan) jobs.Runner {
+	inst, containerID, requestedBy := input.Instance, input.ContainerID, input.RequestedBy
 	instanceID := inst.ID
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		jh.Progress(ctx, 10, "stopping container")
 		clean, killed, err := r.Stopper.stopContainer(ctx, containerID)
 		cleanCopy := clean
+		if killed && err == nil && input.ForceStart && !r.Stopper.stillRunning(ctx, containerID) {
+			jh.Log("the server did not stop within the timeout and was force-killed; " +
+				"starting it anyway because this restart was forced")
+			killed = false
+		}
 		if out := stopFailure(jh, instanceID, killed, err); out != nil {
 			return *out
 		}

@@ -936,6 +936,17 @@ default is 4). It is a launch setting, so it sets `restart_required`.
 It is `0` (off) or 5 to 1440, needs both `instance.settings` and `instance.stop`, and takes effect immediately without
 setting `restart_required`. An unknown player count counts as occupied.
 
+`watchdog` is `off` (the default), `alert` or `restart`: what Valmin does about a running server
+whose log has shown no `Connections` status line for 15 minutes, or for 25 minutes after the
+server started. `alert` sends one `instance_down` event per silence and leaves the server running.
+`restart` also restarts it, at most once an hour per server (counted in memory), and only a server
+that has logged a status line since it started; a server that has not is only reported. A restart
+that has to wait, for the hour or for a job holding the server, is made when it can be, with a
+second event. The restart job records `clean: false` when Docker had to kill the stopped server,
+and the instance is started again unless Docker still shows the container running, in which case
+it is held in the `error` state. Any other value returns `422`. It takes effect immediately
+without setting `restart_required`.
+
 `backup_on_restart` makes a consistent backup after the stop of every restart, every auto-stop
 and every stop a schedule fires, including the stop step of a schedule's chain. A stop a person
 asks for, a planned power cut and the stop steps of an update test never back up. The backup is
@@ -975,8 +986,8 @@ stopped server, a settings change waiting for a restart, or a public IP lookup t
 crossplay server, which joins by code, and when the host's address is unknown. `remedy` is absent
 when `status` is `ok`. `steps` lists what was measured: `public_ip`, `steam_listing` and
 `server_query`. The last two run only for a server with public listing on, because only then does
-the server answer queries; for any other server `server_query` is `unknown` and `steam_listing` is
-absent. When the public IP lookup fails or is turned off, `steps` holds only `public_ip`. The list
+the server answer queries (and not with crossplay on, which the check does not test at all); for
+any other server `server_query` is `unknown` and `steam_listing` is absent. When the public IP lookup fails or is turned off, `steps` holds only `public_ip`. The list
 is empty when the server is stopped, uses crossplay or has a restart pending. The lookup address comes from
 [`game.public_ip_url`](configuration.md#check-that-players-can-reach-a-server).
 
@@ -1004,6 +1015,8 @@ is marked as pending a restart.
 | `backup_keep_cold`, `backup_keep_hot`                                                   | `backups.restore`                       |
 | `remote_backup_enabled`, `remote_keep_cold`, `remote_keep_hot`, `remote_keep_snapshots` | `backups.restore`                       |
 | `auto_stop_minutes`                                                                     | `instance.settings` and `instance.stop` |
+| `watchdog` set to `off` or `alert`                                                      | `instance.settings`                     |
+| `watchdog` set to `restart`                                                             | `instance.settings` and `instance.restart` |
 | `game_branch`, `game_branch_password`                                                   | `instance.update`                       |
 | `mem_limit_mb`, `cpu_limit`                                                             | `instance.limits`                       |
 | `extra_args`                                                                            | `instance.extra_args`                   |

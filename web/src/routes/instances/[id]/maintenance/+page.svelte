@@ -6,6 +6,7 @@
 	import { topics, type ServerMessage } from '#lib/socket/messages.js';
 	import { withLive } from '#lib/state/instances.svelte.js';
 	import AutoStopPanel from '#lib/components/auto-stop-panel.svelte';
+	import WatchdogPanel from '#lib/components/watchdog-panel.svelte';
 	import GameVersionPanel from '#lib/components/game-version-panel.svelte';
 	import ScheduledRuns from '#lib/components/scheduled-runs.svelte';
 	import SchedulesEditor from '#lib/components/schedules-editor.svelte';
@@ -61,6 +62,7 @@
 			</div>
 			<div class="grid gap-6">
 				<AutoStopPanel {instance} onchange={() => void load(id)} />
+				<WatchdogPanel {instance} onchange={() => void load(id)} />
 				<GameVersionPanel {instance} onchange={() => void load(id)} />
 				<ScheduledRuns instanceId={instance.id} />
 			</div>

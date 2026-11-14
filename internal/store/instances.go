@@ -66,6 +66,9 @@ type Instance struct {
 	// AutoStopMinutes stops the running server once it has had no players for this long. 0 is
 	// off.
 	AutoStopMinutes int `json:"auto_stop_minutes"`
+	// Watchdog is what the panel does about a running server whose log has gone quiet: "off",
+	// "alert" or "restart". The values are instance.Watchdog's.
+	Watchdog string `json:"watchdog"`
 	// TestOf is the server this instance is an update-test copy of, nil for an ordinary server.
 	TestOf *string `json:"test_of,omitempty"`
 	// TestPassed is whether the test that made this update-test copy ran to the end.
@@ -84,7 +87,7 @@ const instanceColumns = `id, name, state, container_id, data_dir, base_port, ser
 	mem_limit_mb, cpu_limit, game_build_id, game_branch, game_backups,
 	backup_keep_cold, backup_keep_hot, backup_on_restart, remote_backup_enabled,
  remote_keep_cold, remote_keep_hot, remote_keep_snapshots, status_published,
-	status_notice, status_connect_info, auto_stop_minutes, test_of, (test_passed_at IS NOT NULL),
+	status_notice, status_connect_info, auto_stop_minutes, watchdog, test_of, (test_passed_at IS NOT NULL),
 	container_started_at, created_at, updated_at`
 
 func scanInstance(s scanner) (Instance, error) {
@@ -125,6 +128,7 @@ func scanInstance(s scanner) (Instance, error) {
 		&inst.StatusNotice,
 		&inst.StatusConnectInfo,
 		&inst.AutoStopMinutes,
+		&inst.Watchdog,
 		&testOf,
 		&inst.TestPassed,
 		&containerStartedAt,
@@ -506,6 +510,28 @@ func (db *DB) UpdateInstanceAutoStop(ctx context.Context, id string, minutes int
 	return updateInstanceAutoStop(ctx, db.Writer, id, minutes)
 }
 
+// UpdateInstanceWatchdog sets what the panel does about a running server whose log has gone
+// quiet. It shapes no container, so it leaves restart_required alone.
+func (db *DB) UpdateInstanceWatchdog(ctx context.Context, id, mode string) error {
+	return updateInstanceWatchdog(ctx, db.Writer, id, mode)
+}
+
+func updateInstanceWatchdog(ctx context.Context, ex execer, id, mode string) error {
+	res, err := ex.ExecContext(ctx,
+		`UPDATE instances SET watchdog = ?, updated_at = ? WHERE id = ?`, mode, Now(), id)
+	if err != nil {
+		return fmt.Errorf("update watchdog for instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update watchdog for instance %s: %w", id, err)
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
+}
+
 func updateInstanceAutoStop(ctx context.Context, ex execer, id string, minutes int) error {
 	res, err := ex.ExecContext(ctx,
 		`UPDATE instances SET auto_stop_minutes = ?, updated_at = ? WHERE id = ?`, minutes, Now(), id)
@@ -846,7 +872,7 @@ func TxCreateCloneInstance(
 			id, name, state, data_dir, base_port, server_name, world_name, password,
 			public, crossplay, crossplay_instance_id, preset, modifiers, extra_args,
 			modded, bepinex_version, restart_required, mem_limit_mb, cpu_limit, game_build_id,
-			game_branch, game_branch_password, game_backups, auto_stop_minutes,
+			game_branch, game_branch_password, game_backups, auto_stop_minutes, watchdog,
 			backup_keep_cold, backup_keep_hot, backup_on_restart, test_of, created_at, updated_at
 		)
 		SELECT ?, ?, 'provisioning', ?, ?, server_name, world_name, ?,
@@ -854,6 +880,7 @@ func TxCreateCloneInstance(
 			modded, bepinex_version, FALSE, mem_limit_mb, COALESCE(?, cpu_limit), game_build_id,
 			game_branch, ?, game_backups,
 			CASE WHEN ? THEN ? ELSE auto_stop_minutes END,
+			CASE WHEN ? THEN 'off' ELSE watchdog END,
 			backup_keep_cold, backup_keep_hot, CASE WHEN ? THEN FALSE ELSE backup_on_restart END,
 			CASE WHEN ? THEN id END, ?, ?
 		FROM instances WHERE id = ? AND (state = 'stopped' OR (? AND state = 'running'))`,
@@ -861,6 +888,7 @@ func TxCreateCloneInstance(
 		n.UpdateTest, n.UpdateTest, n.CrossplayInstanceID,
 		n.CPULimit, nullIfEmpty(n.GameBranchPassword),
 		n.UpdateTest, updateTestAutoStopMinutes,
+		n.UpdateTest,
 		n.UpdateTest,
 		n.UpdateTest, now, now, sourceID, n.UpdateTest)
 	if err != nil {
@@ -1074,6 +1102,7 @@ type InstanceUpdate struct {
 	Launch          *InstanceLaunch
 	Backup          *BackupPolicy
 	AutoStopMinutes *int
+	Watchdog        *string
 	Branch          *InstanceBranch
 	Remote          *RemotePolicy
 	StatusText      *StatusText
@@ -1111,6 +1140,9 @@ func (u *InstanceUpdate) writes(ctx context.Context, ex execer, id string) []fun
 	}
 	if u.AutoStopMinutes != nil {
 		out = append(out, func() error { return updateInstanceAutoStop(ctx, ex, id, *u.AutoStopMinutes) })
+	}
+	if u.Watchdog != nil {
+		out = append(out, func() error { return updateInstanceWatchdog(ctx, ex, id, *u.Watchdog) })
 	}
 	if b := u.Branch; b != nil {
 		out = append(out, func() error { return updateInstanceBranch(ctx, ex, id, b.Name, b.Password) })

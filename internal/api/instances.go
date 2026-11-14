@@ -270,6 +270,9 @@ type patchInstanceRequest struct {
 	// AutoStopMinutes is 0 for off, or minAutoStop to maxAutoStop idle minutes. It takes effect
 	// immediately.
 	AutoStopMinutes *int `json:"auto_stop_minutes"`
+	// Watchdog is "off", "alert" or "restart": what the panel does about a running server whose
+	// log has gone quiet. It takes effect immediately.
+	Watchdog *string `json:"watchdog"`
 	// GameBranch and GameBranchPassword choose the Steam branch the next game update installs.
 	// They are applied together: a password branch needs its password each time it is chosen,
 	// and a branch set without one clears the stored password.
@@ -337,6 +340,10 @@ func (b *patchInstanceRequest) actions() []authz.Action {
 	if b.AutoStopMinutes != nil {
 		need = append(need, authz.InstanceStop)
 	}
+	// A watchdog that restarts a hung server restarts it, so it also needs the right to.
+	if b.Watchdog != nil && *b.Watchdog == string(instance.WatchdogRestart) {
+		need = append(need, authz.InstanceRestart)
+	}
 	// The branch decides what the game update installs, so it needs the right to run one.
 	if b.branch() {
 		need = append(need, authz.InstanceUpdate)
@@ -350,7 +357,7 @@ func (b *patchInstanceRequest) settings() bool {
 		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil || b.GameBackups != nil ||
 		b.BackupOnRestart != nil ||
 		b.StatusPublished != nil || b.StatusNotice != nil || b.StatusConnectInfo != nil ||
-		b.AutoStopMinutes != nil
+		b.AutoStopMinutes != nil || b.Watchdog != nil
 }
 
 // retention reports whether the body touches how many archives are kept, here or off-host.
@@ -446,6 +453,15 @@ func addAutoStopViolations(val *apierr.Validation, body *patchInstanceRequest) {
 	}
 }
 
+// addWatchdogViolations rejects a watchdog value other than off, alert or restart.
+func addWatchdogViolations(val *apierr.Validation, body *patchInstanceRequest) {
+	if v := body.Watchdog; v != nil {
+		if _, ok := instance.ParseWatchdog(*v); !ok {
+			val.Add("watchdog", apierr.FieldInvalid, "Use off, alert or restart.")
+		}
+	}
+}
+
 // addGameBackupsViolations rejects a rolling backup count outside minGameBackups..maxGameBackups.
 func addGameBackupsViolations(val *apierr.Validation, body *patchInstanceRequest) {
 	if v := body.GameBackups; v != nil && (*v < minGameBackups || *v > maxGameBackups) {
@@ -500,6 +516,7 @@ func (h *Instances) mergePatch(
 	addBackupPolicyViolations(&val, body)
 	addStatusTextViolations(&val, body)
 	addAutoStopViolations(&val, body)
+	addWatchdogViolations(&val, body)
 	addGameBackupsViolations(&val, body)
 
 	patch := mergeInstanceLaunch(current, body, password)
@@ -710,6 +727,7 @@ func (h *Instances) settingsUpdate(
 		addBackupPolicyViolations(&val, body)
 		addStatusTextViolations(&val, body)
 		addAutoStopViolations(&val, body)
+		addWatchdogViolations(&val, body)
 		if err := val.Err(); err != nil {
 			apierr.Write(w, r, err)
 			return nil, false
@@ -725,6 +743,10 @@ func (h *Instances) settingsUpdate(
 	if v := body.AutoStopMinutes; v != nil && *v != current.AutoStopMinutes {
 		update.AutoStopMinutes = v
 		changes = fieldChange(changes, "auto_stop_minutes", current.AutoStopMinutes, *v)
+	}
+	if v := body.Watchdog; v != nil && *v != current.Watchdog {
+		update.Watchdog = v
+		changes = fieldChange(changes, "watchdog", current.Watchdog, *v)
 	}
 	var branchChanges []change
 	update.Branch, branchChanges = branchUpdate(current, branch)
