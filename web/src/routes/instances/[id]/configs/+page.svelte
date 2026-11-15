@@ -32,6 +32,12 @@
 
 	const allowed = $derived(session.allowed(id));
 	const canEdit = $derived(allowed.includes(actions.configEdit));
+	const canRaw = $derived(allowed.includes(actions.configRaw));
+
+	// Deleting a `.cfg` needs config.edit; a text-only file needs config.raw.
+	function canDelete(file: string): boolean {
+		return hasSettings(file) ? canEdit : canRaw;
+	}
 
 	$effect(() => {
 		void load();
@@ -134,7 +140,7 @@
 							{/if}
 							<ChevronRight class="size-4 shrink-0 text-muted-foreground" />
 						</a>
-						{#if canEdit}
+						{#if canDelete(file.file)}
 							<Button
 								variant="ghost"
 								size="sm"

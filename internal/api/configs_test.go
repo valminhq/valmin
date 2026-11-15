@@ -908,6 +908,33 @@ func TestDeleteConfigRefusals(t *testing.T) {
 	}
 }
 
+// TestDeleteTextOnlyConfigNeedsRaw asserts a member holding config.edit but not config.raw can
+// delete a `.cfg` but not a text-only file, matching who may write one.
+func TestDeleteTextOnlyConfigNeedsRaw(t *testing.T) {
+	t.Parallel()
+	rt, db, fake, _, member := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	cfgPath := seedConfigFile(t, rt)
+	textPath := filepath.Join(filepath.Dir(cfgPath), "notes.yaml")
+	if err := os.WriteFile(textPath, []byte("a: 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seed(t, db, `UPDATE instance_grants SET perms = '["config.edit"]'
+		WHERE user_id = 'u-member' AND instance_id = 'inst-a'`)
+
+	rec := as(rt, member, httptest.NewRequest(http.MethodDelete, configURL("/notes.yaml"), http.NoBody))
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("delete of a text-only file = %d, want 403 (%s)", rec.Code, rec.Body)
+	}
+	if _, err := os.Lstat(textPath); err != nil {
+		t.Errorf("a refused delete removed the file: %v", err)
+	}
+	rec = as(rt, member, httptest.NewRequest(http.MethodDelete, configURL("/"+seededConfigFile), http.NoBody))
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("delete of a .cfg = %d, want 204 (%s)", rec.Code, rec.Body)
+	}
+}
+
 // TestConfigListNamesTheInstalledModsBehindEachFile asserts the list says which installed mod
 // a file belongs to, and an empty list for one no installed mod claims.
 func TestConfigListNamesTheInstalledModsBehindEachFile(t *testing.T) {

@@ -596,6 +596,7 @@ func (h *Instances) writeConfigRaw(w http.ResponseWriter, r *http.Request) {
 // deleteConfig handles DELETE /instances/{id}/configs/{file}: the file and every copy the panel
 // keeps of it. A file an installed mod still claims is refused with the mods that claim it unless
 // allow_installed is set; that mod writes the file again, with its defaults, on its next launch.
+// A `.cfg` needs config.edit; any other file is text only and needs config.raw, as writing it does.
 func (h *Instances) deleteConfig(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -606,8 +607,7 @@ func (h *Instances) deleteConfig(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
-	if !h.Authz.Can(r.Context(), u, authz.ConfigEdit, id) {
-		apierr.Write(w, r, apierr.New(errcode.Forbidden))
+	if !h.mayDeleteConfig(w, r, u, id) {
 		return
 	}
 	inst, ok := h.mustLoadInstance(w, r, id)
@@ -652,6 +652,20 @@ func (h *Instances) deleteConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// mayDeleteConfig reports whether u may delete the file named by {file}: config.edit for a
+// `.cfg`, config.raw for any other. It writes the 403 itself when not.
+func (h *Instances) mayDeleteConfig(w http.ResponseWriter, r *http.Request, u *store.User, id string) bool {
+	need := authz.ConfigEdit
+	if !isSettingsFile(r.PathValue("file")) {
+		need = authz.ConfigRaw
+	}
+	if !h.Authz.Can(r.Context(), u, need, id) {
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
+		return false
+	}
+	return true
 }
 
 // configClaimedBy is the installed mods a config file belongs to, given its bytes.

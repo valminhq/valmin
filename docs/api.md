@@ -1022,7 +1022,8 @@ setups, server definitions and template codes carry it: only a `.cfg` directly i
 belongs to, matched by name (a file in a subfolder also by that top folder, such as
 `EpicLoot/`), or an empty list. `DELETE /instances/{id}/configs/{file}`
 deletes the file with its `.bak`, `.orig` and `.pending` copies and answers `204`. It needs
-`config.edit` and a stopped or running server. A file an installed mod uses is refused
+`config.edit` for a `.cfg`, or `config.raw` for any other file, and a stopped or running
+server. A file an installed mod uses is refused
 with `409 mod_conflict` and `details.installed_mods`; send `allow_installed=true` to delete
 it anyway. That mod's settings return to their defaults on the next start, so the server
 is marked as pending a restart.

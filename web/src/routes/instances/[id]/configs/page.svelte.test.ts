@@ -247,4 +247,28 @@ describe('deleting a file', () => {
 		await screen.findByRole('link', { name: /com\.example\.wards\.cfg/ });
 		expect(screen.queryByRole('button', { name: /^Delete / })).toBeNull();
 	});
+
+	it('offers a text-only file a delete only with config.raw', async () => {
+		const yaml = {
+			file: 'expand_world/expand_biomes.yaml',
+			plugin: '',
+			size_bytes: 12,
+			installed_mods: [],
+			dir: 'BepInEx/config'
+		};
+		serveList([...listed, yaml]);
+		const { unmount } = render(Page);
+
+		await screen.findByRole('button', { name: 'Delete com.example.wards.cfg' });
+		expect(screen.queryByRole('button', { name: `Delete ${yaml.file}` })).toBeNull();
+		unmount();
+
+		session.permissions = permissions('inst-a', [
+			actions.configRead,
+			actions.configEdit,
+			actions.configRaw
+		]);
+		render(Page);
+		expect(await screen.findByRole('button', { name: `Delete ${yaml.file}` })).toBeTruthy();
+	});
 });
