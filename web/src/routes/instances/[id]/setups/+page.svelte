@@ -18,6 +18,7 @@
 	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import Problem from '#lib/components/problem.svelte';
+	import ConfigLeftOut from '#lib/components/config-left-out.svelte';
 	import SetupComparison from '#lib/components/setup-comparison.svelte';
 
 	const id = $derived(page.params.id ?? '');
@@ -199,6 +200,7 @@
 					</Card.Description>
 				</Card.Header>
 				<Card.Content class="grid gap-4">
+					<ConfigLeftOut {id} />
 					<div class="grid max-w-lg gap-2">
 						<Label for="setup-name">Name</Label>
 						<Input id="setup-name" bind:value={name} required />

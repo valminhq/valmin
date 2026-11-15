@@ -13,6 +13,7 @@
 		type ConfigSchema,
 		type ConfigValue
 	} from '#lib/api/configs.js';
+	import { hasSettings } from '#lib/config-files.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { socket } from '#lib/socket/index.svelte.js';
 	import { topics, type ServerMessage } from '#lib/socket/messages.js';
@@ -30,6 +31,8 @@
 
 	const id = $derived(page.params.id ?? '');
 	const file = $derived(page.params.file ?? '');
+	/** A file with no settings (YAML, JSON, text) has only the raw editor. */
+	const textOnly = $derived(!hasSettings(file));
 
 	let instance = $state<Instance | null>(null);
 	let schema = $state<ConfigSchema | null>(null);
@@ -70,6 +73,8 @@
 	const allowed = $derived(session.allowed(id));
 	const canEdit = $derived(allowed.includes(actions.configEdit));
 	const canRaw = $derived(allowed.includes(actions.configRaw));
+	/** Whether this member can change the file at all: a text file only through the raw editor. */
+	const canWrite = $derived(textOnly ? canRaw : canEdit);
 
 	/**
 	 * Which editor is on screen, and whether the raw one has ever been opened. Both stay mounted
@@ -78,6 +83,7 @@
 	 */
 	let tab = $state<'form' | 'raw'>('form');
 	let rawOpened = $state(false);
+	const onRaw = $derived(textOnly || tab === 'raw');
 
 	/** Why editing is unavailable, or null when it is available (B11). The daemon refuses a write
 	 * to a server that is neither stopped nor running; this makes the refusal legible before the
@@ -156,12 +162,12 @@
 		try {
 			const [nextInstance, nextSchema, nextKept] = await Promise.all([
 				instances.get(targetID),
-				configs.read(targetID, targetFile),
+				hasSettings(targetFile) ? configs.read(targetID, targetFile) : null,
 				loadCopies(targetID, targetFile)
 			]);
 			if (request !== loadRequest) return;
 			instance = nextInstance;
-			take(nextSchema);
+			if (nextSchema) take(nextSchema);
 			kept = nextKept;
 			failure = null;
 		} catch (err) {
@@ -173,13 +179,20 @@
 	}
 
 	/** A file the panel has never written has no copy to compare against. The 404 is the ordinary
-	 * case and is not reported. */
+	 * case and is not reported. A text file's copy has no settings, so only whether it exists is
+	 * recorded; the raw editor reads its bytes. */
 	async function loadCopies(
 		targetID: string,
 		targetFile: string
 	): Promise<Record<ConfigCopyName, ConfigCopy | null>> {
+		const read = (which: ConfigCopyName): Promise<ConfigCopy> =>
+			hasSettings(targetFile)
+				? configs.copy(targetID, targetFile, which)
+				: configs
+						.readRawCopy(targetID, targetFile, which)
+						.then(() => ({ file: targetFile, plugin: '', sections: [], captured_at: '' }));
 		const [asFound, beforeLastSave] = await Promise.all(
-			copies.map((which) => configs.copy(targetID, targetFile, which).catch(() => null))
+			copies.map((which) => read(which).catch(() => null))
 		);
 		return { original: asFound, previous: beforeLastSave };
 	}
@@ -269,7 +282,7 @@
 		<div class="grid gap-1">
 			<h2 class="font-mono text-2xl font-semibold tracking-tight">{file}</h2>
 			<p class="text-sm text-muted-foreground">
-				{schema?.plugin || 'No plugin named in this file'}
+				{textOnly ? 'Edited as text' : schema?.plugin || 'No plugin named in this file'}
 			</p>
 		</div>
 	</header>
@@ -296,7 +309,7 @@
 				{/each}
 			</div>
 
-			{#if reference}
+			{#if reference && !textOnly}
 				{#if differences.length === 0}
 					<p class="text-sm text-muted-foreground">
 						Nothing differs from this version, kept {when(reference.captured_at)}.
@@ -357,14 +370,18 @@
 		</p>
 	{/if}
 
-	{#if canEdit && blocked}
+	{#if textOnly && !canRaw}
+		<p class="text-sm text-muted-foreground">
+			This file has no settings form. Opening it as text needs permission to edit raw config files.
+		</p>
+	{:else if canWrite && blocked}
 		<p class="text-sm text-muted-foreground" data-testid="config-actions-blocked">{blocked}</p>
-	{:else if canEdit && instance?.state === 'running'}
+	{:else if canWrite && instance?.state === 'running'}
 		<p class="text-sm text-muted-foreground">
 			This server is running. Saved settings take effect when it restarts; some mods pick them up
 			sooner.
 		</p>
-	{:else if !canEdit && !loading}
+	{:else if !canWrite && !loading}
 		<p class="text-sm text-muted-foreground">You can read these settings but not change them.</p>
 	{/if}
 
@@ -372,7 +389,7 @@
 		<RestartNotice {instance} />
 	{/if}
 
-	{#if canRaw}
+	{#if canRaw && !textOnly}
 		<!-- Two buttons rather than a tabs component, which the panel does not have. -->
 		<div class="flex gap-1 border-b" aria-label="Editor">
 			<button
@@ -409,8 +426,8 @@
 
 	{#if loading}
 		<p class="text-sm text-muted-foreground">Loading…</p>
-	{:else}
-		<div class="grid gap-6" class:hidden={tab !== 'form'}>
+	{:else if !textOnly}
+		<div class="grid gap-6" class:hidden={onRaw}>
 			<div class="relative">
 				<Search
 					class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
@@ -472,8 +489,8 @@
 		</div>
 	{/if}
 
-	{#if rawOpened}
-		<div class:hidden={tab !== 'raw'}>
+	{#if canRaw && (rawOpened || textOnly)}
+		<div class:hidden={!onRaw}>
 			<ConfigRaw
 				{id}
 				{file}

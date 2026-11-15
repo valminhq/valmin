@@ -316,9 +316,9 @@ func ConfigOwners(manifests map[string][]string, plugins map[string]string) map[
 }
 
 // ConfigClaims maps each config file to the installed packages that claim it, sorted. A package
-// claims a file its manifest placed, and one whose header plugin, file name or last
-// dot-separated part of the file name matches the aliases Loaded uses. A file no package claims
-// is absent.
+// claims a file its manifest placed, and one whose header plugin, file name, last
+// dot-separated part of the file name or top folder matches the aliases Loaded uses. A file no
+// package claims is absent.
 //
 // manifests maps a full name to its manifest paths; plugins maps a config file name to the
 // plugin its header names, version included, or an empty string.
@@ -347,15 +347,17 @@ func ConfigClaims(manifests map[string][]string, plugins map[string]string) map[
 // configMatches reports whether a config file's names match a package's aliases. Plugins name
 // their file after their GUID, such as `Azumatt.AzuCraftyBoxes.cfg`, their header after the
 // plugin itself, followed by its version, and a side file after the plugin and its purpose, such
-// as `FiresDiscordIntegration_BotToken.cfg`.
+// as `FiresDiscordIntegration_BotToken.cfg`. A file in a subfolder is also matched by the
+// folder directly under the config directory, such as `EpicLoot/patches/x.json`.
 func configMatches(aliases map[string]bool, file, plugin string) bool {
 	if i := strings.LastIndex(plugin, " "); i >= 0 {
 		plugin = plugin[:i]
 	}
-	stem := strings.TrimSuffix(file, ".cfg")
+	stem := strings.TrimSuffix(path.Base(file), path.Ext(file))
 	last := stem[strings.LastIndex(stem, ".")+1:]
 	head, _, _ := strings.Cut(last, "_")
-	for _, name := range []string{plugin, stem, last, head} {
+	top, _, _ := strings.Cut(path.Dir(file), "/")
+	for _, name := range []string{plugin, stem, last, head, top} {
 		if n := normalisePluginName(name); n != "" && aliases[n] {
 			return true
 		}

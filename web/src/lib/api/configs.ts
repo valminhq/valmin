@@ -3,8 +3,8 @@ import { api } from './client';
 /** What a setting can hold once the daemon has typed it (`11 §1.1`). */
 export type ConfigValue = string | number | boolean;
 
-/** One row of `GET /instances/{id}/configs`. `plugin` comes from the file's own header and is
- * empty when it has none. */
+/** One row of `GET /instances/{id}/configs`. `file` is the path relative to `dir`, and may
+ * name a subdirectory. `plugin` comes from the file's own header and is empty when it has none. */
 export interface ConfigFile {
 	file: string;
 	plugin: string;
@@ -15,6 +15,8 @@ export interface ConfigFile {
 	/** The file's directory relative to the game installation; empty for a file an installed mod
 	 * keeps at the installation root. */
 	dir: string;
+	/** Whether saved setups, definitions and template codes carry this file. */
+	portable: boolean;
 }
 
 export interface ConfigList {

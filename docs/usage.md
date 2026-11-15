@@ -813,7 +813,11 @@ a code after a while, so create a new one when a player cannot import it.
 ## Edit mod configuration
 
 Open **Mod config**. The list shows the server's BepInEx and plugin configuration
-files. Its search box keeps the files whose name or plugin name contains what you
+files, including those in subfolders of `BepInEx/config`, such as Expand World Data's
+`expand_world/*.yaml` or WackysDatabase's `wackysDatabase/**/*.yml`. It lists `.cfg`, `.yaml`,
+`.yml`, `.json` and `.txt` files at most 8 folders deep, YAML, JSON and text files only up to
+1 MiB, and leaves out hidden folders; a note under the list says when one of these limits left a file out. Files
+other than `.cfg` are marked **Edited as text**. Its search box keeps the files whose name or plugin name contains what you
 type, ignoring case, and shows how many files match, for example `3 of 12 files`.
 Adding `?q=` and some text to the page address opens the list already filtered.
 
@@ -848,6 +852,13 @@ line.
 
 ### Edit as raw text
 
+YAML, JSON and text files have no settings form and open straight in the raw editor, with
+the same conflict check, kept versions and line-by-line comparison. Saving a `.json` or
+`.yaml` file that would no longer parse is refused with the parser's message and line, and
+nothing is written. This holds even for a file that did not parse before: JSON with comments,
+which some mods accept, has to lose its comments to be saved from the panel. Many such mods reload these files as soon as they change, so a save to a
+running server often takes effect at once.
+
 The **Raw text** tab edits the whole file as text, for changes the form cannot show,
 such as comments or settings the mod does not describe. It has no validation. It
 compares line by line against the chosen version. Save or discard form changes before
@@ -862,7 +873,9 @@ overwrite the file with them.
 You can edit configuration on a stopped or a running server. Edits to a running
 server take effect when it restarts, so restart it once you have saved everything;
 some mods pick changes up sooner. If a mod writes its old settings back when the
-server stops, Valmin puts your saved values back before the next start.
+server stops, Valmin puts your saved values back before the next start. This applies to
+`.cfg` files only: a YAML, JSON or text file stays as written, including any change the mod
+makes to it later.
 
 Leaving a page with unsaved edits asks you to confirm first, so a mistyped link
 does not discard them. Saving clears the prompt.
@@ -972,7 +985,10 @@ be deleted while a setup links to it.
 
 A setup keeps launch and backup settings, Valmin-managed mods with their exact
 registries, versions, locks, enabled states, and client labels, plus supported mod
-configuration files: flat `.cfg` files up to 1 MiB each. Valmin keeps the
+configuration files: `.cfg` files directly in `BepInEx/config`, up to 1 MiB each. Files in
+subfolders, YAML, JSON and text files, and server-root files are not carried; **Save current
+setup** lists them under *config files are not included*, and a restore leaves them as they
+are. Valmin keeps the
 required package files, so a restore does not need the registry or its download
 cache. Saving fails if a required package cannot be captured. Game build and world
 name appear in the comparison but do not change on restore. The server password and
@@ -994,8 +1010,10 @@ A template recreates a server's setup on any Valmin panel. Both forms are under
 **Share as a template** on the server's **Settings** page.
 
 **Download template file** saves the launch settings, the mods at their installed
-versions and every config file. It carries no password and no world. A mod's config
-can hold a key or a webhook, so read the file before you share it.
+versions and the `.cfg` files directly in `BepInEx/config`. It carries no password and no
+world. A mod's config can hold a key or a webhook, so read the file before you share it.
+Neither the file nor the code carries config files in subfolders, YAML, JSON or text files,
+or server-root files; the section lists them under *config files are not included*.
 
 A template code is a short text that recreates the server's mod setup. Choose **Create
 template code**, then **Copy code**. Codes start with `valmin1:`.

@@ -149,7 +149,9 @@ overview shows **This server needs a check** until you choose **Check this serve
 On **Saved setups**, stop the server and save a named setup before changing its mods
 or settings. Valmin stores the installed package files along with mod versions,
 registries, locks, enabled states, client tags, launch and backup settings, and
-flat `.cfg` files supported by the configuration editor. The saved package files
+the `.cfg` files directly in `BepInEx/config`. Config files in subfolders and YAML,
+JSON and text files are not saved and a restore leaves them as they are; the save card
+lists them. The saved package files
 support recovery when a registry or download cache is unavailable. If a required
 package cannot be captured, the save job fails without publishing the setup.
 

@@ -647,7 +647,8 @@
 	 * searched for the text every file name starts with, which keeps all of them. */
 	function configHref(files: string[]): string {
 		const [only] = files;
-		if (files.length === 1) return resolve('/instances/[id]/configs/[file]', { id, file: only });
+		if (files.length === 1)
+			return resolve('/instances/[id]/configs/[file]', { id, file: encodeURIComponent(only) });
 		const q = sharedPrefix(files);
 		return q
 			? resolve(`/instances/[id]/configs?q=${encodeURIComponent(q)}`, { id })

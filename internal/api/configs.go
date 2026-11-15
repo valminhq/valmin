@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path"
 	"slices"
 	"sort"
 	"strings"
@@ -30,9 +31,47 @@ import (
 // (F2). A `.cfg` is generated on the plugin's first launch (03 §9).
 const noConfigYet = "No config files yet. Start the server once so its mods can write them."
 
-// nestedConfigNote warns that a subdirectory was skipped. These endpoints address the one
-// flat file per plugin that 03 §9 documents (Q46).
-const nestedConfigNote = "Some settings are in subdirectories, which this screen cannot show yet."
+// skippedConfigNote says the listing left files out for one of its limits.
+const skippedConfigNote = "Some files are not listed: larger than 1 MiB, more than 8 folders deep, or past the first 5,000."
+
+const (
+	// maxConfigDepth bounds how many folders below the config directory a file may sit.
+	maxConfigDepth = 8
+	// maxConfigFiles bounds the files one listing returns.
+	maxConfigFiles = 5000
+)
+
+// configExts are the extensions the config routes serve. A `.cfg` has settings; the rest are
+// edited as text only.
+var configExts = []string{".cfg", ".yaml", ".yml", ".json", ".txt"}
+
+// checkConfigPath accepts a slash-separated path relative to the config directory: no `.` or
+// `..` element, no backslash, no folder starting with a dot, at most maxConfigDepth folders,
+// and an extension from configExts. Kept copies (`.bak`, `.orig`, `.pending`) fail the last.
+func checkConfigPath(name string) error {
+	if !fs.ValidPath(name) || strings.Contains(name, `\`) {
+		return fmt.Errorf("%q is not a relative path", name)
+	}
+	parts := strings.Split(name, "/")
+	if len(parts) > maxConfigDepth+1 {
+		return fmt.Errorf("%q is more than %d folders deep", name, maxConfigDepth)
+	}
+	for _, folder := range parts[:len(parts)-1] {
+		if strings.HasPrefix(folder, ".") {
+			return fmt.Errorf("%q is in a hidden folder", name)
+		}
+	}
+	if !slices.Contains(configExts, path.Ext(name)) {
+		return fmt.Errorf("%q is not a config file", name)
+	}
+	return nil
+}
+
+// isSettingsFile reports whether name has settings the typed endpoints serve, rather than
+// being text only.
+func isSettingsFile(name string) bool {
+	return strings.HasSuffix(name, ".cfg")
+}
 
 func (h *Instances) configRoutes(rt *routeTable) {
 	rt.Handle("GET /api/v1/instances/{id}/configs", http.HandlerFunc(h.listConfigs))
@@ -53,6 +92,7 @@ type configListView struct {
 }
 
 type configFileView struct {
+	// File is the file's path relative to Dir, slash-separated.
 	File   string `json:"file"`
 	Plugin string `json:"plugin"`
 	Bytes  int64  `json:"size_bytes"`
@@ -62,6 +102,8 @@ type configFileView struct {
 	// InstalledMods names the installed mods the file belongs to, matched by name; empty for a
 	// file no installed mod claims.
 	InstalledMods []string `json:"installed_mods"`
+	// Portable is whether saved setups, definitions and template codes carry the file.
+	Portable bool `json:"portable"`
 }
 
 // listConfigs handles GET /instances/{id}/configs.
@@ -109,7 +151,9 @@ func (h *Instances) listConfigs(w http.ResponseWriter, r *http.Request) {
 	JSON(w, r, http.StatusOK, view)
 }
 
-// listConfigDir is the view of the config directory. A missing directory has no files.
+// listConfigDir is the view of the config directory and its subdirectories: every regular file
+// checkConfigPath accepts, up to maxConfigFiles, leaving out any larger than
+// control.MaxConfigSize. Symlinks are not followed, and a missing directory has no files.
 func listConfigDir(dataDir string) (configListView, error) {
 	root, err := instance.OpenConfigDir(dataDir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -119,15 +163,74 @@ func listConfigDir(dataDir string) (configListView, error) {
 		return configListView{}, err
 	}
 	defer func() { _ = root.Close() }()
-	entries, err := fs.ReadDir(root.FS(), ".")
-	if err != nil {
+	walk := configWalk{root: root, view: configListView{Items: []configFileView{}}}
+	// ponytail: visits every entry under the directory; bound the entries visited if a tree
+	// turns out huge.
+	if err := fs.WalkDir(root.FS(), ".", walk.visit); err != nil {
 		return configListView{}, fmt.Errorf("list config files: %w", err)
 	}
-	view, err := configList(root, entries)
-	for i := range view.Items {
-		view.Items[i].Dir = instance.ConfigDir
+	return walk.view, nil
+}
+
+// configWalk collects the config directory's view during one fs.WalkDir over root.
+type configWalk struct {
+	root *os.Root
+	view configListView
+}
+
+// visit is the fs.WalkDirFunc of configWalk. An unreadable subdirectory is skipped, and so is a
+// symlink unless it leads to a regular file inside the directory. A limit that leaves something
+// out sets the note; a `.cfg` has no size limit.
+func (c *configWalk) visit(p string, d fs.DirEntry, err error) error {
+	if err != nil {
+		if p == "." {
+			return err
+		}
+		return fs.SkipDir
 	}
-	return view, err
+	switch {
+	case d.IsDir():
+		return c.enter(p, d)
+	case !d.Type().IsRegular() && d.Type()&fs.ModeSymlink == 0, checkConfigPath(p) != nil:
+		return nil //nolint:nilerr // a name the routes refuse is not listed
+	case len(c.view.Items) == maxConfigFiles:
+		c.view.Note = skippedConfigNote
+		return fs.SkipAll
+	}
+	item, skip, err := configListEntry(c.root, p)
+	if err != nil && d.Type()&fs.ModeSymlink != 0 {
+		return nil // a link out of the directory is not listed
+	}
+	if err != nil {
+		return err
+	}
+	if skip {
+		return nil
+	}
+	if !isSettingsFile(p) && item.Bytes > control.MaxConfigSize {
+		c.view.Note = skippedConfigNote
+		return nil
+	}
+	item.Dir = instance.ConfigDir
+	item.Portable = control.CarriedConfig(p)
+	c.view.Items = append(c.view.Items, item)
+	return nil
+}
+
+// enter decides whether the walk descends into the directory at p: not into a hidden one, nor
+// one more than maxConfigDepth deep.
+func (c *configWalk) enter(p string, d fs.DirEntry) error {
+	if p == "." {
+		return nil
+	}
+	if strings.HasPrefix(d.Name(), ".") {
+		return fs.SkipDir
+	}
+	if strings.Count(p, "/") >= maxConfigDepth {
+		c.view.Note = skippedConfigNote
+		return fs.SkipDir
+	}
+	return nil
 }
 
 // listRootConfigs is the `.cfg` files at the root of the game installation, leaving out any
@@ -145,34 +248,21 @@ func listRootConfigs(dataDir string, shadowing []configFileView) ([]configFileVi
 	if err != nil {
 		return nil, fmt.Errorf("list server directory: %w", err)
 	}
-	entries = slices.DeleteFunc(entries, func(e fs.DirEntry) bool {
-		return e.IsDir() || slices.ContainsFunc(shadowing, func(c configFileView) bool { return c.File == e.Name() })
-	})
-	view, err := configList(root, entries)
-	return view.Items, err
-}
-
-// configList is the view of the config directory's entries: its regular `.cfg` files, and the
-// note when a subdirectory was skipped.
-func configList(root *os.Root, entries []fs.DirEntry) (configListView, error) {
-	view := configListView{Items: []configFileView{}}
+	var items []configFileView
 	for _, e := range entries {
-		if e.IsDir() {
-			view.Note = nestedConfigNote
-			continue
-		}
-		if !strings.HasSuffix(e.Name(), ".cfg") {
+		if e.IsDir() || !isSettingsFile(e.Name()) ||
+			slices.ContainsFunc(shadowing, func(c configFileView) bool { return c.File == e.Name() }) {
 			continue
 		}
 		item, skip, err := configListEntry(root, e.Name())
 		if err != nil {
-			return configListView{}, err
+			return nil, err
 		}
 		if !skip {
-			view.Items = append(view.Items, item)
+			items = append(items, item)
 		}
 	}
-	return view, nil
+	return items, nil
 }
 
 // withInstalledMods fills each item's InstalledMods. It writes the response and reports false when
@@ -197,9 +287,21 @@ func (h *Instances) withInstalledMods(w http.ResponseWriter, r *http.Request, id
 	return true
 }
 
-// configListEntry reads one directory entry already known to be a `.cfg`-suffixed name. skip is
-// true for anything that turned out not to be a regular file.
+// configListEntry reads one name checkConfigPath accepts: a `.cfg` whole, for the plugin its
+// header names, any other file only for its size. skip is true for anything that turned out
+// not to be a regular file.
 func configListEntry(root *os.Root, name string) (item configFileView, skip bool, err error) {
+	if !isSettingsFile(name) {
+		f, info, err := fsutil.OpenRegularIn(root, name)
+		if errors.Is(err, fsutil.ErrNotRegular) {
+			return configFileView{}, true, nil
+		}
+		if err != nil {
+			return configFileView{}, false, err
+		}
+		_ = f.Close()
+		return configFileView{File: name, Bytes: info.Size()}, false, nil
+	}
 	raw, info, err := fsutil.ReadRegularIn(root, name)
 	if errors.Is(err, fsutil.ErrNotRegular) {
 		return configFileView{}, true, nil
@@ -316,7 +418,7 @@ func (h *Instances) readConfigCopy(suffix string) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		dir, name, ok := h.resolveConfig(w, r, inst)
+		dir, name, ok := h.resolveSettingsConfig(w, r, inst)
 		if !ok {
 			return
 		}
@@ -399,7 +501,7 @@ func (h *Instances) patchConfig(w http.ResponseWriter, r *http.Request) {
 	if !operationSettled(w, r, h.DB, id) {
 		return
 	}
-	dir, name, ok := h.resolveConfig(w, r, inst)
+	dir, name, ok := h.resolveSettingsConfig(w, r, inst)
 	if !ok {
 		return
 	}
@@ -475,6 +577,10 @@ func (h *Instances) writeConfigRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.matchesCurrent(w, r, current) {
+		return
+	}
+	if err := checkTextFormat(name, next); err != nil {
+		apierr.Write(w, r, err)
 		return
 	}
 
@@ -593,7 +699,7 @@ func (h *Instances) loadConfig(w http.ResponseWriter, r *http.Request, id string
 	if !ok {
 		return "", nil, false
 	}
-	dir, name, ok := h.resolveConfig(w, r, inst)
+	dir, name, ok := h.resolveSettingsConfig(w, r, inst)
 	if !ok {
 		return "", nil, false
 	}
@@ -606,14 +712,14 @@ func (h *Instances) loadConfig(w http.ResponseWriter, r *http.Request, id string
 }
 
 // resolveConfig validates {file} and opens the directory that holds it: the config directory,
-// or the root of the game installation for a file only found there that an installed mod
-// claims. A name that is not a plain `.cfg` basename is a 404, never an error naming what it
-// refused (B5, D2, D13), and so is a missing directory. The caller closes dir.
+// or the root of the game installation for a `.cfg` only found there that an installed mod
+// claims. A name checkConfigPath refuses is a 404, never an error naming what it refused, and
+// so is a missing directory. The caller closes dir.
 func (h *Instances) resolveConfig(
 	w http.ResponseWriter, r *http.Request, inst *store.Instance,
 ) (dir *os.Root, name string, ok bool) {
 	name = r.PathValue("file")
-	if err := control.CheckManifestConfigName(name); err != nil {
+	if err := checkConfigPath(name); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return nil, "", false
 	}
@@ -629,8 +735,20 @@ func (h *Instances) resolveConfig(
 	return dir, name, true
 }
 
+// resolveSettingsConfig is resolveConfig for the endpoints that serve a file's settings, which
+// only a `.cfg` has. Any other name is a 404.
+func (h *Instances) resolveSettingsConfig(
+	w http.ResponseWriter, r *http.Request, inst *store.Instance,
+) (dir *os.Root, name string, ok bool) {
+	if !isSettingsFile(r.PathValue("file")) {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return nil, "", false
+	}
+	return h.resolveConfig(w, r, inst)
+}
+
 // configDirFor opens the directory holding the named config, wrapping fs.ErrNotExist when
-// neither directory has it.
+// neither directory has it. Only a top-level `.cfg` is looked for at the installation root.
 func (h *Instances) configDirFor(ctx context.Context, inst *store.Instance, name string) (*os.Root, error) {
 	dir, err := instance.OpenConfigDir(inst.DataDir)
 	if err == nil {
@@ -638,9 +756,16 @@ func (h *Instances) configDirFor(ctx context.Context, inst *store.Instance, name
 			return dir, nil
 		}
 		_ = dir.Close()
+		if strings.Contains(name, "/") {
+			// A file, a link out of the directory or a loop where a folder should be.
+			err = fmt.Errorf("%s: %w", name, fs.ErrNotExist)
+		}
 	}
 	if !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("open config directory: %w", err)
+	}
+	if strings.Contains(name, "/") || !isSettingsFile(name) {
+		return nil, fmt.Errorf("find %s: %w", name, err)
 	}
 	root, err := os.OpenRoot(instance.ServerDir(inst.DataDir))
 	if err != nil {
@@ -737,9 +862,13 @@ func (h *Instances) configEditable(w http.ResponseWriter, r *http.Request, inst 
 const maxAuditedConfigChanges = 50
 
 // configAuditDetail is the detail of a config write: the file, its new size and which settings
-// changed, cut to maxAuditedConfigChanges with truncated set when there were more.
+// changed, cut to maxAuditedConfigChanges with truncated set when there were more. A text-only
+// file lists no changes.
 func configAuditDetail(file string, current, next []byte, raw bool) string {
-	diff := modconfig.Diff(current, next)
+	var diff []modconfig.Change
+	if isSettingsFile(file) {
+		diff = modconfig.Diff(current, next)
+	}
 	truncated := len(diff) > maxAuditedConfigChanges
 	kept := diff[:min(len(diff), maxAuditedConfigChanges)]
 	changes := make([]change, 0, len(kept))
@@ -791,9 +920,13 @@ func (h *Instances) saveConfig(
 	return true
 }
 
-// markPending keeps the pending copy of a write to a running server, and drops a stale one on
-// a write to a stopped server, whose file is now the operator's latest.
+// markPending keeps the pending copy of a `.cfg` write to a running server, and drops a stale
+// one on a write to a stopped server, whose file is now the operator's latest. A text-only file
+// has none: it is replaced whole, and settling an old copy would undo a mod's own rewrite.
 func markPending(dir *os.Root, name string, next []byte, running bool) error {
+	if !isSettingsFile(name) {
+		return nil
+	}
 	pending := name + modconfig.PendingSuffix
 	if running {
 		if err := fsutil.WriteFileAtomicIn(dir, pending, next); err != nil {

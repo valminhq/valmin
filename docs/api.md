@@ -436,10 +436,10 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/import`                       | Create a server from a definition; returns a job.                     |
 | `GET`    | `/templates`                              | Shared templates from the Valmin presets repository.                  |
 | `GET`    | `/instances/{id}/configs`                 | Available configuration files.                                        |
-| `GET`    | `/instances/{id}/configs/{file}`          | Settings of one file, typed for a form, with an `ETag`.               |
-| `PATCH`  | `/instances/{id}/configs/{file}`          | Change settings by key; returns the updated settings.                 |
-| `GET`    | `/instances/{id}/configs/{file}/original` | Settings of the copy taken before the panel's first write.            |
-| `GET`    | `/instances/{id}/configs/{file}/previous` | Settings of the copy the last write replaced.                         |
+| `GET`    | `/instances/{id}/configs/{file}`          | Settings of one `.cfg` file, typed for a form, with an `ETag`.        |
+| `PATCH`  | `/instances/{id}/configs/{file}`          | Change a `.cfg` file's settings by key; returns the updated settings. |
+| `GET`    | `/instances/{id}/configs/{file}/original` | Settings of the copy taken before the panel's first write (`.cfg`).   |
+| `GET`    | `/instances/{id}/configs/{file}/previous` | Settings of the copy the last write replaced (`.cfg`).                |
 | `GET`    | `/instances/{id}/configs/{file}/raw`      | Raw configuration with an `ETag` header.                              |
 | `PUT`    | `/instances/{id}/configs/{file}/raw`      | Replace raw configuration on a stopped or running server; `If-Match`. |
 | `DELETE` | `/instances/{id}/configs/{file}`          | Delete a configuration file and the copies kept of it.                |
@@ -995,9 +995,32 @@ For raw configuration replacement, first fetch the file and retain its `ETag`.
 Send that exact value as `If-Match` with the replacement text and
 `Content-Type: text/plain`. A missing or stale
 value returns `412 stale_write`; reload and reconcile the file before retrying.
+A replacement that breaks a `.json` file's syntax (a leading UTF-8 byte-order mark is allowed)
+or any document of a `.yaml`/`.yml` file returns `422 validation_failed` with the parser's
+message on the field `content`. The check applies to every write, also when the file on disk
+does not parse, so a file the mod reads leniently (JSON with comments) must be saved as strict
+JSON.
+
+`{file}` is a path relative to `BepInEx/config`, with each `/` sent as `%2F`, for example
+`/configs/expand_world%2Fexpand_biomes.yaml/raw`. It may sit up to 8 folders deep and must end
+in `.cfg`, `.yaml`, `.yml`, `.json` or `.txt`; no folder may start with a dot. Any other name
+returns `404`. Only `.cfg` files have settings: the typed read, `PATCH`, and the `/original`
+and `/previous` settings routes return `404` for the others, which are read and written
+through the raw routes. A raw write to a running server leaves a `.pending` copy only for a
+`.cfg` file; any other file is replaced and stays as written. The audit entry of a write to a
+file that is not `.cfg` lists no settings.
+
+`GET /instances/{id}/configs` walks `BepInEx/config` and its subfolders. It skips hidden
+folders, symlinked folders, symlinks that do not lead to a regular file inside the directory,
+files with other extensions, files other than `.cfg` over 1 MiB and folders more than 8 deep,
+and returns at most 5,000 files; when a limit left a file out, `note` says so. Each
+item's `file` is its path, `dir` the directory it is relative to, and `portable` whether saved
+setups, server definitions and template codes carry it: only a `.cfg` directly in
+`BepInEx/config`, other than the RCON plugin's.
 
 `GET /instances/{id}/configs` lists each file's `installed_mods`: the installed mods it
-belongs to, matched by name, or an empty list. `DELETE /instances/{id}/configs/{file}`
+belongs to, matched by name (a file in a subfolder also by that top folder, such as
+`EpicLoot/`), or an empty list. `DELETE /instances/{id}/configs/{file}`
 deletes the file with its `.bak`, `.orig` and `.pending` copies and answers `204`. It needs
 `config.edit` and a stopped or running server. A file an installed mod uses is refused
 with `409 mod_conflict` and `details.installed_mods`; send `allow_installed=true` to delete

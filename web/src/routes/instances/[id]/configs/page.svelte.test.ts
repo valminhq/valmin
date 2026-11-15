@@ -94,6 +94,26 @@ describe('the mod configuration list', () => {
 		expect(link.getAttribute('href')).toBe('/instances/inst-a/configs/Author.Sailing.cfg');
 	});
 
+	// A file in a subfolder is one route segment, so its slashes travel escaped.
+	it('links a file in a subfolder to its editor as one segment', async () => {
+		serveList([
+			{
+				file: 'expand_world/expand_biomes.yaml',
+				plugin: '',
+				size_bytes: 12,
+				installed_mods: [],
+				dir: 'BepInEx/config'
+			}
+		]);
+		render(Page);
+
+		const link = await screen.findByRole('link', { name: /expand_biomes\.yaml/ });
+		expect(link.getAttribute('href')).toBe(
+			'/instances/inst-a/configs/expand_world%2Fexpand_biomes.yaml'
+		);
+		expect(screen.getByText('Edited as text')).toBeTruthy();
+	});
+
 	it('offers a retry when the list could not be read', async () => {
 		daemon.on('GET', '/instances/inst-a/configs', () => envelope(500, 'internal', 'Broken.'));
 		render(Page);

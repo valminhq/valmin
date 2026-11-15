@@ -45,6 +45,7 @@
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { warningText } from '#lib/tone.js';
+	import ConfigLeftOut from '#lib/components/config-left-out.svelte';
 
 	const id = $derived(page.params.id ?? '');
 	// The whole link, so an operator can copy it out of the panel and send it to a friend.
@@ -778,8 +779,9 @@
 									<p class="text-sm font-medium">Share as a template</p>
 									<p class="text-sm text-muted-foreground">
 										The template file holds the launch settings, the mods at their installed
-										versions and every config file. It carries no password and no world, but a mod's
-										config can hold a key or a webhook — read it before you share it.
+										versions and the plugin config files at the top of the config folder. It carries
+										no password and no world, but a mod's config can hold a key or a webhook — read
+										it before you share it.
 									</p>
 								</div>
 								<Button variant="outline" size="sm" disabled={exporting} onclick={downloadManifest}>
@@ -787,6 +789,7 @@
 									{exporting ? 'Preparing…' : 'Download template file'}
 								</Button>
 							</div>
+							<ConfigLeftOut {id} />
 							<div class="grid gap-2">
 								<p class="text-sm text-muted-foreground">
 									A template code is a short text to paste under New from template on another panel.
