@@ -52,7 +52,7 @@ var instanceRouteAccess = map[string]string{
 	"GET /api/v1/instances/{id}/configs":                         accessView,
 	"GET /api/v1/instances/{id}/configs/{file}":                  accessView,
 	"PATCH /api/v1/instances/{id}/configs/{file}":                "config.edit config.raw",
-	"DELETE /api/v1/instances/{id}/configs/{file}":               "config.edit config.raw",
+	"DELETE /api/v1/instances/{id}/configs/{file}":               "config.raw",
 	"GET /api/v1/instances/{id}/configs/{file}/original":         accessView,
 	"GET /api/v1/instances/{id}/configs/{file}/original/raw":     "config.raw",
 	"GET /api/v1/instances/{id}/configs/{file}/previous":         accessView,
