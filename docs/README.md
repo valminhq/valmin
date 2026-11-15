@@ -36,6 +36,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | Read what a mod update changes                  | [Read what changed in a mod](usage.md#read-what-changed-in-a-mod)                          |
 | Give players the mod list they need             | [Tell players which mods they need](usage.md#tell-players-which-mods-they-need)            |
 | Edit mod settings                               | [Edit mod configuration](usage.md#edit-mod-configuration)                                  |
+| Edit a mod's YAML or JSON files in subfolders   | [Edit as raw text](usage.md#edit-as-raw-text)                                              |
 | Import, reset or roll back a world              | [Manage worlds](usage.md#manage-worlds)                                                    |
 | Back up and restore a world                     | [Back up or restore a world](operations.md#back-up-or-restore-a-world)                     |
 | Keep backups off the host                       | [Remote backups](remote-backups.md)                                                        |

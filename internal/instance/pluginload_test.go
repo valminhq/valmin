@@ -251,6 +251,28 @@ func TestConfigOwnersAssignsEachFileToOnePackage(t *testing.T) {
 	}
 }
 
+// TestConfigClaimsMatchTextFilesAndFolders asserts a YAML or JSON file is matched by its name
+// without the extension, and a file in a subfolder by that folder.
+func TestConfigClaimsMatchTextFilesAndFolders(t *testing.T) {
+	manifests := map[string][]string{
+		"Azumatt-AzuAntiCheat": nil,
+		"RandyKnapp-EpicLoot":  nil,
+		"Ns-Json":              nil,
+	}
+	plugins := map[string]string{
+		"Azumatt.AzuAntiCheat_Whitelist.yml": "",
+		"EpicLoot/patches/a.json":            "",
+		"other/x.json":                       "",
+	}
+	want := map[string][]string{
+		"Azumatt.AzuAntiCheat_Whitelist.yml": {"Azumatt-AzuAntiCheat"},
+		"EpicLoot/patches/a.json":            {"RandyKnapp-EpicLoot"},
+	}
+	if got := ConfigClaims(manifests, plugins); !reflect.DeepEqual(got, want) {
+		t.Errorf("ConfigClaims = %v, want %v", got, want)
+	}
+}
+
 // TestIsPluginExcludesWhatBepInExNeverLoads. The framework package puts its assemblies in
 // BepInEx/core/ and is never named by a Loading line; calling it `not_seen` would be a
 // permanent warning about the one package whose presence *is* the mod loader.

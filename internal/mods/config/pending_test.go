@@ -62,3 +62,49 @@ func TestSettlePendingRestoresThePanelsValues(t *testing.T) {
 		})
 	}
 }
+
+// TestSettlePendingTreeReachesSubdirectories asserts the tree settle applies a pending copy in a
+// subdirectory, which the flat settle leaves alone.
+func TestSettlePendingTreeReachesSubdirectories(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		settle  func(*os.Root) error
+		settled bool
+	}{
+		{"flat", SettlePending, false},
+		{"tree", SettlePendingTree, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			sub := filepath.Join(dir, "mod", "extra")
+			if err := os.MkdirAll(sub, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(sub, "x.cfg")
+			if err := os.WriteFile(path, []byte("[A]\nk = plugin\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path+PendingSuffix, []byte("[A]\nk = panel\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			root, err := os.OpenRoot(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = root.Close() }()
+			if err := tt.settle(root); err != nil {
+				t.Fatalf("settle: %v", err)
+			}
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if settled := string(got) == "[A]\nk = panel\n"; settled != tt.settled {
+				t.Errorf("config = %q, settled %v, want settled %v", got, settled, tt.settled)
+			}
+			if _, err := os.Stat(path + PendingSuffix); os.IsNotExist(err) == !tt.settled {
+				t.Errorf("pending copy present = %v after a %s settle", err == nil, tt.name)
+			}
+		})
+	}
+}

@@ -1,5 +1,11 @@
 import type { ConfigFile } from '#lib/api/configs.js';
 
+/** Whether the daemon serves settings for this file. Only a `.cfg` has them; any other config
+ * file is edited as text. */
+export function hasSettings(file: string): boolean {
+	return file.endsWith('.cfg');
+}
+
 /**
  * The files whose name or plugin name contains the query, ignoring case and surrounding
  * whitespace. A blank query keeps every file, and the order given is the order returned.

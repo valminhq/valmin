@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { page } from '$app/state';
 import type { ConfigCopy, ConfigSchema, ConfigSetting } from '#lib/api/configs.js';
 import { actions, type Instance } from '#lib/api/instances.js';
 import { session } from '#lib/state/session.svelte.js';
@@ -306,5 +307,49 @@ describe('the raw config editor', () => {
 		expect(
 			screen.getByText('Save or discard your changes to edit this file as text.')
 		).toBeTruthy();
+	});
+});
+
+describe('a config file with no settings', () => {
+	const name = 'expand_world/expand_biomes.yaml';
+	const filePath = `/instances/inst-a/configs/${encodeURIComponent(name)}`;
+	const params = page.params as Record<string, string>;
+
+	beforeEach(() => {
+		params.file = name;
+	});
+
+	afterEach(() => {
+		params.file = 'Author.Sailing.cfg';
+	});
+
+	function serve() {
+		daemon.on('GET', '/instances/inst-a', () => Response.json(instance()));
+		daemon.on('GET', `${filePath}/raw`, () => textResource('biomes: []\n', '"v1"'));
+		daemon.on('GET', `${filePath}/original/raw`, () => textResource('biomes: [old]\n', '"o"'));
+		daemon.on('GET', `${filePath}/previous/raw`, () => envelope(404, 'not_found', 'No copy.'));
+	}
+
+	// The settings read would project YAML lines as settings; the daemon refuses it anyway.
+	it('opens straight in the raw editor and never asks for settings', async () => {
+		serve();
+		session.permissions = permissions('inst-a', [...edit, actions.configRaw]);
+		render(Page);
+
+		const area = (await screen.findByLabelText(`${name} as text`)) as HTMLTextAreaElement;
+		await vi.waitFor(() => expect(area.value).toBe('biomes: []\n'));
+		expect(screen.queryByRole('button', { name: 'Raw text' })).toBeNull();
+		expect(screen.queryByLabelText('Filter settings')).toBeNull();
+		expect(daemon.requests('GET', filePath)).toHaveLength(0);
+		expect(await screen.findByText(/line differs|lines differ/)).toBeTruthy();
+	});
+
+	it('says why a member without raw access cannot open it', async () => {
+		serve();
+		session.permissions = permissions('inst-a', edit);
+		render(Page);
+
+		expect(await screen.findByText(/no settings form/)).toBeTruthy();
+		expect(screen.queryByLabelText(`${name} as text`)).toBeNull();
 	});
 });

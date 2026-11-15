@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
@@ -32,6 +33,12 @@ func CheckManifestConfigName(name string) error {
 		return fmt.Errorf("%q is not a .cfg file", name)
 	}
 	return nil
+}
+
+// CarriedConfig reports whether saved setups, definitions and template codes carry the config
+// file at name, relative to the config directory: a plain .cfg other than the RCON plugin's.
+func CarriedConfig(name string) bool {
+	return CheckManifestConfigName(name) == nil && name != command.ConfigFile
 }
 
 // ApplyManifestConfigs writes the configuration files of an imported definition. With merge
@@ -137,11 +144,18 @@ func submitConfigApply(
 }
 
 // settleIn settles the pending configs of one instance, in the config directory and at the
-// root of the game installation. A missing directory has nothing pending.
+// root of the game installation. The config directory is settled with its subdirectories, the
+// installation root on its own. A missing directory has nothing pending.
 func settleIn(dataDir string) error {
 	var errs []error
-	for _, open := range []func(string) (*os.Root, error){instance.OpenConfigDir, openServerDir} {
-		dir, err := open(dataDir)
+	for _, d := range []struct {
+		open   func(string) (*os.Root, error)
+		settle func(*os.Root) error
+	}{
+		{instance.OpenConfigDir, modconfig.SettlePendingTree},
+		{openServerDir, modconfig.SettlePending},
+	} {
+		dir, err := d.open(dataDir)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -149,7 +163,7 @@ func settleIn(dataDir string) error {
 			errs = append(errs, err)
 			continue
 		}
-		errs = append(errs, modconfig.SettlePending(dir))
+		errs = append(errs, d.settle(dir))
 		_ = dir.Close()
 	}
 	return errors.Join(errs...)

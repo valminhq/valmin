@@ -8,16 +8,25 @@ const files: ConfigFile[] = [
 		plugin: 'Sailing Overhaul',
 		size_bytes: 120,
 		installed_mods: [],
-		dir: 'BepInEx/config'
+		dir: 'BepInEx/config',
+		portable: true
 	},
 	{
 		file: 'com.example.wards.cfg',
 		plugin: 'Wards',
 		size_bytes: 80,
 		installed_mods: [],
-		dir: 'BepInEx/config'
+		dir: 'BepInEx/config',
+		portable: true
 	},
-	{ file: 'orphan.cfg', plugin: '', size_bytes: 10, installed_mods: [], dir: 'BepInEx/config' }
+	{
+		file: 'orphan.cfg',
+		plugin: '',
+		size_bytes: 10,
+		installed_mods: [],
+		dir: 'BepInEx/config',
+		portable: true
+	}
 ];
 
 const all = files.map((f) => f.file);
