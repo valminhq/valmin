@@ -94,6 +94,8 @@ export function instance(overrides: Partial<Instance> = {}): Instance {
 		game_branch: 'public',
 		game_backups: 4,
 		status_published: false,
+		status_show_join: false,
+		status_show_modpack: false,
 		join_host: '',
 		join_address: null,
 		steam_join_url: null,

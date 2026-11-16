@@ -63,6 +63,10 @@ type Instance struct {
 	// announcement, and how to join. Empty when unset.
 	StatusNotice      string `json:"status_notice"`
 	StatusConnectInfo string `json:"status_connect_info"`
+	// StatusShowJoin adds the join address, or the join code with crossplay, to the public
+	// status page; StatusShowModpack adds the current profile code.
+	StatusShowJoin    bool `json:"status_show_join"`
+	StatusShowModpack bool `json:"status_show_modpack"`
 	// JoinHost is the host name or IP address players connect to, without a port. Empty when
 	// unset.
 	JoinHost string `json:"join_host"`
@@ -90,7 +94,7 @@ const instanceColumns = `id, name, state, container_id, data_dir, base_port, ser
 	mem_limit_mb, cpu_limit, game_build_id, game_branch, game_backups,
 	backup_keep_cold, backup_keep_hot, backup_on_restart, remote_backup_enabled,
  remote_keep_cold, remote_keep_hot, remote_keep_snapshots, status_published,
-	status_notice, status_connect_info, join_host, auto_stop_minutes, watchdog, test_of, (test_passed_at IS NOT NULL),
+	status_notice, status_connect_info, status_show_join, status_show_modpack, join_host, auto_stop_minutes, watchdog, test_of, (test_passed_at IS NOT NULL),
 	container_started_at, created_at, updated_at`
 
 func scanInstance(s scanner) (Instance, error) {
@@ -130,6 +134,8 @@ func scanInstance(s scanner) (Instance, error) {
 		&inst.StatusPublished,
 		&inst.StatusNotice,
 		&inst.StatusConnectInfo,
+		&inst.StatusShowJoin,
+		&inst.StatusShowModpack,
 		&inst.JoinHost,
 		&inst.AutoStopMinutes,
 		&inst.Watchdog,
@@ -801,6 +807,32 @@ func updateInstanceJoinHost(ctx context.Context, ex execer, id, host string) err
 	return nil
 }
 
+// StatusShow is what the public status page adds beyond its text: how to join, and the current
+// profile code.
+type StatusShow struct {
+	Join    bool
+	Modpack bool
+}
+
+// setInstanceStatusShow sets what the public status page adds beyond its text. It shapes no
+// container, so it leaves restart_required alone.
+func setInstanceStatusShow(ctx context.Context, ex execer, id string, show StatusShow) error {
+	res, err := ex.ExecContext(ctx, `
+		UPDATE instances SET status_show_join = ?, status_show_modpack = ?, updated_at = ? WHERE id = ?`,
+		show.Join, show.Modpack, Now(), id)
+	if err != nil {
+		return fmt.Errorf("update status page contents for instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update status page contents for instance %s: %w", id, err)
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
+}
+
 // PublishedStatus is everything the unauthenticated status route may read. A narrow struct
 // rather than the whole row, so a column added later cannot reach that route by being added
 // to instanceColumns. JobKind is the kind of the job holding the instance lock, empty when
@@ -811,6 +843,11 @@ type PublishedStatus struct {
 	Notice      string
 	ConnectInfo string
 	JobKind     string
+	Show        StatusShow
+	// JoinHost, BasePort and Crossplay are read only when Show.Join is set.
+	JoinHost  string
+	BasePort  int
+	Crossplay bool
 }
 
 // PublishedInstanceStatus returns the row only if it exists and has opted in, and (nil, nil)
@@ -822,9 +859,11 @@ func (db *DB) PublishedInstanceStatus(ctx context.Context, id, lockKey string) (
 	err := db.Reader.QueryRowContext(ctx, `
 		SELECT server_name, state, status_notice, status_connect_info,
 			COALESCE((SELECT jr.kind FROM job_locks jl JOIN job_runs jr ON jr.id = jl.job_id
-				WHERE jl.lock_key = ?), '')
+				WHERE jl.lock_key = ?), ''),
+			status_show_join, status_show_modpack, join_host, base_port, crossplay
 		FROM instances WHERE id = ? AND status_published = TRUE`, lockKey, id).
-		Scan(&st.ServerName, &st.State, &st.Notice, &st.ConnectInfo, &st.JobKind)
+		Scan(&st.ServerName, &st.State, &st.Notice, &st.ConnectInfo, &st.JobKind,
+			&st.Show.Join, &st.Show.Modpack, &st.JoinHost, &st.BasePort, &st.Crossplay)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -1130,6 +1169,7 @@ type InstanceUpdate struct {
 	Remote          *RemotePolicy
 	StatusText      *StatusText
 	StatusPublished *bool
+	StatusShow      *StatusShow
 	Name            *string
 }
 
@@ -1183,6 +1223,9 @@ func (u *InstanceUpdate) writes(ctx context.Context, ex execer, id string) []fun
 	}
 	if u.StatusPublished != nil {
 		out = append(out, func() error { return setInstanceStatusPublished(ctx, ex, id, *u.StatusPublished) })
+	}
+	if show := u.StatusShow; show != nil {
+		out = append(out, func() error { return setInstanceStatusShow(ctx, ex, id, *show) })
 	}
 	if u.Name != nil {
 		out = append(out, func() error { return renameInstance(ctx, ex, id, *u.Name) })

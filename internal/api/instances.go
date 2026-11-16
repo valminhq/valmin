@@ -273,6 +273,10 @@ type patchInstanceRequest struct {
 	// maxStatusText characters each.
 	StatusNotice      *string `json:"status_notice"`
 	StatusConnectInfo *string `json:"status_connect_info"`
+	// StatusShowJoin and StatusShowModpack add how to join and the current profile code to the
+	// status page.
+	StatusShowJoin    *bool `json:"status_show_join"`
+	StatusShowModpack *bool `json:"status_show_modpack"`
 	// JoinHost is the host name or IP address players connect to, without a port; empty clears
 	// it. It takes effect immediately.
 	JoinHost *string `json:"join_host"`
@@ -365,8 +369,13 @@ func (b *patchInstanceRequest) settings() bool {
 	return b.Name != nil || b.ServerName != nil || b.Password != nil || b.Public != nil ||
 		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil || b.GameBackups != nil ||
 		b.BackupOnRestart != nil ||
-		b.StatusPublished != nil || b.StatusNotice != nil || b.StatusConnectInfo != nil ||
-		b.JoinHost != nil || b.AutoStopMinutes != nil || b.Watchdog != nil
+		b.statusPage() || b.JoinHost != nil || b.AutoStopMinutes != nil || b.Watchdog != nil
+}
+
+// statusPage reports whether the body touches the public status page.
+func (b *patchInstanceRequest) statusPage() bool {
+	return b.StatusPublished != nil || b.StatusNotice != nil || b.StatusConnectInfo != nil ||
+		b.StatusShowJoin != nil || b.StatusShowModpack != nil
 }
 
 // retention reports whether the body touches how many archives are kept, here or off-host.
@@ -868,6 +877,20 @@ func statusUpdate(
 	text = fieldChange(text, "status_connect_info", current.StatusConnectInfo, connectInfo)
 	if len(text) > 0 {
 		update.StatusText = &store.StatusText{Notice: notice, ConnectInfo: connectInfo}
+	}
+	show := store.StatusShow{Join: current.StatusShowJoin, Modpack: current.StatusShowModpack}
+	if v := body.StatusShowJoin; v != nil {
+		show.Join = *v
+	}
+	if v := body.StatusShowModpack; v != nil {
+		show.Modpack = *v
+	}
+	shown := fieldChange(nil, "status_show_join", current.StatusShowJoin, show.Join)
+	shown = fieldChange(shown, "status_show_modpack", current.StatusShowModpack, show.Modpack)
+	if len(shown) > 0 {
+		update.StatusShow = &show
+	}
+	if text = append(text, shown...); len(text) > 0 {
 		audits = append(audits, audit("instances.status.update", text))
 	}
 	if want := body.StatusPublished; want != nil && *want != current.StatusPublished {

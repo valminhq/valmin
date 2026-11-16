@@ -434,7 +434,11 @@ describe('the mods step', () => {
 	beforeEach(() => {
 		daemon.on('GET', '/instances/inst-a/mods/export', () => Response.json(preview()));
 		daemon.on('POST', '/instances/inst-a/mods/export/code', () =>
-			Response.json({ code: '01234567-89ab-cdef-0123-456789abcdef', registry: 'thunderstore' })
+			Response.json({
+				code: '01234567-89ab-cdef-0123-456789abcdef',
+				registry: 'thunderstore',
+				created_at: '2026-11-17T10:00:00Z'
+			})
 		);
 	});
 
@@ -458,9 +462,35 @@ describe('the mods step', () => {
 		expect(uploads()).toHaveLength(1);
 	});
 
+	it('shows the stored code on load and offers a new one, without uploading', async () => {
+		daemon.on('GET', '/instances/inst-a/mods/export/code', () =>
+			Response.json({
+				current: {
+					code: 'fedcba98-7654-3210-fedc-ba9876543210',
+					registry: 'thunderstore',
+					created_at: '2026-11-17T10:00:00Z'
+				}
+			})
+		);
+		session.permissions = permissions('inst-a', [actions.view, actions.modsList]);
+		render(ConnectionSummary, { instance: instance({ modded: true }) });
+
+		expect(await screen.findByText('fedcba98-7654-3210-fedc-ba9876543210')).toBeTruthy();
+		expect(screen.getByText(/Created/)).toBeTruthy();
+		expect(uploads()).toHaveLength(0);
+
+		await click(screen.getByRole('button', { name: 'Create a new code' }));
+		expect(await screen.findByText('01234567-89ab-cdef-0123-456789abcdef')).toBeTruthy();
+		expect(uploads()).toHaveLength(1);
+	});
+
 	it('notes that a Hexium code works in Gale only', async () => {
 		daemon.on('POST', '/instances/inst-a/mods/export/code', () =>
-			Response.json({ code: '01234567-89ab-cdef-0123-456789abcdef', registry: 'hexium' })
+			Response.json({
+				code: '01234567-89ab-cdef-0123-456789abcdef',
+				registry: 'hexium',
+				created_at: '2026-11-17T10:00:00Z'
+			})
 		);
 		session.permissions = permissions('inst-a', [actions.view, actions.modsList]);
 		render(ConnectionSummary, { instance: instance({ modded: true }) });

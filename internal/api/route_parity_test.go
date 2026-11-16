@@ -107,6 +107,7 @@ B- POST /api/v1/instances/{id}/mods
 B- POST /api/v1/instances/{id}/mods/code/apply
 B- POST /api/v1/instances/{id}/mods/code/preview
 B- GET /api/v1/instances/{id}/mods/export
+B- GET /api/v1/instances/{id}/mods/export/code
 B- POST /api/v1/instances/{id}/mods/export/code
 B- GET /api/v1/instances/{id}/mods/queue
 B- POST /api/v1/instances/{id}/mods/queue

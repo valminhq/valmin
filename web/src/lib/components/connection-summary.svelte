@@ -2,6 +2,7 @@
 	import { resolve } from '$app/paths';
 	import { actions, instances, type Instance, type Reachability } from '#lib/api/instances.js';
 	import { mods, type ExportCode, type ExportPreview } from '#lib/api/mods.js';
+	import { formatInstant } from '#lib/api/schedules.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import CopyButton from '#lib/components/copy-button.svelte';
@@ -67,8 +68,8 @@
 		}
 	});
 
-	// Reads which mods players need, for a modded server whose mods the user may see. It is a
-	// local read; the profile code itself is uploaded only on request.
+	// Reads which mods players need and the stored profile code, for a modded server whose mods
+	// the user may see. Both are local reads; a code is uploaded only on request.
 	$effect(() => {
 		const target = id;
 		preview = null;
@@ -77,6 +78,12 @@
 		mods.exportPreview(target).then(
 			(p) => {
 				if (current) preview = p;
+			},
+			() => {}
+		);
+		mods.currentCode(target).then(
+			(r) => {
+				if (current && !profileCode) profileCode = r.current;
 			},
 			() => {}
 		);
@@ -178,6 +185,15 @@
 						{#if profileCode.registry === 'hexium'}
 							<span class="text-xs text-muted-foreground">Works in Gale only.</span>
 						{/if}
+					</div>
+					<div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+						<span>
+							Created {formatInstant(profileCode.created_at)}. A registry may stop serving a code
+							after a while.
+						</span>
+						<Button variant="ghost" size="sm" disabled={creating} onclick={createCode}>
+							{creating ? 'Creating…' : 'Create a new code'}
+						</Button>
 					</div>
 				{:else}
 					<div>

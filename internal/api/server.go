@@ -180,16 +180,16 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 		ready, err := logs.ReadyLogged(ctx, *inst.ContainerID)
 		return err == nil && ready
 	}
+	hub = w.hub(external, streams, grants)
+
+	worlds := &control.Worlds{DataRoot: w.cfg.Data.Root, Runtime: w.runtime}
+	mods := w.mods(worlds)
 	// Outside the API chain and outside the API subtree, on a thin chain of its own: it is the
 	// only route a stranger can reach, and it authorizes on a column rather than a session. Its
 	// limiter is its own, so a flood of status reads cannot spend the login route's budget.
 	publicStatusRoutes(rt.mux, middleware.PublicChain(
 		trusted, perMinute(publicStatusPerMinute, publicStatusBurst)),
-		&PublicStatus{DB: w.db, Streams: streams})
-	hub = w.hub(external, streams, grants)
-
-	worlds := &control.Worlds{DataRoot: w.cfg.Data.Root, Runtime: w.runtime}
-	mods := w.mods(worlds)
+		&PublicStatus{DB: w.db, Streams: streams, Modpacks: mods})
 	ctl, err := control.New(w.cfg, &control.Deps{
 		DB: w.db, Engine: w.engine, Runtime: w.runtime, Keeper: w.keeper, Streams: streams,
 		Worlds: worlds, Installer: mods.install, Notifier: notifier, Commands: w.commands,
