@@ -259,6 +259,23 @@ describe('the server settings screen', () => {
 		);
 	});
 
+	it('turns on how to join and the profile code for the status page', async () => {
+		await open([actions.settings], instance({ status_published: true }));
+		daemon.on('PATCH', '/instances/inst-a', () =>
+			Response.json(
+				instance({ status_published: true, status_show_join: true, status_show_modpack: true })
+			)
+		);
+
+		await click(screen.getByRole('switch', { name: 'Show how to join' }));
+		expect(screen.getByText(/Set a join address under Connections/)).toBeTruthy();
+		await click(screen.getByRole('switch', { name: 'Show the profile code' }));
+		await click(saveButton());
+
+		await vi.waitFor(() => expect(patches()).toHaveLength(1));
+		expect(patches()[0].body).toEqual({ status_show_join: true, status_show_modpack: true });
+	});
+
 	it('edits the join address, sending it trimmed', async () => {
 		await open([actions.settings]);
 		daemon.on('PATCH', '/instances/inst-a', () =>

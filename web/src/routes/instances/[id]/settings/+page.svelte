@@ -70,6 +70,8 @@
 	let statusPublished = $state(false);
 	let statusNotice = $state('');
 	let statusConnectInfo = $state('');
+	let statusShowJoin = $state(false);
+	let statusShowModpack = $state(false);
 	let joinHost = $state('');
 	let crossplay = $state(false);
 	let preset = $state('');
@@ -195,6 +197,8 @@
 		statusPublished = row.status_published;
 		statusNotice = row.status_notice ?? '';
 		statusConnectInfo = row.status_connect_info ?? '';
+		statusShowJoin = row.status_show_join;
+		statusShowModpack = row.status_show_modpack;
 		joinHost = row.join_host;
 		crossplay = row.crossplay;
 		preset = row.preset ?? '';
@@ -246,6 +250,8 @@
 		if (statusConnectInfo.trim() !== (instance.status_connect_info ?? '')) {
 			fields.push('status_connect_info');
 		}
+		if (statusShowJoin !== instance.status_show_join) fields.push('status_show_join');
+		if (statusShowModpack !== instance.status_show_modpack) fields.push('status_show_modpack');
 		if (joinHost.trim() !== instance.join_host) fields.push('join_host');
 		if (crossplay !== instance.crossplay) fields.push('crossplay');
 		if (preset !== (instance.preset ?? '')) fields.push('preset');
@@ -321,6 +327,8 @@
 		if (changed.includes('status_connect_info')) {
 			body.status_connect_info = statusConnectInfo.trim();
 		}
+		if (changed.includes('status_show_join')) body.status_show_join = statusShowJoin;
+		if (changed.includes('status_show_modpack')) body.status_show_modpack = statusShowModpack;
 		if (changed.includes('join_host')) body.join_host = joinHost.trim();
 		if (changed.includes('crossplay')) body.crossplay = crossplay;
 		if (changed.includes('preset')) body.preset = preset;
@@ -567,10 +575,41 @@
 									{/snippet}
 								</Field>
 
+								<div class="flex items-center justify-between gap-4">
+									<div class="grid gap-1">
+										<Label for="status_show_join">Show how to join</Label>
+										<p class="text-sm text-muted-foreground">
+											Adds the join address and the Steam link, or the join code on a crossplay
+											server. Anyone with the link sees them.
+										</p>
+										{#if statusShowJoin && !crossplay && joinHost.trim() === ''}
+											<p class="text-sm text-muted-foreground">
+												Set a join address under Connections, or the page has none to show.
+											</p>
+										{/if}
+									</div>
+									<Switch id="status_show_join" disabled={!canEdit} bind:checked={statusShowJoin} />
+								</div>
+
+								<div class="flex items-center justify-between gap-4">
+									<div class="grid gap-1">
+										<Label for="status_show_modpack">Show the profile code</Label>
+										<p class="text-sm text-muted-foreground">
+											Adds the last profile code created for this server, while its mods still match
+											it. Anyone with the link sees it.
+										</p>
+									</div>
+									<Switch
+										id="status_show_modpack"
+										disabled={!canEdit}
+										bind:checked={statusShowModpack}
+									/>
+								</div>
+
 								<Field
 									id="status_connect_info"
 									label="How to join"
-									hint={`Shown on the status page: the address, where to get the password, and any mods players need. Plain text, up to ${STATUS_TEXT_MAX} characters.`}
+									hint={`Shown on the status page, for example where to get the password. Plain text, up to ${STATUS_TEXT_MAX} characters.`}
 									error={problem('status_connect_info')}
 								>
 									{#snippet children(field)}

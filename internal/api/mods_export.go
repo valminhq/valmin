@@ -3,11 +3,15 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
@@ -99,17 +103,88 @@ func (m *Mods) exportClientManifest(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, name, profile.ArchiveTime, bytes.NewReader(archive))
 }
 
-// exportCodeView is POST /instances/{id}/mods/export/code: the code a mod manager imports, and
-// the registry that stores it.
+// exportCodeView is a profile code: the code a mod manager imports, the registry that stores
+// it, and when it was uploaded.
 type exportCodeView struct {
-	Code     string `json:"code"`
-	Registry string `json:"registry"`
+	Code      string    `json:"code"`
+	Registry  string    `json:"registry"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// currentCodeView is GET /instances/{id}/mods/export/code: the stored profile code while the
+// server's mods still match it, else null.
+type currentCodeView struct {
+	Current *exportCodeView `json:"current"`
+}
+
+// currentClientCode is GET /instances/{id}/mods/export/code: the last profile code uploaded for
+// this server, while it still carries the mods players need. It never uploads.
+func (m *Mods) currentClientCode(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	if !m.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	if !m.Authz.Can(r.Context(), u, authz.ModsList, id) {
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
+		return
+	}
+	if _, ok := m.mustLoadInstance(w, r, id); !ok {
+		return
+	}
+	code, err := m.currentModpackCode(r, id)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	var view currentCodeView
+	if code != nil {
+		view.Current = &exportCodeView{Code: code.Code, Registry: code.Registry, CreatedAt: code.CreatedAt}
+	}
+	JSON(w, r, http.StatusOK, view)
+}
+
+// currentModpackCode returns the server's stored profile code when the client mod list it
+// carries is still the one the server's mods give, and nil otherwise.
+func (m *Mods) currentModpackCode(r *http.Request, instanceID string) (*store.ModpackCode, error) {
+	code, err := m.DB.ModpackCode(r.Context(), instanceID)
+	if err != nil || code == nil {
+		return nil, err
+	}
+	installed, err := m.DB.InstanceMods(r.Context(), instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("read mods of instance %s: %w", instanceID, err)
+	}
+	preview, err := m.buildExport(r, "", installed)
+	if err != nil {
+		return nil, err
+	}
+	if len(preview.Conflicts) > 0 || manifestDigest(preview.Mods) != code.ManifestSHA256 {
+		return nil, nil
+	}
+	return code, nil
+}
+
+// manifestDigest is a hex SHA-256 over the registry, name and version of each mod in a client
+// mod list, independent of their order.
+func manifestDigest(mods []exportEntry) string {
+	lines := make([]string, len(mods))
+	for i, e := range mods {
+		lines[i] = e.Source + "/" + e.FullName + "@" + e.Version
+	}
+	sort.Strings(lines)
+	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
+	return hex.EncodeToString(sum[:])
 }
 
 // exportClientCode is POST /instances/{id}/mods/export/code: it uploads the client mod list to
-// a registry and returns the profile code r2modman and Gale import. It needs the same actions
-// as the file export, and each user may upload a few times a minute; a request refused before
-// the upload does not count.
+// a registry, stores the profile code r2modman and Gale import as the server's current one,
+// and returns it. It needs the same actions as the file export, and each user may upload a few
+// times a minute; a request refused before the upload does not count.
 func (m *Mods) exportClientCode(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -157,7 +232,16 @@ func (m *Mods) exportClientCode(w http.ResponseWriter, r *http.Request) {
 			Msg("The registry did not accept the modpack. Try again in a moment.").Wrap(err))
 		return
 	}
-	JSON(w, r, http.StatusOK, exportCodeView{Code: code, Registry: registry.String()})
+	saved := &store.ModpackCode{
+		InstanceID: id, Code: code, Registry: registry.String(),
+		ManifestSHA256: manifestDigest(preview.Mods), CreatedAt: time.Now().UTC(),
+	}
+	// The code exists once uploaded, so it is kept even if the caller has gone.
+	if err := m.DB.SaveModpackCode(context.WithoutCancel(r.Context()), saved); err != nil {
+		slog.ErrorContext(r.Context(), "could not store the profile code",
+			slog.String("instance_id", id), slog.Any("error", err))
+	}
+	JSON(w, r, http.StatusOK, exportCodeView{Code: code, Registry: saved.Registry, CreatedAt: saved.CreatedAt})
 }
 
 // uploadRegistry picks where a profile code is stored: Thunderstore, which r2modman reads, unless

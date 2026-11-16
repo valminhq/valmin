@@ -425,6 +425,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/mods/updates/resolve`    | Preview updating every mod that has a newer version.                  |
 | `POST`   | `/instances/{id}/mods/updates`            | Back up the world, then apply those updates; returns a job.           |
 | `GET`    | `/instances/{id}/mods/export`             | Client manifest preview, or the archive with `format=r2z`.            |
+| `GET`    | `/instances/{id}/mods/export/code`        | The stored profile code while the mods still match it.                |
 | `POST`   | `/instances/{id}/mods/export/code`        | Upload the client manifest; returns a profile code.                   |
 | `GET`    | `/instances/{id}/mods/queue`              | Installs waiting for the server to stop.                              |
 | `POST`   | `/instances/{id}/mods/queue`              | Queue an install for the next stop or restart.                        |
@@ -822,13 +823,19 @@ are named after the profile, with the world `Dedicated`. Profile codes use the r
 `/api/experimental` endpoints, which can change without notice.
 
 `POST /instances/{id}/mods/export/code` needs the same actions as `GET /instances/{id}/mods/export`
-and takes no body. It uploads the same client mod list as the file export to a registry and
-returns `{"code", "registry"}`. The registry is `thunderstore` unless a mod in the list exists only
+and takes no body. It uploads the same client mod list as the file export to a registry, stores
+the result as the server's current profile code, and returns `{"code", "registry", "created_at"}`. The registry is `thunderstore` unless a mod in the list exists only
 in Hexium and Hexium is enabled, in which case it is `hexium`, every mod in it names its registry,
 and Gale reads the code but r2modman does not. A list with a conflict answers `409 mod_conflict` and uploads nothing, a list
 the registry refuses as too large answers `413`, and a registry that is down answers `503`. A user
-may upload five codes a minute (`429` with `Retry-After` beyond that). Each
-entry in the export preview also has `source`, the registry the installed package came from.
+may upload five codes a minute (`429` with `Retry-After` beyond that), counted only when the upload
+is attempted. Each entry in the export preview also has `source`, the registry the installed package
+came from.
+
+`GET /instances/{id}/mods/export/code` needs the same actions and returns `{"current": {"code",
+"registry", "created_at"}}`, or `{"current": null}` when no code was uploaded, the mods players need or
+their versions or registries have changed since, or the list has a conflict.
+It never uploads.
 
 `GET /templates` needs the action that creates servers and returns
 `{"sources", "templates", "problems"}`. Each source has `url`, `fetched_at` and `error`.
@@ -1045,6 +1052,7 @@ is marked as pending a restart.
 | `name`, `server_name`, `password`, `public`, `crossplay`, `preset`, `modifiers`         | `instance.settings`                     |
 | `game_backups`                                                                          | `instance.settings`                     |
 | `status_published`, `status_notice`, `status_connect_info`                              | `instance.settings`                     |
+| `status_show_join`, `status_show_modpack`                                               | `instance.settings`                     |
 | `join_host`                                                                             | `instance.settings`                     |
 | `backup_on_restart`                                                                     | `instance.settings`                     |
 | `backup_keep_cold`, `backup_keep_hot`                                                   | `backups.restore`                       |
@@ -1558,6 +1566,13 @@ These routes are outside `/api/v1` and do not require a session:
 | `GET /healthz`            | HTTP 200 with `ok` when the daemon can respond.                                                               |
 | `GET /readyz`             | JSON with `ready` and `components`; HTTP 503 if draining, SQLite is unavailable, or Docker cannot be reached. |
 | `GET /public/status/{id}` | Server status only when its public status page is enabled.                                                    |
+
+`GET /public/status/{id}` returns `name`, `online`, `players` and `observed_at`, plus `notice`,
+`connect_info` and `activity` when set. With `status_show_join` on it adds `join_address` and
+`steam_join_url`, or `join_code` for a crossplay server once the server has logged one. With
+`status_show_modpack` on it adds `modpack_code` and `modpack_registry` while the stored profile
+code matches the server's mods. Absent fields are omitted. The route never uploads a code and
+never returns the password.
 
 ## Diagnostics
 

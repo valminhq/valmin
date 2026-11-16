@@ -236,10 +236,12 @@ The **Join this server** card at the top lists what a player does to join, in or
 
 1. **Install the mods**, on a server with mods labelled for players (see
    [tell players which mods they need](#tell-players-which-mods-they-need)). Players install
-   Gale or r2modman, create a Valheim profile, and import a profile code. **Create profile
-   code** uploads the list and shows the code with a copy button; nothing is uploaded until
-   someone selects it. If the modpack has a conflict, the step links to the **Player modpack**
-   tab instead. Each person can create five codes a minute.
+   Gale or r2modman, create a Valheim profile, and import a profile code. The card shows the
+   last code created for the server, with its date, for as long as the server's player mods
+   still match it. Otherwise **Create profile code** uploads the list and shows the new code
+   with a copy button; nothing is uploaded until someone selects it. **Create a new code**
+   replaces a code a player cannot import. If the modpack has a conflict, the step links to
+   the **Player modpack** tab instead. Each person can create five codes a minute.
 2. **Connect**, with the [join address](#connections) and a copy button. **Join with Steam**
    starts the game through Steam and connects it to that address; players still type the
    password. It works only while the game is closed; with the game already running, it does
@@ -431,8 +433,18 @@ open without signing in. The link appears under the switch and has the form
 The page shows the server's name, whether it is up or under maintenance, and how many
 players are on it, with the time the count was observed. Two optional texts appear on
 it: **Status page notice**, for example `Down for the update until 20:00`, and **How
-to join**, for the address, where to get the password, and the mods players need. Both
-are plain text.
+to join**, for example where to get the password. Both are plain text.
+
+Two switches add details that stay correct by themselves, each off until you turn it on:
+
+- **Show how to join** adds the [join address](#connections) with its **Join with Steam**
+  link, or the join code of a crossplay server once the server has logged it.
+- **Show the profile code** adds the last profile code created for the server, from the
+  overview or the **Player modpack** tab, while the server's player mods still match it.
+  After a mod change the page shows no code until someone creates a new one; the page itself
+  never uploads anything.
+
+Anyone with the link sees what these switches add. The password never appears on the page.
 
 Visitors can refresh the page or turn on automatic refresh, which checks again every
 30 seconds while the tab is open. Public listing in the game and the status page are
@@ -829,7 +841,8 @@ nowhere else may not be found on import. Players can still install it by hand fr
 the registry's own page.
 
 **Create profile code** uploads the same list to Thunderstore, or to Hexium when a mod
-exists only there, and shows a code with a **Copy code** button. Players paste it into
+exists only there, and shows a code with a **Copy code** button. The newest code is kept as
+the server's current one for the overview and the status page. Players paste it into
 r2modman or Gale instead of importing a file. Hexium codes work in Gale only. Uploading
 publishes the package names and versions to the registry, and a registry may stop serving
 a code after a while, so create a new one when a player cannot import it. The same button is

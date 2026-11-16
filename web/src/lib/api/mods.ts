@@ -282,11 +282,11 @@ export interface ExportPreview {
 	conflicts: ExportConflict[];
 }
 
-/** `POST /instances/{id}/mods/export/code`: the profile code r2modman and Gale import, and the
- * registry it was uploaded to. */
+/** A profile code r2modman and Gale import, the registry it was uploaded to, and when. */
 export interface ExportCode {
 	code: string;
 	registry: ModSource;
+	created_at: string;
 }
 
 /** One installed package and the version "Update all" moves it to. The preview lists these
@@ -478,5 +478,8 @@ export const mods = {
 	 * `409 mod_conflict` while the preview reports a conflict. */
 	exportUrl: (id: string) => `/api/v1/instances/${id}/mods/export?format=r2z`,
 	/** Uploads the same list to a registry and answers with the code a mod manager imports. */
-	exportCode: (id: string) => api.post<ExportCode>(`/instances/${id}/mods/export/code`)
+	exportCode: (id: string) => api.post<ExportCode>(`/instances/${id}/mods/export/code`),
+	/** The last uploaded code while the server's mods still match it, else null. Never uploads. */
+	currentCode: (id: string) =>
+		api.get<{ current: ExportCode | null }>(`/instances/${id}/mods/export/code`)
 };
