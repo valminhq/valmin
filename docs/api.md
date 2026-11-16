@@ -826,7 +826,8 @@ and takes no body. It uploads the same client mod list as the file export to a r
 returns `{"code", "registry"}`. The registry is `thunderstore` unless a mod in the list exists only
 in Hexium and Hexium is enabled, in which case it is `hexium`, every mod in it names its registry,
 and Gale reads the code but r2modman does not. A list with a conflict answers `409 mod_conflict` and uploads nothing, a list
-the registry refuses as too large answers `413`, and a registry that is down answers `503`. Each
+the registry refuses as too large answers `413`, and a registry that is down answers `503`. A user
+may upload five codes a minute (`429` with `Retry-After` beyond that). Each
 entry in the export preview also has `source`, the registry the installed package came from.
 
 `GET /templates` needs the action that creates servers and returns
@@ -947,6 +948,15 @@ and the instance is started again unless Docker still shows the container runnin
 it is held in the `error` state. Any other value returns `422`. It takes effect immediately
 without setting `restart_required`.
 
+`join_host` is the host name or IP address players connect to, without a port: an IP address,
+or a DNS name of letters, digits and hyphens. Anything else, including a port, returns `422`.
+An empty string clears it. It takes effect immediately without setting `restart_required`. A
+server's JSON also carries two fields derived from it. `join_address` is the host with the game
+port, such as `play.example.com:2456` or `[2001:db8::1]:2456`. `steam_join_url` is a
+`steam://run/` link that starts the game and connects to `join_address`; it does nothing while the
+game is already running. Both are `null` without
+a join host, and `steam_join_url` is also `null` for an IPv6 host and while crossplay is on.
+
 `backup_on_restart` makes a consistent backup after the stop of every restart, every auto-stop
 and every stop a schedule fires, including the stop step of a schedule's chain. A stop a person
 asks for, a planned power cut and the stop steps of an update test never back up. The backup is
@@ -1035,6 +1045,7 @@ is marked as pending a restart.
 | `name`, `server_name`, `password`, `public`, `crossplay`, `preset`, `modifiers`         | `instance.settings`                     |
 | `game_backups`                                                                          | `instance.settings`                     |
 | `status_published`, `status_notice`, `status_connect_info`                              | `instance.settings`                     |
+| `join_host`                                                                             | `instance.settings`                     |
 | `backup_on_restart`                                                                     | `instance.settings`                     |
 | `backup_keep_cold`, `backup_keep_hot`                                                   | `backups.restore`                       |
 | `remote_backup_enabled`, `remote_keep_cold`, `remote_keep_hot`, `remote_keep_snapshots` | `backups.restore`                       |

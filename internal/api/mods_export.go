@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
+	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/mods/profile"
@@ -107,7 +108,8 @@ type exportCodeView struct {
 
 // exportClientCode is POST /instances/{id}/mods/export/code: it uploads the client mod list to
 // a registry and returns the profile code r2modman and Gale import. It needs the same actions
-// as the file export.
+// as the file export, and each user may upload a few times a minute; a request refused before
+// the upload does not count.
 func (m *Mods) exportClientCode(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -138,6 +140,10 @@ func (m *Mods) exportClientCode(w http.ResponseWriter, r *http.Request) {
 	host, ok := m.Profiles[registry]
 	if !ok {
 		apierr.Write(w, r, apierr.New(errcode.Unavailable).Msg("This registry does not store profile codes."))
+		return
+	}
+	if allowed, retry := m.profileCodeLimit.Allow(u.ID); !allowed {
+		middleware.RefuseRateLimited(w, r, retry)
 		return
 	}
 	code, err := host.Upload(r.Context(), archive)

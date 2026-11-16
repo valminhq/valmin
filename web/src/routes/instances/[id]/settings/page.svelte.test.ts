@@ -259,6 +259,46 @@ describe('the server settings screen', () => {
 		);
 	});
 
+	it('edits the join address, sending it trimmed', async () => {
+		await open([actions.settings]);
+		daemon.on('PATCH', '/instances/inst-a', () =>
+			Response.json(
+				instance({ join_host: 'play.example.com', join_address: 'play.example.com:2456' })
+			)
+		);
+
+		await type('Join address', '  play.example.com  ');
+		await click(saveButton());
+
+		await vi.waitFor(() => expect(patches()).toHaveLength(1));
+		expect(patches()[0].body).toEqual({ join_host: 'play.example.com' });
+		await vi.waitFor(() =>
+			expect(screen.queryByRole('button', { name: 'Discard changes' })).toBeNull()
+		);
+		expect((screen.getByLabelText('Join address') as HTMLInputElement).value).toBe(
+			'play.example.com'
+		);
+	});
+
+	it('renders a rejected join address beside its field', async () => {
+		await open([actions.settings]);
+		daemon.on('PATCH', '/instances/inst-a', () =>
+			envelope(422, 'validation_failed', 'Some settings are invalid.', [
+				{
+					field: 'join_host',
+					code: 'invalid',
+					message: 'Enter a host name or IP address without a port, such as play.example.com.'
+				}
+			])
+		);
+
+		await type('Join address', 'play.example.com:2456');
+		await click(saveButton());
+
+		const input = screen.getByLabelText('Join address');
+		await vi.waitFor(() => expect(input.getAttribute('aria-invalid')).toBe('true'));
+	});
+
 	it('renders a rejected status text beside its field, and locks it for a viewer', async () => {
 		await open([actions.settings], instance({ status_published: true }));
 		daemon.on('PATCH', '/instances/inst-a', () =>

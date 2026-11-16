@@ -143,6 +143,14 @@ export interface Instance {
 	 * when unset. */
 	status_notice?: string;
 	status_connect_info?: string;
+	/** The host name or IP address players connect to, without a port. Empty when unset. */
+	join_host: string;
+	/** The join host with the game port, ready to paste into the game. Null when no join host
+	 * is set. */
+	join_address: string | null;
+	/** Starts the game through Steam and connects it to `join_address`. Null without a join
+	 * address, for an IPv6 address, or with crossplay on. */
+	steam_join_url: string | null;
 	/** The server this one is an update-test copy of. Absent on an ordinary server. */
 	test_of?: string;
 	created_at: string;
@@ -277,6 +285,8 @@ export interface PatchInstance {
 	/** The status page's text, at most `STATUS_TEXT_MAX` characters each. Empty clears it. */
 	status_notice?: string;
 	status_connect_info?: string;
+	/** A host name or IP address without a port. Empty clears it. */
+	join_host?: string;
 	/** 0 turns auto-stop off; otherwise `AUTO_STOP_MIN` to `AUTO_STOP_MAX` minutes. */
 	auto_stop_minutes?: number;
 	/** `restart` needs the right to restart the server as well as to change its settings. */

@@ -395,7 +395,7 @@ func (w *wiring) mods(worlds *control.Worlds) *Mods {
 	}
 	m := &Mods{
 		DB: w.db, Authz: w.az, Engine: w.engine, Clients: clients, Patterns: w.patterns,
-		Profiles: w.profileHosts(),
+		Profiles: w.profileHosts(), profileCodeLimit: perMinute(profileCodePerMinute, profileCodeBurst),
 	}
 	m.plan = &manager.Planner{DB: w.db, Enabled: m.enabledSources()}
 	m.install = &manager.Installer{

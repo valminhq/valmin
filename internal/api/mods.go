@@ -12,6 +12,7 @@ import (
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
+	"github.com/valminhq/valmin/internal/ratelimit"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -24,8 +25,10 @@ type Mods struct {
 	// Clients holds one client per enabled registry (03 §6.1). A registry the operator
 	// disabled is absent rather than flagged, so nothing downstream checks twice.
 	Clients map[source.Source]*thunderstore.Client
-	// Profiles stores profile codes for each enabled registry that offers them.
-	Profiles profileHosts
+	// Profiles stores profile codes for each enabled registry that offers them, and
+	// profileCodeLimit bounds how often each user may upload one.
+	Profiles         profileHosts
+	profileCodeLimit *ratelimit.Limiter
 	// Patterns reads the loader log's plugin lines.
 	Patterns instance.PatternSet
 	plan     *manager.Planner
