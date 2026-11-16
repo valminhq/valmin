@@ -70,6 +70,7 @@
 	let statusPublished = $state(false);
 	let statusNotice = $state('');
 	let statusConnectInfo = $state('');
+	let joinHost = $state('');
 	let crossplay = $state(false);
 	let preset = $state('');
 	let gameBackups = $state<number | undefined>();
@@ -194,6 +195,7 @@
 		statusPublished = row.status_published;
 		statusNotice = row.status_notice ?? '';
 		statusConnectInfo = row.status_connect_info ?? '';
+		joinHost = row.join_host;
 		crossplay = row.crossplay;
 		preset = row.preset ?? '';
 		gameBackups = row.game_backups;
@@ -244,6 +246,7 @@
 		if (statusConnectInfo.trim() !== (instance.status_connect_info ?? '')) {
 			fields.push('status_connect_info');
 		}
+		if (joinHost.trim() !== instance.join_host) fields.push('join_host');
 		if (crossplay !== instance.crossplay) fields.push('crossplay');
 		if (preset !== (instance.preset ?? '')) fields.push('preset');
 		if (gameBackups !== instance.game_backups) fields.push('game_backups');
@@ -318,6 +321,7 @@
 		if (changed.includes('status_connect_info')) {
 			body.status_connect_info = statusConnectInfo.trim();
 		}
+		if (changed.includes('join_host')) body.join_host = joinHost.trim();
 		if (changed.includes('crossplay')) body.crossplay = crossplay;
 		if (changed.includes('preset')) body.preset = preset;
 		if (changed.includes('game_backups')) body.game_backups = gameBackups;
@@ -449,6 +453,24 @@
 							<Card.Description>How players find and join this server.</Card.Description>
 						</Card.Header>
 						<Card.Content class="grid gap-4">
+							<Field
+								id="join_host"
+								label="Join address"
+								hint="The host name or IP address players type to join, without the port, such as play.example.com."
+								error={problem('join_host')}
+							>
+								{#snippet children(field)}
+									<Input
+										id="join_host"
+										bind:value={joinHost}
+										disabled={!canEdit}
+										autocomplete="off"
+										spellcheck="false"
+										{...field}
+									/>
+								{/snippet}
+							</Field>
+
 							<div class="flex items-center justify-between gap-4">
 								<div class="grid gap-1">
 									<Label for="public">List publicly</Label>

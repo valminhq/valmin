@@ -175,10 +175,16 @@ type instanceView struct {
 	// CrossplayJoinCode is this boot's code, null until the session logs one (Q25). Read from
 	// the log rather than stored, since a previous boot's code names a session that is gone.
 	CrossplayJoinCode *string `json:"crossplay_join_code"`
+	// JoinAddress is the join host with the game port, null when no join host is set.
+	// SteamJoinURL starts the game through Steam and connects to it, null without a join
+	// address, for an IPv6 address, or with crossplay on.
+	JoinAddress  *string `json:"join_address"`
+	SteamJoinURL *string `json:"steam_join_url"`
 }
 
 func (h *Instances) view(inst *store.Instance) instanceView {
-	v := instanceView{Instance: inst}
+	addr := joinAddress(inst.JoinHost, inst.BasePort)
+	v := instanceView{Instance: inst, JoinAddress: addr, SteamJoinURL: steamJoinURL(addr, inst.Crossplay)}
 	if reader := h.Streams.Reader(inst.ID); reader != nil {
 		if code := reader.JoinCode(); code != "" {
 			v.CrossplayJoinCode = &code
@@ -267,6 +273,9 @@ type patchInstanceRequest struct {
 	// maxStatusText characters each.
 	StatusNotice      *string `json:"status_notice"`
 	StatusConnectInfo *string `json:"status_connect_info"`
+	// JoinHost is the host name or IP address players connect to, without a port; empty clears
+	// it. It takes effect immediately.
+	JoinHost *string `json:"join_host"`
 	// AutoStopMinutes is 0 for off, or minAutoStop to maxAutoStop idle minutes. It takes effect
 	// immediately.
 	AutoStopMinutes *int `json:"auto_stop_minutes"`
@@ -357,7 +366,7 @@ func (b *patchInstanceRequest) settings() bool {
 		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil || b.GameBackups != nil ||
 		b.BackupOnRestart != nil ||
 		b.StatusPublished != nil || b.StatusNotice != nil || b.StatusConnectInfo != nil ||
-		b.AutoStopMinutes != nil || b.Watchdog != nil
+		b.JoinHost != nil || b.AutoStopMinutes != nil || b.Watchdog != nil
 }
 
 // retention reports whether the body touches how many archives are kept, here or off-host.
@@ -517,6 +526,7 @@ func (h *Instances) mergePatch(
 	addStatusTextViolations(&val, body)
 	addAutoStopViolations(&val, body)
 	addWatchdogViolations(&val, body)
+	addJoinHostViolations(&val, body)
 	addGameBackupsViolations(&val, body)
 
 	patch := mergeInstanceLaunch(current, body, password)
@@ -701,9 +711,9 @@ func branchUpdate(current *store.Instance, branch *branchPatch) (*store.Instance
 	return &store.InstanceBranch{Name: branch.name, Password: branch.envelope}, changes
 }
 
-// settingsUpdate validates the launch, retention, auto-stop, branch and remote-policy fields the
-// body sets, adds them to update, and returns what changes. It writes nothing; it reports false
-// after writing the error.
+// settingsUpdate validates the launch, retention, auto-stop, watchdog, join host, branch and
+// remote-policy fields the body sets, adds them to update, and returns what changes. It writes
+// nothing; it reports false after writing the error.
 func (h *Instances) settingsUpdate(
 	w http.ResponseWriter, r *http.Request, current *store.Instance, body *patchInstanceRequest,
 	update *store.InstanceUpdate,
@@ -728,6 +738,7 @@ func (h *Instances) settingsUpdate(
 		addStatusTextViolations(&val, body)
 		addAutoStopViolations(&val, body)
 		addWatchdogViolations(&val, body)
+		addJoinHostViolations(&val, body)
 		if err := val.Err(); err != nil {
 			apierr.Write(w, r, err)
 			return nil, false
@@ -747,6 +758,12 @@ func (h *Instances) settingsUpdate(
 	if v := body.Watchdog; v != nil && *v != current.Watchdog {
 		update.Watchdog = v
 		changes = fieldChange(changes, "watchdog", current.Watchdog, *v)
+	}
+	if v := body.JoinHost; v != nil {
+		if host := strings.TrimSpace(*v); host != current.JoinHost {
+			update.JoinHost = &host
+			changes = fieldChange(changes, "join_host", current.JoinHost, host)
+		}
 	}
 	var branchChanges []change
 	update.Branch, branchChanges = branchUpdate(current, branch)
@@ -825,7 +842,7 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	JSON(w, r, http.StatusOK, updated)
+	JSON(w, r, http.StatusOK, h.view(updated))
 }
 
 // auditor builds the audit entries of one caller's change to one instance.
@@ -1003,5 +1020,5 @@ func (h *Instances) acknowledge(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	JSON(w, r, http.StatusOK, updated)
+	JSON(w, r, http.StatusOK, h.view(updated))
 }

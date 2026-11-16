@@ -94,6 +94,9 @@ export function instance(overrides: Partial<Instance> = {}): Instance {
 		game_branch: 'public',
 		game_backups: 4,
 		status_published: false,
+		join_host: '',
+		join_address: null,
+		steam_join_url: null,
 		created_at: '2026-09-01T00:00:00Z',
 		updated_at: '2026-09-01T00:00:00Z',
 		...overrides

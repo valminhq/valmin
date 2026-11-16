@@ -232,10 +232,28 @@ two different badges:
 
 ### The overview
 
-The connection card at the top shows the port pair, join code for a
-crossplay server, and the server password behind **Show**. On a running server,
-**Check reachability** tests whether players outside your network can find the server (see
+The **Join this server** card at the top lists what a player does to join, in order:
+
+1. **Install the mods**, on a server with mods labelled for players (see
+   [tell players which mods they need](#tell-players-which-mods-they-need)). Players install
+   Gale or r2modman, create a Valheim profile, and import a profile code. **Create profile
+   code** uploads the list and shows the code with a copy button; nothing is uploaded until
+   someone selects it. If the modpack has a conflict, the step links to the **Player modpack**
+   tab instead. Each person can create five codes a minute.
+2. **Connect**, with the [join address](#connections) and a copy button. **Join with Steam**
+   starts the game through Steam and connects it to that address; players still type the
+   password. It works only while the game is closed; with the game already running, it does
+   nothing. There is no Steam link for an IPv6 address. A crossplay server shows its join code instead. Without a join address, the card
+   shows the port pair and says that no address is set.
+3. **Enter the password**, behind **Show password**.
+
+Under the steps are the world name and, for a listed server, the name it has in the
+community browser. On a running server, **Check reachability** tests whether players outside
+your network can find the server (see
 [check that friends can connect](#check-that-friends-can-connect)).
+
+Everyone who can see a server sees its card, and nobody sees the card of a server they
+have no access to.
 
 ### Check that friends can connect
 
@@ -390,6 +408,12 @@ The panel cannot tell players the new password. Players already connected stay
 connected, and the running server keeps the old password until it restarts.
 
 ### Connections
+
+**Join address** is the host name or IP address players type to join, without the port,
+for example `play.example.com`. The overview shows it with the server's port, as
+`play.example.com:2456`, and builds the Steam link from it. Each server has its own, and
+leaving it empty hides the address. Valmin does not check that the address reaches the
+server; [check that friends can connect](#check-that-friends-can-connect) does.
 
 **List publicly** shows the server in the in-game community browser. **Crossplay**
 lets players on other platforms find and join it; they join with the join code that
@@ -808,7 +832,9 @@ the registry's own page.
 exists only there, and shows a code with a **Copy code** button. Players paste it into
 r2modman or Gale instead of importing a file. Hexium codes work in Gale only. Uploading
 publishes the package names and versions to the registry, and a registry may stop serving
-a code after a while, so create a new one when a player cannot import it.
+a code after a while, so create a new one when a player cannot import it. The same button is
+on the [overview](#the-overview), where players who can see the server can create a code
+themselves.
 
 ## Edit mod configuration
 

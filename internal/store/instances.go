@@ -63,6 +63,9 @@ type Instance struct {
 	// announcement, and how to join. Empty when unset.
 	StatusNotice      string `json:"status_notice"`
 	StatusConnectInfo string `json:"status_connect_info"`
+	// JoinHost is the host name or IP address players connect to, without a port. Empty when
+	// unset.
+	JoinHost string `json:"join_host"`
 	// AutoStopMinutes stops the running server once it has had no players for this long. 0 is
 	// off.
 	AutoStopMinutes int `json:"auto_stop_minutes"`
@@ -87,7 +90,7 @@ const instanceColumns = `id, name, state, container_id, data_dir, base_port, ser
 	mem_limit_mb, cpu_limit, game_build_id, game_branch, game_backups,
 	backup_keep_cold, backup_keep_hot, backup_on_restart, remote_backup_enabled,
  remote_keep_cold, remote_keep_hot, remote_keep_snapshots, status_published,
-	status_notice, status_connect_info, auto_stop_minutes, watchdog, test_of, (test_passed_at IS NOT NULL),
+	status_notice, status_connect_info, join_host, auto_stop_minutes, watchdog, test_of, (test_passed_at IS NOT NULL),
 	container_started_at, created_at, updated_at`
 
 func scanInstance(s scanner) (Instance, error) {
@@ -127,6 +130,7 @@ func scanInstance(s scanner) (Instance, error) {
 		&inst.StatusPublished,
 		&inst.StatusNotice,
 		&inst.StatusConnectInfo,
+		&inst.JoinHost,
 		&inst.AutoStopMinutes,
 		&inst.Watchdog,
 		&testOf,
@@ -779,6 +783,24 @@ func setInstanceStatusText(ctx context.Context, ex execer, id, notice, connectIn
 	return nil
 }
 
+// updateInstanceJoinHost sets the address players connect to. It shapes no container, so it
+// leaves restart_required alone.
+func updateInstanceJoinHost(ctx context.Context, ex execer, id, host string) error {
+	res, err := ex.ExecContext(ctx,
+		`UPDATE instances SET join_host = ?, updated_at = ? WHERE id = ?`, host, Now(), id)
+	if err != nil {
+		return fmt.Errorf("update join host for instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update join host for instance %s: %w", id, err)
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
+}
+
 // PublishedStatus is everything the unauthenticated status route may read. A narrow struct
 // rather than the whole row, so a column added later cannot reach that route by being added
 // to instanceColumns. JobKind is the kind of the job holding the instance lock, empty when
@@ -872,7 +894,7 @@ func TxCreateCloneInstance(
 			id, name, state, data_dir, base_port, server_name, world_name, password,
 			public, crossplay, crossplay_instance_id, preset, modifiers, extra_args,
 			modded, bepinex_version, restart_required, mem_limit_mb, cpu_limit, game_build_id,
-			game_branch, game_branch_password, game_backups, auto_stop_minutes, watchdog,
+			game_branch, game_branch_password, game_backups, auto_stop_minutes, watchdog, join_host,
 			backup_keep_cold, backup_keep_hot, backup_on_restart, test_of, created_at, updated_at
 		)
 		SELECT ?, ?, 'provisioning', ?, ?, server_name, world_name, ?,
@@ -880,7 +902,7 @@ func TxCreateCloneInstance(
 			modded, bepinex_version, FALSE, mem_limit_mb, COALESCE(?, cpu_limit), game_build_id,
 			game_branch, ?, game_backups,
 			CASE WHEN ? THEN ? ELSE auto_stop_minutes END,
-			CASE WHEN ? THEN 'off' ELSE watchdog END,
+			CASE WHEN ? THEN 'off' ELSE watchdog END, join_host,
 			backup_keep_cold, backup_keep_hot, CASE WHEN ? THEN FALSE ELSE backup_on_restart END,
 			CASE WHEN ? THEN id END, ?, ?
 		FROM instances WHERE id = ? AND (state = 'stopped' OR (? AND state = 'running'))`,
@@ -1103,6 +1125,7 @@ type InstanceUpdate struct {
 	Backup          *BackupPolicy
 	AutoStopMinutes *int
 	Watchdog        *string
+	JoinHost        *string
 	Branch          *InstanceBranch
 	Remote          *RemotePolicy
 	StatusText      *StatusText
@@ -1143,6 +1166,9 @@ func (u *InstanceUpdate) writes(ctx context.Context, ex execer, id string) []fun
 	}
 	if u.Watchdog != nil {
 		out = append(out, func() error { return updateInstanceWatchdog(ctx, ex, id, *u.Watchdog) })
+	}
+	if u.JoinHost != nil {
+		out = append(out, func() error { return updateInstanceJoinHost(ctx, ex, id, *u.JoinHost) })
 	}
 	if b := u.Branch; b != nil {
 		out = append(out, func() error { return updateInstanceBranch(ctx, ex, id, b.Name, b.Password) })
