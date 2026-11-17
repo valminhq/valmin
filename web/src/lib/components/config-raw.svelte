@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Textarea } from '#lib/components/ui/textarea/index.js';
-	import { configs, type ConfigCopyName } from '#lib/api/configs.js';
+	import { configs } from '#lib/api/configs.js';
 	import { ApiError } from '#lib/api/errors.js';
 	import type { TextResource } from '#lib/api/client.js';
 	import { diffLines, hunks } from '#lib/diff.js';
@@ -20,15 +20,15 @@
 		id,
 		file,
 		editable,
-		compare,
+		revision,
 		onsaved
 	}: {
 		id: string;
 		file: string;
 		editable: boolean;
-		/** Which kept version to diff against, chosen once for the whole screen so this view and
-		 * the form compare against the same one. */
-		compare: ConfigCopyName | 'off';
+		/** The id of the kept version to diff against, or null for none. Chosen once for the whole
+		 * screen so this view and the form compare against the same one. */
+		revision: string | null;
 		/** Called after a save lands, so the typed form re-reads rather than keeping a schema
 		 * parsed from bytes that are gone (F4). */
 		onsaved: () => void;
@@ -63,16 +63,17 @@
 	});
 
 	$effect(() => {
-		void loadReference(compare);
+		void loadReference(revision);
 	});
 
-	async function loadReference(which: ConfigCopyName | 'off') {
-		if (which === 'off') {
+	async function loadReference(rev: string | null) {
+		if (rev === null) {
 			reference = null;
 			return;
 		}
-		const read = await configs.readRawCopy(id, file, which).catch(() => null);
-		reference = read?.text ?? null;
+		const read = await configs.readRawRevision(id, file, rev).catch(() => null);
+		// A later choice may have been made while this one was read.
+		if (rev === revision) reference = read?.text ?? null;
 	}
 
 	function take(read: TextResource) {

@@ -179,8 +179,8 @@ Administrators can copy an existing server. Stop the source server, open its
 **Settings**, and choose **Clone** under **Manage server**. Enter a panel name for
 the copy and choose **Clone server**.
 
-The copy gets the world, the installed game build, mods, configuration files, launch
-settings and the server password. It gets its own ports, identity and data
+The copy gets the world, the installed game build, mods, configuration files with their
+history, launch settings and the server password. It gets its own ports, identity and data
 directories, and stays stopped when it is ready. Users, access grants and the source
 server's backups are not copied. After cloning, the two servers are independent.
 
@@ -703,8 +703,10 @@ anything changes, Valmin shows every package that would be installed, updated,
 downgraded, or removed. If the change would break another installed mod, for example a
 downgrade below what that mod needs, Valmin names the mod and will not apply the change.
 
-A downgrade changes mod files only. It does not restore the world or the config files,
-and a world or setting that a newer version changed may not work with the older one. On a
+A downgrade puts back the older version's files, including the config files it ships (see
+[Config files a mod ships](#config-files-a-mod-ships)). It does not restore the world or the
+settings a mod writes itself, and a world or setting that a newer version changed may not
+work with the older one. On a
 server with a world, Valmin backs up the world first, so restore that backup if you need
 to go back completely.
 
@@ -751,6 +753,22 @@ world, then the whole set. An install queued ahead of them runs first, on its ow
 A mod marked **not in the index** is one its registry no longer lists, usually because
 the author or the registry removed it. Valmin cannot offer updates for it and leaves it
 out of **Update all mods**. It keeps working as installed.
+
+### Config files a mod ships
+
+Some mods ship config files in `BepInEx/config`, such as a modpack's `.cfg` files or a mod's
+YAML and JSON data. Installing a mod writes such a file only where none exists yet, and two
+mods may ship the same file. When an update or a downgrade ships a different version of a
+file than the installed version did, Valmin replaces the file on the server with the mod's
+version, even if you edited it, so the mod gets the settings it expects. Your version stays
+in the file's history (see [Compare with an earlier version](#compare-with-an-earlier-version)). A file the change
+ships unchanged is left as you have it. The job log counts the config files it updated. A
+`.cfg` file a mod creates on the server when it starts is not shipped, so updates never touch
+it.
+
+A mod installed by an earlier Valmin release over a config file that was already on the
+server has no record of shipping it. Its next update keeps that file, and updates after that
+follow the mod.
 
 ### Read what changed in a mod
 
@@ -878,21 +896,36 @@ changed from its default offers **Reset to default**.
 
 When you are done, choose **Review changes**. The dialog lists every changed setting
 with its old and new value, and nothing is written until you confirm. The rest of the
-file is left as it was, comments included, and the version before the save is kept.
+file is left as it was, comments included, and the version before the save is kept in the
+file's history.
 If a value is invalid, nothing is written and the form marks the setting.
 
 ### Compare with an earlier version
 
-Above the form, **Compare with** picks a kept version of the file: **the original**,
-as the mod first wrote it, or **before the last save**. The panel then lists the
-settings that differ, marks each changed field, and offers to load one value or all
-of them back into the form. **Compare as text** opens the same comparison line by
-line.
+Valmin keeps a history of each config file: the file as the panel first found it, every save
+from the panel with who made it, each version a mod install or update wrote, each version a
+setup restore or a definition import wrote, and changes made outside the panel, by the game,
+a mod or by hand, noticed the next time the panel writes the file. The newest 20 versions are
+kept, plus the one template codes measure your changes against. A version the same as the one
+before it is not kept twice, and a save that changes nothing writes nothing. The RCON plugin's
+config file has no history, since it holds the console password the panel sets.
+
+Above the form, **Compare with** picks one of these versions, or **the mod's defaults**, the
+default each setting's description declares. The panel then lists the settings that differ,
+marks each changed field, and offers to load one value or all of them back into the form,
+where the usual review applies. Loading skips settings the file no longer has, so loading an
+old version after a mod update keeps the settings the update added. A version from before the
+newest mod update says so. **Compare as text** opens the same comparison line by line; for a
+YAML, JSON or text file, loading a version from before a mod update replaces the whole file,
+which the mod may no longer read.
+
+A file a mod update replaced while it held your edits is marked **Replaced by** the mod and
+version in the list, until it is saved again. Its history holds your version.
 
 ### Edit as raw text
 
 YAML, JSON and text files have no settings form and open straight in the raw editor, with
-the same conflict check, kept versions and line-by-line comparison. Saving a `.json` or
+the same conflict check, history and line-by-line comparison. Saving a `.json` or
 `.yaml` file that would no longer parse is refused with the parser's message and line, and
 nothing is written. This holds even for a file that did not parse before: JSON with comments,
 which some mods accept, has to lose its comments to be saved from the panel. Many such mods reload these files as soon as they change, so a save to a
@@ -1058,7 +1091,8 @@ A template code is a short text that recreates the server's mod setup. Choose **
 template code**, then **Copy code**. Codes start with `valmin1:`.
 
 The code carries launch and backup settings, enabled mods pinned to their versions and
-registries, and the settings changed in the panel's config editor. Dependencies, including a
+registries, and the settings changed in the panel's config editor, measured against the file as
+the panel first found it or as the newest mod install wrote it. Dependencies, including a
 modpack's members, are left out and added again on import. The code excludes the password, the
 world, disabled mods, mods installed outside Valmin, and changes made to config files outside
 the panel. The summary under the code lists what was left out.
