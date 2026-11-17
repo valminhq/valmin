@@ -135,6 +135,17 @@
 							{#if file.dir === ''}
 								<Badge variant="outline" class="shrink-0">Server root</Badge>
 							{/if}
+							{#if file.mod_replaced_edits}
+								{@const by = file.mod_replaced_edits}
+								<Badge
+									variant="outline"
+									class="max-w-40 min-w-0 truncate sm:max-w-64"
+									title="A mod update replaced this file while it held edits; the history keeps them."
+								>
+									Replaced by {by.mod}
+									{by.version}
+								</Badge>
+							{/if}
 							{#if file.installed_mods.length === 0}
 								<Badge variant="outline" class="shrink-0">No installed mod</Badge>
 							{/if}

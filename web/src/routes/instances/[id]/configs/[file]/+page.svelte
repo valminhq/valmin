@@ -6,19 +6,19 @@
 	import { actions, instances, stateSentence, type Instance } from '#lib/api/instances.js';
 	import {
 		configs,
-		copies,
 		fieldOf,
 		type ConfigCopy,
-		type ConfigCopyName,
+		type ConfigRevision,
 		type ConfigSchema,
 		type ConfigValue
 	} from '#lib/api/configs.js';
-	import { hasSettings } from '#lib/config-files.js';
+	import { hasSettings, newerModVersion, revisionLabel } from '#lib/config-files.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { socket } from '#lib/socket/index.svelte.js';
 	import { topics, type ServerMessage } from '#lib/socket/messages.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
+	import { NativeSelect } from '#lib/components/ui/native-select/index.js';
 	import * as Dialog from '#lib/components/ui/dialog/index.js';
 	import Problem from '#lib/components/problem.svelte';
 	import RestartNotice from '#lib/components/restart-notice.svelte';
@@ -52,14 +52,26 @@
 	let original = $state<Record<string, ConfigValue>>({});
 
 	/**
-	 * The versions the panel kept, and which one the form is comparing against. Both are absent
-	 * until the panel has written this file once, in which case no comparison is offered.
+	 * The file's kept versions, newest first, and what the form and the raw view compare against:
+	 * a version's id, the mod's declared defaults, nothing, or empty until the first load picks.
+	 * `compared` is the chosen version's settings once read.
 	 */
-	let kept = $state<Record<ConfigCopyName, ConfigCopy | null>>({ original: null, previous: null });
-	let compare = $state<ConfigCopyName | 'off'>('original');
+	let history = $state<ConfigRevision[]>([]);
+	let compare = $state<string>('');
+	let compared = $state<ConfigCopy | null>(null);
 
-	const reference = $derived(compare === 'off' ? null : kept[compare]);
-	const refValues = $derived(reference ? valuesOf(reference) : {});
+	const chosen = $derived(history.find((rev) => rev.id === compare) ?? null);
+	/** The newest mod-written version when the chosen one is older, so loading it may hand the
+	 * mod a file it no longer expects. */
+	const predates = $derived(chosen ? newerModVersion(history, chosen.id) : null);
+	/** The newest version, when a mod update wrote it over a file that held edits. */
+	const replacedBy = $derived(
+		history[0]?.source === 'mod' && history[0].replaced_edits ? history[0] : null
+	);
+	const refValues = $derived(
+		compare === 'defaults' ? defaultsOf(schema) : compared ? valuesOf(compared) : {}
+	);
+	const comparing = $derived(compare === 'defaults' ? schema !== null : compared !== null);
 
 	/** Settings whose value in the reference differs from the file. Compared against the file
 	 * rather than the pending edits, so the list does not shift while the operator types. Keys
@@ -156,19 +168,41 @@
 		}
 	}
 
+	// The chosen version's settings, read when the choice changes. A text file is compared only
+	// in the raw view, which reads the bytes itself.
+	$effect(() => {
+		const rev = compare;
+		compared = null;
+		if (textOnly || rev === '' || rev === 'off' || rev === 'defaults') return;
+		let current = true;
+		configs
+			.revision(id, file, rev)
+			.then((read) => {
+				if (current) compared = read;
+			})
+			.catch(() => {});
+		return () => {
+			current = false;
+		};
+	});
+
 	async function load(targetID: string, targetFile: string) {
 		const request = ++loadRequest;
 		loading = true;
 		try {
-			const [nextInstance, nextSchema, nextKept] = await Promise.all([
+			const [nextInstance, nextSchema, nextHistory] = await Promise.all([
 				instances.get(targetID),
 				hasSettings(targetFile) ? configs.read(targetID, targetFile) : null,
-				loadCopies(targetID, targetFile)
+				configs
+					.history(targetID, targetFile)
+					.then((read) => read.items)
+					.catch(() => [])
 			]);
 			if (request !== loadRequest) return;
 			instance = nextInstance;
 			if (nextSchema) take(nextSchema);
-			kept = nextKept;
+			history = nextHistory;
+			compare = pickCompare(nextHistory, compare, !hasSettings(targetFile));
 			failure = null;
 		} catch (err) {
 			if (request !== loadRequest) return;
@@ -178,23 +212,28 @@
 		}
 	}
 
-	/** A file the panel has never written has no copy to compare against. The 404 is the ordinary
-	 * case and is not reported. A text file's copy has no settings, so only whether it exists is
-	 * recorded; the raw editor reads its bytes. */
-	async function loadCopies(
-		targetID: string,
-		targetFile: string
-	): Promise<Record<ConfigCopyName, ConfigCopy | null>> {
-		const read = (which: ConfigCopyName): Promise<ConfigCopy> =>
-			hasSettings(targetFile)
-				? configs.copy(targetID, targetFile, which)
-				: configs
-						.readRawCopy(targetID, targetFile, which)
-						.then(() => ({ file: targetFile, plugin: '', sections: [], captured_at: '' }));
-		const [asFound, beforeLastSave] = await Promise.all(
-			copies.map((which) => read(which).catch(() => null))
-		);
-		return { original: asFound, previous: beforeLastSave };
+	/**
+	 * What to compare against after a load: the current choice while it still applies, otherwise
+	 * the version a mod update replaced, otherwise the baseline. A file with no history compares
+	 * against nothing until one is chosen.
+	 */
+	function pickCompare(items: ConfigRevision[], current: string, textFile: boolean): string {
+		if (current === 'off' || items.some((rev) => rev.id === current)) return current;
+		if (current === 'defaults' && !textFile) return current;
+		if (items[0]?.source === 'mod' && items[0].replaced_edits && items[1]) return items[1].id;
+		return items.find((rev) => rev.baseline)?.id ?? 'off';
+	}
+
+	/** Each setting's declared default, keyed like the form. A setting the file declared no
+	 * metadata for has no known default and is left out. */
+	function defaultsOf(read: ConfigSchema | null): Record<string, ConfigValue> {
+		const values: Record<string, ConfigValue> = {};
+		for (const section of read?.sections ?? []) {
+			for (const setting of section.settings) {
+				if (setting.type !== '') values[fieldOf(section.name, setting.key)] = setting.default;
+			}
+		}
+		return values;
 	}
 
 	function valuesOf(read: ConfigSchema): Record<string, ConfigValue> {
@@ -247,12 +286,10 @@
 		return timestamp && !Number.isNaN(date.getTime()) ? formatInstant(date) : '';
 	}
 
-	/** The comparisons on offer, labelled by what each version is rather than by age. */
-	const choices = $derived([
-		...(kept.original ? [{ key: 'original' as const, label: 'the original' }] : []),
-		...(kept.previous ? [{ key: 'previous' as const, label: 'before the last save' }] : []),
-		{ key: 'off' as const, label: 'nothing' }
-	]);
+	/** How the chosen comparison is named in the button that loads from it. */
+	const chosenLabel = $derived(
+		compare === 'defaults' ? "the mod's defaults" : chosen ? revisionLabel(chosen) : ''
+	);
 
 	/** Folds the reference's values into the pending edits. It writes nothing on its own: the
 	 * operator confirms in the same dialog every other change goes through (F4). */
@@ -287,39 +324,49 @@
 		</div>
 	</header>
 
+	{#if replacedBy}
+		<p class="text-sm" data-testid="config-replaced">
+			{revisionLabel(replacedBy)} replaced this file while it held edits. The version it replaced is kept
+			below.
+		</p>
+	{/if}
+
 	<!--
-		Shown only where a kept copy exists. The comparison is by setting rather than by line, so
-		it survives a plugin rewriting the file around the values.
+		Offered for a file with history, and for any .cfg against its declared defaults. The
+		comparison is by setting rather than by line, so it survives a plugin rewriting the file
+		around the values.
 	-->
-	{#if choices.length > 1}
+	{#if history.length > 0 || !textOnly}
 		<div class="grid gap-3 rounded-md border p-4">
 			<div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-				<span class="text-muted-foreground">Compare with</span>
-				{#each choices as choice (choice.key)}
-					<button
-						type="button"
-						class="rounded-md px-2 py-1 {compare === choice.key
-							? 'bg-secondary font-medium'
-							: 'text-muted-foreground hover:text-foreground'}"
-						aria-pressed={compare === choice.key}
-						onclick={() => (compare = choice.key)}
-					>
-						{choice.label}
-					</button>
-				{/each}
+				<label class="text-muted-foreground" for="config-compare">Compare with</label>
+				<NativeSelect id="config-compare" class="max-w-full sm:max-w-96" bind:value={compare}>
+					{#each history as rev (rev.id)}
+						<option value={rev.id}>{revisionLabel(rev)} · {when(rev.created_at)}</option>
+					{/each}
+					{#if !textOnly}
+						<option value="defaults">The mod's defaults</option>
+					{/if}
+					<option value="off">Nothing</option>
+				</NativeSelect>
 			</div>
 
-			{#if reference && !textOnly}
+			{#if predates}
+				<p class="text-sm text-muted-foreground" data-testid="config-predates">
+					{textOnly
+						? `This version is from before ${revisionLabel(predates)}. The mod may not read it.`
+						: `This version is from before ${revisionLabel(predates)}. Settings the file no longer has are skipped when loading.`}
+				</p>
+			{/if}
+
+			{#if comparing && !textOnly}
 				{#if differences.length === 0}
-					<p class="text-sm text-muted-foreground">
-						Nothing differs from this version, kept {when(reference.captured_at)}.
-					</p>
+					<p class="text-sm text-muted-foreground">Nothing differs from {chosenLabel}.</p>
 				{:else}
 					<details class="text-sm">
 						<summary class="cursor-pointer text-muted-foreground">
 							{differences.length}
-							{differences.length === 1 ? 'setting differs' : 'settings differ'} from this version, kept
-							{when(reference.captured_at)}
+							{differences.length === 1 ? 'setting differs' : 'settings differ'} from {chosenLabel}
 						</summary>
 						<ul class="mt-3 grid max-h-64 gap-3 overflow-y-auto">
 							{#each differences as field (field)}
@@ -339,11 +386,11 @@
 							<!-- Puts the values back into the form, where the usual confirmation applies. -->
 							<Button variant="outline" size="sm" disabled={!editable} onclick={restoreAll}>
 								<History />
-								Load {differences.length} settings from {choices.find((c) => c.key === compare)
-									?.label}
+								Load {differences.length}
+								{differences.length === 1 ? 'setting' : 'settings'} from {chosenLabel}
 							</Button>
 						{/if}
-						{#if canRaw}
+						{#if canRaw && chosen}
 							<!-- This list is by setting; a changed comment or a reshaped file is visible
 							     only line by line, in the raw view. -->
 							<Button
@@ -494,7 +541,7 @@
 			<ConfigRaw
 				{id}
 				{file}
-				{compare}
+				revision={chosen?.id ?? null}
 				editable={canRaw && blocked === null}
 				onsaved={() => void load(id, file)}
 			/>
@@ -532,7 +579,7 @@
 				>Save {changed.length} {changed.length === 1 ? 'change' : 'changes'}?</Dialog.Title
 			>
 			<Dialog.Description>
-				The rest of the file is untouched, and the version before this save is kept beside it.
+				The rest of the file is untouched, and the version before this save is kept in its history.
 			</Dialog.Description>
 		</Dialog.Header>
 		<ul class="grid max-h-64 gap-3 overflow-y-auto text-sm">

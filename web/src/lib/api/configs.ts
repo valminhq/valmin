@@ -17,6 +17,15 @@ export interface ConfigFile {
 	dir: string;
 	/** Whether saved setups, definitions and template codes carry this file. */
 	portable: boolean;
+	/** The mod update whose version of this file replaced edits, while that is still its newest
+	 * version. */
+	mod_replaced_edits: ModReplaced | null;
+}
+
+export interface ModReplaced {
+	mod: string;
+	version: string;
+	created_at: string;
 }
 
 export interface ConfigList {
@@ -68,12 +77,26 @@ export interface ConfigCopy extends ConfigSchema {
 	captured_at: string;
 }
 
+/** What produced the bytes of a kept version. */
+export type RevisionSource = 'found' | 'outside' | 'edit' | 'setup' | 'mod';
+
 /**
- * The two versions the panel keeps: `original` is the file as the panel first found it and
- * never moves, `previous` is what the last write replaced. After one save they are identical.
+ * One entry of a file's history, newest first. `user` is set for an edit; `mod` and the
+ * versions for a mod install, update or downgrade. `baseline` marks the version template codes
+ * measure changes against.
  */
-export const copies = ['original', 'previous'] as const;
-export type ConfigCopyName = (typeof copies)[number];
+export interface ConfigRevision {
+	id: string;
+	created_at: string;
+	source: RevisionSource;
+	user: string | null;
+	mod: string | null;
+	from_version: string | null;
+	to_version: string | null;
+	replaced_edits: boolean;
+	baseline: boolean;
+	size_bytes: number;
+}
 
 /** The `widget` values the daemon sends, named so a component cannot branch on a string that
  * silently never matches. */
@@ -94,21 +117,29 @@ export const configs = {
 	 * patch leaves the file exactly as it was (`11 §2.4`). */
 	patch: (id: string, file: string, changes: Record<string, ConfigValue>) =>
 		api.patch<ConfigSchema>(`/instances/${id}/configs/${encodeURIComponent(file)}`, changes),
-	/** 404 until the panel has written the file once, meaning there is nothing to compare
-	 * against yet. */
-	copy: (id: string, file: string, which: ConfigCopyName) =>
-		api.get<ConfigCopy>(`/instances/${id}/configs/${encodeURIComponent(file)}/${which}`),
+	/** The file's kept versions, newest first, without their content. */
+	history: (id: string, file: string) =>
+		api.get<{ items: ConfigRevision[] }>(
+			`/instances/${id}/configs/${encodeURIComponent(file)}/history`
+		),
+	/** One kept version of a `.cfg`, projected like the file itself. */
+	revision: (id: string, file: string, rev: string) =>
+		api.get<ConfigCopy>(
+			`/instances/${id}/configs/${encodeURIComponent(file)}/history/${encodeURIComponent(rev)}`
+		),
 	/** The file's own text, with the ETag a save has to hand back (`11 §1.1`). */
 	readRaw: (id: string, file: string) =>
 		api.getText(`/instances/${id}/configs/${encodeURIComponent(file)}/raw`),
 	/** A kept version's own text, gated on `config.raw` like every other route serving bytes. */
-	readRawCopy: (id: string, file: string, which: ConfigCopyName) =>
-		api.getText(`/instances/${id}/configs/${encodeURIComponent(file)}/${which}/raw`),
+	readRawRevision: (id: string, file: string, rev: string) =>
+		api.getText(
+			`/instances/${id}/configs/${encodeURIComponent(file)}/history/${encodeURIComponent(rev)}/raw`
+		),
 	/** A full replacement, so a stale `etag` is refused as `stale_write` rather than overwriting
 	 * another writer's save. */
 	writeRaw: (id: string, file: string, text: string, etag: string) =>
 		api.putText(`/instances/${id}/configs/${encodeURIComponent(file)}/raw`, text, etag),
-	/** Deletes the file and the copies kept of it. A file an installed mod uses is refused with
+	/** Deletes the file. Its history is kept and shows again if the file comes back. A file an installed mod uses is refused with
 	 * `409 mod_conflict` unless `allowInstalled` is set. */
 	remove: (id: string, file: string, allowInstalled: boolean) =>
 		api.del<void>(

@@ -35,7 +35,7 @@ const listed = [
 	}
 ];
 
-function serveList(items = listed) {
+function serveList(items: object[] = listed) {
 	daemon.on('GET', '/instances/inst-a/configs', () => Response.json({ items }));
 }
 
@@ -112,6 +112,24 @@ describe('the mod configuration list', () => {
 			'/instances/inst-a/configs/expand_world%2Fexpand_biomes.yaml'
 		);
 		expect(screen.getByText('Edited as text')).toBeTruthy();
+	});
+
+	it('marks a file a mod update replaced while it held edits', async () => {
+		serveList([
+			{
+				...listed[0],
+				mod_replaced_edits: {
+					mod: 'Author-Sailing',
+					version: '2.0.0',
+					created_at: '2026-11-01T10:00:00Z'
+				}
+			},
+			listed[1]
+		]);
+		render(Page);
+
+		expect(await screen.findByText(/Replaced by Author-Sailing\s+2\.0\.0/)).toBeTruthy();
+		expect(screen.getAllByText(/Replaced by/)).toHaveLength(1);
 	});
 
 	it('offers a retry when the list could not be read', async () => {
