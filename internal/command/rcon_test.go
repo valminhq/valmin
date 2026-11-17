@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	modconfig "github.com/valminhq/valmin/internal/mods/config"
 )
 
 func TestExecuteRCONAuthenticatesAndReturnsThePluginResponse(t *testing.T) {
@@ -292,5 +294,24 @@ func TestClearPasswordLeavesTheNextConfigureToMintOne(t *testing.T) {
 			password,
 			changed,
 		)
+	}
+}
+
+// TestClearPasswordRemovesTheKeptCopies asserts the copies kept beside the config, which hold
+// the old password, go with it.
+func TestClearPasswordRemovesTheKeptCopies(t *testing.T) {
+	_, path := serverRoot(t)
+	for _, suffix := range append([]string{""}, modconfig.CopySuffixes()...) {
+		if err := os.WriteFile(path+suffix, []byte("[1. Rcon]\nPassword = source-secret\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ClearPassword(filepath.Dir(filepath.Dir(filepath.Dir(path)))); err != nil {
+		t.Fatal(err)
+	}
+	for _, suffix := range modconfig.CopySuffixes() {
+		if _, err := os.Lstat(path + suffix); !os.IsNotExist(err) {
+			t.Errorf("%s survived (err %v)", filepath.Base(path+suffix), err)
+		}
 	}
 }

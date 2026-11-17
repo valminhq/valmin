@@ -188,7 +188,8 @@ func Apply(changes []Change, serverRoot string) error {
 }
 
 // Rollback returns serverRoot to its pre-Apply state: every manifest path whose original was
-// backed up is restored, and every other manifest path is removed. It runs after a failed apply
+// backed up is restored, and every other manifest path is removed unless it is a kept config,
+// which the install never wrote. It runs after a failed apply
 // and from the crash sweep, so manifest paths are re-validated rather than trusted: they arrive
 // from a database column and this is a privileged process deleting files.
 //
@@ -221,6 +222,8 @@ func Rollback(manifest []ManifestEntry, serverRoot, backupDir string) error {
 			continue
 		case !errors.Is(err, os.ErrNotExist):
 			errs = append(errs, fmt.Errorf("stat backup of %s: %w", e.Path, err))
+			continue
+		case e.Kept:
 			continue
 		}
 		if err := root.Remove(rel); err != nil && !errors.Is(err, os.ErrNotExist) {

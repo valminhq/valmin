@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -294,8 +295,11 @@ func TestPatchConfigBacksUpAndFlagsARestart(t *testing.T) {
 	if !strings.Contains(after, "## Damage scaling applied to enemies.") {
 		t.Error("the comments did not survive the write (B10)")
 	}
-	if got := readFile(t, path+".bak"); got != seededConfig {
-		t.Errorf(".bak does not hold the previous bytes exactly:\n%s", got)
+	if got := readHistory(t, rt, admin); len(got) != 2 || got[1].Source != "found" || got[0].Source != "edit" {
+		t.Errorf("history = %+v, want the file as found and the edit", got)
+	}
+	if _, err := os.Lstat(path + modconfig.BackupSuffix); !os.IsNotExist(err) {
+		t.Errorf("a .bak copy was written beside the file (err %v)", err)
 	}
 
 	var required, pending bool
@@ -313,7 +317,7 @@ func TestPatchConfigBacksUpAndFlagsARestart(t *testing.T) {
 }
 
 // TestTheTwoCopiesAnswerDifferentQuestions asserts the two copies answer different
-// questions: .bak follows the last write, .orig stays where the panel found the file.
+// questions: /previous follows the last write, /original stays where the panel found the file.
 func TestTheTwoCopiesAnswerDifferentQuestions(t *testing.T) {
 	t.Parallel()
 	rt, db, fake, admin, member := lifecycleWorld(t)
@@ -334,11 +338,8 @@ func TestTheTwoCopiesAnswerDifferentQuestions(t *testing.T) {
 		}
 	}
 
-	if got := readFile(t, path+".orig"); got != seededConfig {
-		t.Errorf(".orig moved with the second write; it must hold the file as first found:\n%s", got)
-	}
-	if got := readFile(t, path+".bak"); !strings.Contains(got, "DamageMultiplier = 2.5") {
-		t.Error(".bak does not hold the bytes the last write replaced (03 §9 rule 5)")
+	if got := readFile(t, path); !strings.Contains(got, "DamageMultiplier = 3.5") {
+		t.Errorf("the second write did not reach the file:\n%s", got)
 	}
 
 	// The two reference points must not converge: after two edits /original is the file as
@@ -554,8 +555,8 @@ func TestRawPutNeedsAFreshETag(t *testing.T) {
 	if got := readFile(t, path); got != edited {
 		t.Error("the accepted write did not reach the file")
 	}
-	if got := readFile(t, path+".bak"); got != seededConfig {
-		t.Error("the raw path did not write a .bak of the previous bytes")
+	if got := copyValue(t, rt, admin, "/previous"); got != 1.5 {
+		t.Errorf("previous DamageMultiplier = %v, want the bytes the raw write replaced", got)
 	}
 }
 
@@ -1007,5 +1008,176 @@ func TestRootConfigOfAnInstalledModIsEditable(t *testing.T) {
 	}
 	if string(raw) != "# token\nBotToken = abc\n" {
 		t.Errorf("file = %q, want the token written in place", raw)
+	}
+}
+
+// historyEntry mirrors the fields of a history item this package asserts on.
+type historyEntry struct {
+	ID            string  `json:"id"`
+	Source        string  `json:"source"`
+	User          *string `json:"user"`
+	ReplacedEdits bool    `json:"replaced_edits"`
+	Baseline      bool    `json:"baseline"`
+	SizeBytes     int     `json:"size_bytes"`
+}
+
+// readHistory lists the seeded config's history, newest first.
+func readHistory(t *testing.T, rt *Server, u *store.User) []historyEntry {
+	t.Helper()
+	rec := as(rt, u, httptest.NewRequest(http.MethodGet, configURL("/"+seededConfigFile+"/history"), http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("history = %d (%s)", rec.Code, rec.Body)
+	}
+	var view struct {
+		Items []historyEntry `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	return view.Items
+}
+
+// TestConfigHistoryRecordsEditsAndOutsideChanges asserts each save records the bytes it
+// replaced and the bytes it wrote, a change made outside the panel shows up as one, and a save
+// that changes nothing writes nothing.
+func TestConfigHistoryRecordsEditsAndOutsideChanges(t *testing.T) {
+	t.Parallel()
+	rt, db, fake, admin, member := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	path := seedConfigFile(t, rt)
+	patch := func(value float64) {
+		t.Helper()
+		rec := as(rt, admin, httptest.NewRequest(http.MethodPatch, configURL("/"+seededConfigFile),
+			jsonBody(t, map[string]any{"General.DamageMultiplier": value})))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("patch %v = %d (%s)", value, rec.Code, rec.Body)
+		}
+	}
+
+	patch(2.5)
+	outside := strings.Replace(readFile(t, path), "DamageMultiplier = 2.5", "DamageMultiplier = 3", 1)
+	if err := os.WriteFile(path, []byte(outside), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patch(4)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch(4)
+	if again, err := os.Stat(path); err != nil || !again.ModTime().Equal(info.ModTime()) {
+		t.Errorf("a save that changes nothing rewrote the file (err %v)", err)
+	}
+
+	got := readHistory(t, rt, admin)
+	sources := make([]string, 0, len(got))
+	for _, e := range got {
+		sources = append(sources, e.Source)
+	}
+	if want := []string{"edit", "outside", "edit", "found"}; !slices.Equal(sources, want) {
+		t.Fatalf("history sources = %v, want %v", sources, want)
+	}
+	if got[0].User == nil || *got[0].User != admin.Username || got[1].User != nil {
+		t.Errorf("users = %v, %v; want the editor on an edit and none on an outside change", got[0].User, got[1].User)
+	}
+	if !got[3].Baseline || got[0].Baseline {
+		t.Errorf("baseline = %+v, want the file as found", got)
+	}
+
+	revURL := configURL("/" + seededConfigFile + "/history/" + got[1].ID)
+	if rec := as(
+		rt,
+		admin,
+		httptest.NewRequest(http.MethodGet, revURL+"/raw", http.NoBody),
+	); rec.Body.String() != outside {
+		t.Errorf("revision raw = %d %q, want the outside bytes", rec.Code, rec.Body)
+	}
+	if rec := as(
+		rt,
+		member,
+		httptest.NewRequest(http.MethodGet, revURL+"/raw", http.NoBody),
+	); rec.Code != http.StatusForbidden {
+		t.Errorf("revision raw as viewer = %d, want 403", rec.Code)
+	}
+	if rec := as(rt, member, httptest.NewRequest(http.MethodGet, revURL, http.NoBody)); rec.Code != http.StatusOK {
+		t.Errorf("revision as viewer = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	other := stranger(t, db)
+	if rec := as(rt, other, httptest.NewRequest(http.MethodGet, revURL, http.NoBody)); rec.Code != http.StatusNotFound {
+		t.Errorf("revision as stranger = %d, want 404", rec.Code)
+	}
+	if rec := as(rt, admin, httptest.NewRequest(http.MethodGet,
+		configURL("/"+seededConfigFile+"/history/no-such-revision"), http.NoBody)); rec.Code != http.StatusNotFound {
+		t.Errorf("unknown revision = %d, want 404", rec.Code)
+	}
+}
+
+// TestConfigHistoryTakesTheCopiesEarlierReleasesKept asserts a file with `.orig` and `.bak`
+// beside it starts its history from them, so /original still answers with the file as first
+// found.
+func TestConfigHistoryTakesTheCopiesEarlierReleasesKept(t *testing.T) {
+	t.Parallel()
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	path := seedConfigFile(t, rt)
+	first := strings.Replace(seededConfig, "DamageMultiplier = 1.5", "DamageMultiplier = 0.5", 1)
+	last := strings.Replace(seededConfig, "DamageMultiplier = 1.5", "DamageMultiplier = 1", 1)
+	for suffix, body := range map[string]string{modconfig.OriginalSuffix: first, modconfig.BackupSuffix: last} {
+		if err := os.WriteFile(path+suffix, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(path+modconfig.OriginalSuffix, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPatch, configURL("/"+seededConfigFile),
+		jsonBody(t, map[string]any{"General.DamageMultiplier": 2.5})))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch = %d (%s)", rec.Code, rec.Body)
+	}
+	if got := readHistory(t, rt, admin); len(got) != 4 {
+		t.Fatalf("history = %+v, want the two kept copies, the file as found and the edit", got)
+	}
+	if got := copyValue(t, rt, admin, "/original"); got != 0.5 {
+		t.Errorf("original DamageMultiplier = %v, want the .orig copy's 0.5", got)
+	}
+	if got := copyValue(t, rt, admin, "/previous"); got != 1.5 {
+		t.Errorf("previous DamageMultiplier = %v, want what the edit replaced", got)
+	}
+}
+
+// TestConfigListMarksAFileAModUpdateReplaced asserts the list names the mod update whose
+// version of a file replaced edits, until a newer version of the file is recorded.
+func TestConfigListMarksAFileAModUpdateReplaced(t *testing.T) {
+	t.Parallel()
+	rt, db, fake, admin, _ := lifecycleWorld(t)
+	seedInstance(t, rt, db, fake, "stopped")
+	seedConfigFile(t, rt)
+	err := db.RecordConfigRevisions(t.Context(), []store.ConfigRevision{{
+		InstanceID: seededInstanceID, File: seededConfigFile, Source: store.ConfigMod,
+		Mod: "Ns-Example", FromVersion: "1.0.0", ToVersion: "2.0.0", ReplacedEdits: true,
+		Content: []byte(seededConfig),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, configURL(""), http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list = %d (%s)", rec.Code, rec.Body)
+	}
+	var view struct {
+		Items []struct {
+			File     string           `json:"file"`
+			Replaced *modReplacedView `json:"mod_replaced_edits"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &view); err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Items) != 1 || view.Items[0].Replaced == nil ||
+		view.Items[0].Replaced.Mod != "Ns-Example" || view.Items[0].Replaced.Version != "2.0.0" {
+		t.Errorf("items = %+v, want the file marked as replaced by Ns-Example 2.0.0", view.Items)
 	}
 }
