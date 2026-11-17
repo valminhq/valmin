@@ -151,7 +151,11 @@ or settings. Valmin stores the installed package files along with mod versions,
 registries, locks, enabled states, client tags, launch and backup settings, and
 the `.cfg` files directly in `BepInEx/config`. Config files in subfolders and YAML,
 JSON and text files are not saved and a restore leaves them as they are; the save card
-lists them. The saved package files
+lists them. Each config file the restore replaces or removes is kept in its history first.
+Restoring a setup with an older version of a mod leaves the YAML or JSON files a later update
+of that mod wrote; load the older version from the file's history if the mod needs it. A setup
+saved before mods recorded the config files they ship lets the next update of those mods keep
+such files as they are; later updates follow the mod again. The saved package files
 support recovery when a registry or download cache is unavailable. If a required
 package cannot be captured, the save job fails without publishing the setup.
 

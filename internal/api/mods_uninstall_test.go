@@ -241,9 +241,9 @@ func TestUninstallRefusesWhileAnotherModNeedsIt(t *testing.T) {
 }
 
 // TestUninstallKeepsTheAdminsConfig asserts an uninstall removes the package's plugin and
-// leaves its BepInEx/config/ file holding the admin's bytes, whether the install skipped the
-// file because it already existed or wrote it and the admin edited it afterwards (B10), and
-// that the installed row counts the config files an uninstall leaves.
+// leaves its BepInEx/config/ file holding the admin's bytes, whether the install kept the file
+// because it already existed or wrote it and the admin edited it afterwards, and that the
+// installed row counts the config file in both cases.
 func TestUninstallKeepsTheAdminsConfig(t *testing.T) {
 	t.Parallel()
 	const cfg = "BepInEx/config/Configured.cfg"
@@ -253,7 +253,7 @@ func TestUninstallKeepsTheAdminsConfig(t *testing.T) {
 		files         int
 		configFiles   int
 	}{
-		{name: "existing before the install", beforeInstall: true, files: 1, configFiles: 0},
+		{name: "existing before the install", beforeInstall: true, files: 2, configFiles: 1},
 		{name: "written by the install then edited", beforeInstall: false, files: 2, configFiles: 1},
 	}
 	for _, tc := range cases {

@@ -8,6 +8,7 @@ import (
 	"github.com/valminhq/valmin/internal/instance"
 	modconfig "github.com/valminhq/valmin/internal/mods/config"
 	"github.com/valminhq/valmin/internal/store"
+	"github.com/valminhq/valmin/internal/store/storetest"
 )
 
 // Asserts a config written by a setup restore or a definition import keeps its value through
@@ -25,7 +26,9 @@ func TestAWrittenConfigSurvivesAStalePendingCopy(t *testing.T) {
 	}{
 		{"definition import", func(t *testing.T, inst *store.Instance) {
 			t.Helper()
-			if err := ApplyManifestConfigs(inst, []ManifestConfig{{File: name, Content: restored}}, false); err != nil {
+			db := instanceDB(t, inst)
+			configs := []ManifestConfig{{File: name, Content: restored}}
+			if err := ApplyManifestConfigs(t.Context(), db, inst, configs, false); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -74,4 +77,16 @@ func TestAWrittenConfigSurvivesAStalePendingCopy(t *testing.T) {
 			}
 		})
 	}
+}
+
+// instanceDB opens a database holding inst's row, for code that records config history.
+func instanceDB(t *testing.T, inst *store.Instance) *store.DB {
+	t.Helper()
+	db := storetest.Open(t)
+	seed(t, db, `INSERT INTO instances (
+			id, name, state, data_dir, base_port, server_name, world_name, password,
+			crossplay_instance_id, created_at, updated_at
+		) VALUES (?, ?, 'stopped', ?, 2456, 'S', 'W', 'enc', ?, ?, ?)`,
+		inst.ID, inst.ID, inst.DataDir, inst.ID, store.Now(), store.Now())
+	return db
 }

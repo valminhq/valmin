@@ -439,11 +439,14 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `GET`    | `/instances/{id}/configs`                 | Available configuration files.                                        |
 | `GET`    | `/instances/{id}/configs/{file}`          | Settings of one `.cfg` file, typed for a form, with an `ETag`.        |
 | `PATCH`  | `/instances/{id}/configs/{file}`          | Change a `.cfg` file's settings by key; returns the updated settings. |
-| `GET`    | `/instances/{id}/configs/{file}/original` | Settings of the copy taken before the panel's first write (`.cfg`).   |
-| `GET`    | `/instances/{id}/configs/{file}/previous` | Settings of the copy the last write replaced (`.cfg`).                |
+| `GET`    | `/instances/{id}/configs/{file}/original` | Settings of the file's baseline version (`.cfg`).                     |
+| `GET`    | `/instances/{id}/configs/{file}/previous` | Settings of the newest kept version that differs from the file (`.cfg`). |
+| `GET`    | `/instances/{id}/configs/{file}/history`  | The file's kept versions, newest first.                               |
+| `GET`    | `/instances/{id}/configs/{file}/history/{rev}` | Settings of one kept version (`.cfg`).                           |
+| `GET`    | `/instances/{id}/configs/{file}/history/{rev}/raw` | One kept version's bytes.                                    |
 | `GET`    | `/instances/{id}/configs/{file}/raw`      | Raw configuration with an `ETag` header.                              |
 | `PUT`    | `/instances/{id}/configs/{file}/raw`      | Replace raw configuration on a stopped or running server; `If-Match`. |
-| `DELETE` | `/instances/{id}/configs/{file}`          | Delete a configuration file and the copies kept of it.                |
+| `DELETE` | `/instances/{id}/configs/{file}`          | Delete a configuration file; its history is kept.                     |
 | `GET`    | `/instances/orphans`                      | Containers Valmin created that no server claims.                      |
 | `GET`    | `/orphans/{container_id}`                 | What the panel can prove about one unclaimed container.               |
 | `POST`   | `/orphans/{container_id}`                 | Recover the container as a server; returns a job.                     |
@@ -687,8 +690,9 @@ An install that would overwrite files no installed mod owns, such as files place
 writes nothing and fails with `mod_unowned_files`; its `error` names the files. Send the
 install again with `"unowned": "keep"` to install the mod without those files, which stay
 as they are and are never removed with the mod, or `"unowned": "replace"` to overwrite them
-and make them the mod's own, removed with it. Config files under `BepInEx/config` are never
-overwritten either way. `POST /instances/{id}/mods/updates` takes the same `unowned` field.
+and make them the mod's own, removed with it. The choice does not cover config files under
+`BepInEx/config`: an install keeps one that exists, and an update replaces one only when the
+mod ships a changed version of it. `POST /instances/{id}/mods/updates` takes the same `unowned` field.
 Queued installs and installs from a server definition send none, so they stop at such files
 until you install by hand.
 
@@ -720,7 +724,8 @@ into one server is not possible; uninstall it first. Each row also has `enabled`
 registry no longer lists: the last complete refresh of that registry's catalogue did not
 include it. Such a row has an empty `update_version` and is left out of **Update all**.
 It stays `false` until the registry has completed at least one refresh. `file_count` counts
-every file the mod placed and `config_file_count` those under `BepInEx/config/`. By
+every file the mod placed, plus the config files it ships that were already on the server or
+that another mod placed, and `config_file_count` those under `BepInEx/config/`. By
 default, uninstall keeps the config files, including edited settings. `leftover_configs` names the `.cfg` files
 in `BepInEx/config/` that belong to this mod alone: the ones it placed, and the ones its
 plugin wrote, matched by the mod's name, its plugin `.dll` names and each file's header.
@@ -1033,12 +1038,16 @@ files with other extensions, files other than `.cfg` over 1 MiB and folders more
 and returns at most 5,000 files; when a limit left a file out, `note` says so. Each
 item's `file` is its path, `dir` the directory it is relative to, and `portable` whether saved
 setups, server definitions and template codes carry it: only a `.cfg` directly in
-`BepInEx/config`, other than the RCON plugin's.
+`BepInEx/config`, other than the RCON plugin's. `mod_replaced_edits` is
+`{"mod", "version", "created_at"}` while the file's newest version is one a mod install,
+update or downgrade wrote over bytes the mod had not shipped, and `null` otherwise.
 
 `GET /instances/{id}/configs` lists each file's `installed_mods`: the installed mods it
 belongs to, matched by name (a file in a subfolder also by that top folder, such as
 `EpicLoot/`), or an empty list. `DELETE /instances/{id}/configs/{file}`
-deletes the file with its `.bak`, `.orig` and `.pending` copies and answers `204`. It needs
+deletes the file with its `.pending` copy and any `.bak` or `.orig` copy an earlier release
+kept, and answers `204`. The file's history, the deleted version included, is kept and is
+served again once a file of that name exists; a file over 16 MiB is deleted without keeping it. It needs
 `config.edit` for a `.cfg`, or `config.raw` for any other file, and a stopped or running
 server. A file an installed mod uses is refused
 with `409 mod_conflict` and `details.installed_mods`; send `allow_installed=true` to delete
@@ -1108,11 +1117,24 @@ changed values are rewritten; comments and layout stay. `If-Match` with the file
 is optional and, when sent, refuses a stale write with `412 stale_write`. The response
 is the updated settings with a new `ETag`.
 
-Each write keeps two copies: the file as it was before the panel's first write, read
-through `/original`, and the file the last write replaced, read through `/previous`.
-Both return the same shape plus `captured_at`, or `404` when the panel has never written
-the file. `/original/raw` and `/previous/raw` return their bytes and need `config.raw`,
-like the live `/raw`.
+The panel keeps a history of each file. Before a write it records the bytes on disk, labelled
+`outside` when they differ from the newest kept version, and after it the bytes it wrote. A
+write whose bytes equal the file's writes nothing, and a write to a file over 16 MiB, too large
+to keep, is refused with `413 payload_too_large`. The RCON plugin's file has no history. `GET .../history` lists the kept versions,
+newest first, in `items` with a `next_cursor` that is always `null`: the newest 20 plus the
+baseline. Each has `id`, `created_at`, `source` (`found`, `outside`, `edit`, `setup` or
+`mod`), `user` for an edit, `mod`, `from_version` and `to_version` for a mod install, update
+or downgrade (`from_version` is `null` for a first install), `replaced_edits` for a mod
+version that replaced bytes the mod had not shipped, `baseline` and `size_bytes`.
+`GET .../history/{rev}` returns one `.cfg` version's settings plus `captured_at`, and
+`.../history/{rev}/raw` its bytes, which needs `config.raw`. An id the file does not have is
+`404`.
+
+`/original` serves the baseline: the first version recorded, or the one a mod install last
+wrote. `/previous` serves the newest kept version that differs from the file. Both return the
+settings plus `captured_at`, or `404` when there is none. A file with no history yet serves the
+`.orig` and `.bak` copies earlier releases kept beside it. `/original/raw` and
+`/previous/raw` return their bytes and need `config.raw`, like the live `/raw`.
 
 Writes are allowed on a stopped or running server. A write to a running server also
 keeps a pending copy, whose values the panel puts back after the server stops, because

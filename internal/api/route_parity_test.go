@@ -86,6 +86,9 @@ B- GET /api/v1/instances/{id}/configs
 B- GET /api/v1/instances/{id}/configs/{file}
 B- PATCH /api/v1/instances/{id}/configs/{file}
 B- DELETE /api/v1/instances/{id}/configs/{file}
+B- GET /api/v1/instances/{id}/configs/{file}/history
+B- GET /api/v1/instances/{id}/configs/{file}/history/{rev}
+B- GET /api/v1/instances/{id}/configs/{file}/history/{rev}/raw
 B- GET /api/v1/instances/{id}/configs/{file}/original
 B- GET /api/v1/instances/{id}/configs/{file}/original/raw
 B- GET /api/v1/instances/{id}/configs/{file}/previous

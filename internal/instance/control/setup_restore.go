@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -364,6 +365,15 @@ func (s *SetupJobs) RunRestore(
 		if err := jh.Checkpoint(ctx, "backed_up"); err != nil {
 			return fail(err, archived)
 		}
+		if err := s.trackReplacedConfigs(
+			ctx,
+			inst,
+			payload.StagingDir,
+			plan.Journal,
+			plan.Snapshot.Configs,
+		); err != nil {
+			return fail(err, archived)
+		}
 		rollback := func(cause error) jobs.Outcome {
 			if err := rollbackSetupPaths(inst, payload.StagingDir, plan.Journal); err != nil {
 				keepStaging = true
@@ -388,10 +398,86 @@ func (s *SetupJobs) RunRestore(
 		out := jobs.Outcome{
 			Status: jobs.StatusSucceeded,
 			OnFinish: func(ctx context.Context, tx *sql.Tx) error {
-				return store.TxApplySetupState(ctx, tx, inst.ID, mods, &launch, backup)
+				if err := store.TxApplySetupState(ctx, tx, inst.ID, mods, &launch, backup); err != nil {
+					return err
+				}
+				return store.TxRecordConfigRevisions(ctx, tx, setupRevisions(inst.ID, plan.Snapshot.Configs))
 			},
 			AfterFinish: cleanup,
 		}
 		return out.PrependFinish(archived)
 	}
+}
+
+// trackReplacedConfigs records, in each file's history, the config files a restore is about to
+// replace or remove, reading the copies the rollback backup just saved. A target file that does
+// not exist yet is recorded empty, so its restored settings count as tweaks.
+func (s *SetupJobs) trackReplacedConfigs(
+	ctx context.Context, inst *store.Instance, staging string, journal SetupJournal, targets []ManifestConfig,
+) error {
+	saved, err := savedSetupConfigs(staging, journal)
+	if err != nil {
+		return err
+	}
+	for _, cfg := range targets {
+		if _, ok := saved[cfg.File]; !ok {
+			saved[cfg.File] = []byte{}
+		}
+	}
+	if len(saved) == 0 {
+		return nil
+	}
+	dir, err := instance.OpenConfigDir(inst.DataDir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		dir = nil
+	case err != nil:
+		return fmt.Errorf("open config directory: %w", err)
+	default:
+		defer func() { _ = dir.Close() }()
+	}
+	for name, raw := range saved {
+		if err := trackBefore(ctx, s.DB, dir, inst.ID, name, raw); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// setupRevisions is the config files a restore wrote, as revisions.
+func setupRevisions(instanceID string, configs []ManifestConfig) []store.ConfigRevision {
+	out := make([]store.ConfigRevision, 0, len(configs))
+	for _, cfg := range configs {
+		out = append(out, store.ConfigRevision{
+			InstanceID: instanceID, File: cfg.File, Source: store.ConfigSetup, Content: []byte(cfg.Content),
+		})
+	}
+	return out
+}
+
+// savedSetupConfigs reads the config files the rollback backup saved from the server root, by
+// name relative to the config directory.
+func savedSetupConfigs(staging string, journal SetupJournal) (map[string][]byte, error) {
+	saved := map[string][]byte{}
+	for i, group := range journal.Roots {
+		if group.Root != (SetupRoot{}).String() {
+			continue
+		}
+		backup := filepath.Join(staging, "backup", fmt.Sprintf("%d", i))
+		for _, p := range group.Paths {
+			name, ok := strings.CutPrefix(p, instance.ConfigDir+"/")
+			if !ok {
+				continue
+			}
+			raw, err := os.ReadFile(filepath.Join(backup, filepath.FromSlash(p)))
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return nil, fmt.Errorf("read the saved %s: %w", name, err)
+			}
+			saved[name] = raw
+		}
+	}
+	return saved, nil
 }

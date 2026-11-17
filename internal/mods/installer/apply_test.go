@@ -49,10 +49,7 @@ func applyFixture(t *testing.T, staged, existing map[string]string) (
 ) {
 	t.Helper()
 	changes, serverRoot = diffFor(t, "Ns-Thing", staged, existing)
-	manifest, err := Manifest(changes)
-	if err != nil {
-		t.Fatal(err)
-	}
+	manifest = Manifest(changes)
 	backupDir = filepath.Join(t.TempDir(), "backup")
 	return changes, manifest, serverRoot, backupDir, treeHash(t, serverRoot)
 }
@@ -422,5 +419,53 @@ func TestRollbackLeavesFilesItDoesNotOwn(t *testing.T) {
 	}
 	if _, err := os.Stat(keep); err != nil {
 		t.Errorf("rollback removed a file no manifest named and no job wrote: %v", err)
+	}
+}
+
+// TestRollbackKeepsAKeptConfig: a config the install left as found has no backup, and rollback
+// leaves it on disk instead of reading the missing backup as its own write.
+func TestRollbackKeepsAKeptConfig(t *testing.T) {
+	changes, manifest, serverRoot, backupDir, before := applyFixture(t,
+		map[string]string{"config/thing.cfg": "shipped", "Thing.dll": "dll"},
+		map[string]string{"BepInEx/config/thing.cfg": "the operator's edits"})
+
+	if err := backupAndApply(changes, serverRoot, backupDir); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if err := Rollback(manifest, serverRoot, backupDir); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if got := treeHash(t, serverRoot); got != before {
+		t.Errorf("server tree after rollback:\n%s\nwant:\n%s", got, before)
+	}
+}
+
+// TestRollbackRestoresAConfigAnUpdateOverwrote: a config overwritten to follow the mod comes
+// back from its backup.
+func TestRollbackRestoresAConfigAnUpdateOverwrote(t *testing.T) {
+	dir := stage(t, metadataFiles(map[string]string{"config/thing.cfg": "v2"}))
+	placements, err := Plan(dir, "Ns-Thing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverRoot := server(t, map[string]string{"BepInEx/config/thing.cfg": "edited v1"})
+	before := treeHash(t, serverRoot)
+	prev := map[string]string{"BepInEx/config/thing.cfg": hashOf("v1")}
+	changes, err := Diff("Ns-Thing", placements, serverRoot, nil, prev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backupDir := filepath.Join(t.TempDir(), "backup")
+	if err := backupAndApply(changes, serverRoot, backupDir); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if treeHash(t, serverRoot) == before {
+		t.Fatal("Apply did not overwrite the config")
+	}
+	if err := Rollback(Manifest(changes), serverRoot, backupDir); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if got := treeHash(t, serverRoot); got != before {
+		t.Errorf("server tree after rollback:\n%s\nwant:\n%s", got, before)
 	}
 }

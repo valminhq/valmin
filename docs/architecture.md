@@ -50,7 +50,11 @@ every server that installs them. Each registry has its own directory: two regist
 can publish different files under one package name and version, so a shared directory
 could hand one registry's download to an install of the other's. Every installed
 package has a file manifest, which is what makes uninstall, disable and rollback
-exact.
+exact. It lists each file the package wrote with the hash of the bytes it shipped, and each
+config file under `BepInEx/config` the package ships that was already on the server or that
+another package places, marked `kept` with the shipped hash. A version change compares a config file's shipped hash with the
+installed version's: when the mod changed its file, the new version replaces the one on the
+server unless that already holds the new bytes; otherwise the file is left as it is.
 
 A game container mounts its installation, worlds, and logs. The backup archive
 directory is not mounted into it. All managed processes use UID/GID `10000:10000`
@@ -147,8 +151,12 @@ queued updates combined into one job and one world backup. A restart requested w
 installs are queued stops the server, runs them, and starts it again.
 
 Configuration files are parsed into a document that keeps comments and layout, so a
-form edit changes only the values it touches. The previous bytes are kept beside the
-file for comparison. A file edited while its server runs is also kept as a pending
+form edit changes only the values it touches. Earlier versions of each file are kept in the
+`config_revisions` table: before a write, the panel records the bytes on disk, which shows a
+change made outside the panel since its last record, and after it the bytes it wrote. Each
+file keeps its newest 20 versions plus a baseline, the first version recorded or the one a mod
+install last wrote, which template codes measure tweaks against. A file with no history yet
+takes the `.orig` and `.bak` copies earlier releases kept beside it. A file edited while its server runs is also kept as a pending
 copy: many plugins write their loaded settings back at shutdown, so the daemon
 reapplies the pending values once the server has stopped and before it starts again.
 

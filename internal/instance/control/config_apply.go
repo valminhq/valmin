@@ -1,6 +1,7 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -43,8 +44,11 @@ func CarriedConfig(name string) bool {
 
 // ApplyManifestConfigs writes the configuration files of an imported definition. With merge
 // set, each file's settings are applied over the file already on disk instead of replacing it.
-// The bytes each write replaces are kept as a panel edit keeps them.
-func ApplyManifestConfigs(inst *store.Instance, configs []ManifestConfig, merge bool) error {
+// Each file's history records the bytes a write replaces and the bytes written; a file whose
+// bytes would not change is not rewritten.
+func ApplyManifestConfigs(
+	ctx context.Context, db *store.DB, inst *store.Instance, configs []ManifestConfig, merge bool,
+) error {
 	if len(configs) == 0 {
 		return nil
 	}
@@ -62,25 +66,69 @@ func ApplyManifestConfigs(inst *store.Instance, configs []ManifestConfig, merge 
 	}
 	defer func() { _ = dir.Close() }()
 	for _, cfg := range configs {
-		current, _, err := fsutil.ReadRegularIn(dir, cfg.File)
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("read config %s: %w", cfg.File, err)
-		}
-		next := []byte(cfg.Content)
-		if merge {
-			next = modconfig.Merge(current, next)
-		}
-		if err := modconfig.KeepCopies(dir, cfg.File, current); err != nil {
-			return err
-		}
-		if err := fsutil.WriteFileAtomicIn(dir, cfg.File, next); err != nil {
-			return fmt.Errorf("write config %s: %w", cfg.File, err)
-		}
-		if err := modconfig.DropPending(dir, cfg.File); err != nil {
+		if err := applyManifestConfig(ctx, db, inst.ID, dir, cfg, merge); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// applyManifestConfig writes one imported file inside dir, recording the bytes it replaces and
+// the bytes it writes. A file that did not exist is recorded empty, so the imported settings
+// count as tweaks.
+func applyManifestConfig(
+	ctx context.Context, db *store.DB, instanceID string, dir *os.Root, cfg ManifestConfig, merge bool,
+) error {
+	current, _, err := fsutil.ReadRegularIn(dir, cfg.File)
+	exists := err == nil
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read config %s: %w", cfg.File, err)
+	}
+	next := []byte(cfg.Content)
+	if merge {
+		next = modconfig.Merge(current, next)
+	}
+	if err := modconfig.DropPending(dir, cfg.File); err != nil {
+		return err
+	}
+	if exists && bytes.Equal(current, next) {
+		return nil
+	}
+	if err := trackBefore(ctx, db, dir, instanceID, cfg.File, current); err != nil {
+		return err
+	}
+	if err := fsutil.WriteFileAtomicIn(dir, cfg.File, next); err != nil {
+		return fmt.Errorf("write config %s: %w", cfg.File, err)
+	}
+	recordConfigWrite(ctx, db, instanceID, cfg.File, next)
+	return nil
+}
+
+// trackBefore is instance.TrackConfigBefore for a job's write, which goes ahead without the old
+// version of a file too large to keep, logging that it was not kept.
+func trackBefore(ctx context.Context, db *store.DB, dir *os.Root, instanceID, file string, current []byte) error {
+	err := instance.TrackConfigBefore(ctx, db, dir, instanceID, file, current)
+	if errors.Is(err, store.ErrConfigTooLarge) {
+		slog.WarnContext(ctx, "config file too large to keep in its history; replaced without it",
+			slog.String("instance_id", instanceID), slog.String("file", file))
+		return nil
+	}
+	return err
+}
+
+// recordConfigWrite records bytes a setup restore or definition import wrote. A failure is only
+// logged: the file is written, and the next write records it as an outside change.
+func recordConfigWrite(ctx context.Context, db *store.DB, instanceID, file string, content []byte) {
+	if !instance.KeepsHistory(file) {
+		return
+	}
+	err := db.RecordConfigRevisions(ctx, []store.ConfigRevision{{
+		InstanceID: instanceID, File: file, Source: store.ConfigSetup, Content: content,
+	}})
+	if err != nil {
+		slog.WarnContext(ctx, "config revision not recorded",
+			slog.String("instance_id", instanceID), slog.String("file", file), slog.Any("error", err))
+	}
 }
 
 // mkdirConfigDir creates the config directory inside the server tree, with the exact mode
@@ -111,7 +159,7 @@ func mkdirConfigDir(dataDir string) error {
 
 // submitConfigApply records and runs the imported configuration step.
 func submitConfigApply(
-	ctx context.Context, engine *jobs.Engine, inst *store.Instance, configs []ManifestConfig,
+	ctx context.Context, db *store.DB, engine *jobs.Engine, inst *store.Instance, configs []ManifestConfig,
 	merge bool, requestedBy string, afterFinish func(context.Context),
 ) (*store.Job, error) {
 	id := inst.ID
@@ -131,7 +179,7 @@ func submitConfigApply(
 		},
 	}, func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		jh.Progress(ctx, 10, "writing configuration")
-		if err := ApplyManifestConfigs(inst, configs, merge); err != nil {
+		if err := ApplyManifestConfigs(ctx, db, inst, configs, merge); err != nil {
 			return jobs.Failed(errcode.Internal, err)
 		}
 		jh.Progress(ctx, 100, "configuration written")

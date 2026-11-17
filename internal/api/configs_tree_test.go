@@ -175,10 +175,10 @@ func TestRawEditOfANestedFile(t *testing.T) {
 			if got := readFile(t, path); got != "a: 2\n" {
 				t.Errorf("file = %q, want the new content", got)
 			}
-			for _, suffix := range []string{modconfig.BackupSuffix, modconfig.OriginalSuffix} {
-				if got := readFile(t, path+suffix); got != "a: 1\n" {
-					t.Errorf("%s copy = %q, want the replaced content", suffix, got)
-				}
+			prev := as(rt, admin, httptest.NewRequest(http.MethodGet,
+				configURL("/"+url.PathEscape(tt.name)+"/previous/raw"), http.NoBody))
+			if prev.Code != http.StatusOK || prev.Body.String() != "a: 1\n" {
+				t.Errorf("previous = %d %q, want the replaced content", prev.Code, prev.Body)
 			}
 			_, err := os.Stat(path + modconfig.PendingSuffix)
 			if pending := err == nil; pending != tt.wantPending {

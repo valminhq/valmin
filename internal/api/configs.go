@@ -1,12 +1,16 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"os"
 	"path"
@@ -84,6 +88,7 @@ func (h *Instances) configRoutes(rt *routeTable) {
 	rt.Handle("GET /api/v1/instances/{id}/configs/{file}/previous/raw", h.readConfigRaw(modconfig.BackupSuffix))
 	rt.Handle("PUT /api/v1/instances/{id}/configs/{file}/raw", http.HandlerFunc(h.writeConfigRaw))
 	rt.Handle("DELETE /api/v1/instances/{id}/configs/{file}", http.HandlerFunc(h.deleteConfig))
+	h.configHistoryRoutes(rt)
 }
 
 type configListView struct {
@@ -104,6 +109,9 @@ type configFileView struct {
 	InstalledMods []string `json:"installed_mods"`
 	// Portable is whether saved setups, definitions and template codes carry the file.
 	Portable bool `json:"portable"`
+	// ModReplacedEdits names the mod update whose new version of the file replaced edited
+	// bytes, while that is still the file's newest version; null otherwise.
+	ModReplacedEdits *modReplacedView `json:"mod_replaced_edits"`
 }
 
 // listConfigs handles GET /instances/{id}/configs.
@@ -138,6 +146,10 @@ func (h *Instances) listConfigs(w http.ResponseWriter, r *http.Request) {
 	}
 	view.Items = append(view.Items, rootItems...)
 	if !h.withInstalledMods(w, r, id, view.Items) {
+		return
+	}
+	if err := h.withModReplaced(r.Context(), id, view.Items); err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
 	// A root file is listed only when an installed mod claims it.
@@ -423,13 +435,13 @@ func (h *Instances) readConfigCopy(suffix string) http.HandlerFunc {
 			return
 		}
 		defer func() { _ = dir.Close() }()
-		raw, info, ok := readConfigFileInfo(w, r, dir, name+suffix)
+		raw, at, ok := h.readKeptCopy(w, r, inst.ID, dir, name, suffix)
 		if !ok {
 			return
 		}
 		JSON(w, r, http.StatusOK, configCopyView{
 			Schema:     modconfig.Parse(raw).Schema(r.PathValue("file")),
-			CapturedAt: info.ModTime().UTC(),
+			CapturedAt: at,
 		})
 	}
 }
@@ -461,7 +473,12 @@ func (h *Instances) readConfigRaw(suffix string) http.HandlerFunc {
 			return
 		}
 		defer func() { _ = dir.Close() }()
-		raw, ok := readConfigFile(w, r, dir, name+suffix)
+		var raw []byte
+		if suffix == "" {
+			raw, ok = readConfigFile(w, r, dir, name)
+		} else {
+			raw, _, ok = h.readKeptCopy(w, r, inst.ID, dir, name, suffix)
+		}
 		if !ok {
 			return
 		}
@@ -473,6 +490,61 @@ func (h *Instances) readConfigRaw(suffix string) http.HandlerFunc {
 		// which confines the read to the config directory
 		_, _ = w.Write(raw)
 	}
+}
+
+// readKeptCopy reads the version `/original` or `/previous` serves, named by the suffix of the
+// copy earlier releases kept: the file's baseline revision, or its newest revision that differs
+// from the live file. A file with no history is served the kept copy itself. Anything else is
+// a 404.
+func (h *Instances) readKeptCopy(
+	w http.ResponseWriter, r *http.Request, instanceID string, dir *os.Root, name, suffix string,
+) (raw []byte, at time.Time, ok bool) {
+	rev, tracked, err := h.keptRevision(r.Context(), instanceID, dir, name, suffix)
+	switch {
+	case err != nil:
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return nil, time.Time{}, false
+	case rev != nil:
+		return rev.Content, rev.CreatedAt, true
+	case tracked:
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return nil, time.Time{}, false
+	}
+	raw, info, ok := readConfigFileInfo(w, r, dir, name+suffix)
+	if !ok {
+		return nil, time.Time{}, false
+	}
+	return raw, info.ModTime().UTC(), true
+}
+
+// keptRevision finds the revision readKeptCopy serves, and reports whether the file has any
+// history at all.
+func (h *Instances) keptRevision(
+	ctx context.Context, instanceID string, dir *os.Root, name, suffix string,
+) (*store.ConfigRevision, bool, error) {
+	revs, err := h.DB.ConfigRevisions(ctx, instanceID, name)
+	if err != nil || len(revs) == 0 {
+		return nil, false, err
+	}
+	if suffix == modconfig.OriginalSuffix {
+		rev, err := h.DB.ConfigBaseline(ctx, instanceID, name)
+		return rev, true, err
+	}
+	live, _, err := fsutil.ReadRegularIn(dir, name)
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fsutil.ErrNotRegular) {
+		return nil, true, nil
+	}
+	if err != nil {
+		return nil, true, fmt.Errorf("read %s: %w", name, err)
+	}
+	sum := sha256.Sum256(live)
+	for i := range revs {
+		if revs[i].SHA256 != hex.EncodeToString(sum[:]) {
+			full, err := h.DB.ConfigRevision(ctx, instanceID, name, revs[i].ID)
+			return full, true, err
+		}
+	}
+	return nil, true, nil
 }
 
 // patchConfig handles PATCH /instances/{id}/configs/{file}, a body of `{"Section.Key": value}`.
@@ -643,7 +715,7 @@ func (h *Instances) deleteConfig(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.ModConflict).With("installed_mods", by))
 		return
 	}
-	if err := removeConfigCopies(dir, name); err != nil {
+	if err := h.removeConfig(r.Context(), inst.ID, dir, name, raw); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
@@ -696,10 +768,18 @@ func (h *Instances) recordConfigDelete(ctx context.Context, u *store.User, id, n
 	return nil
 }
 
-// removeConfigCopies removes a config file and every copy the panel keeps of it. The live file
-// goes first, so a failure leaves its copies to restore it from.
-func removeConfigCopies(dir *os.Root, name string) error {
-	for _, suffix := range []string{"", modconfig.BackupSuffix, modconfig.OriginalSuffix, modconfig.PendingSuffix} {
+// removeConfig records raw, the file's bytes, in its history, then removes the file and every
+// copy the panel keeps beside it. A file too large to keep is removed without it. The live file
+// goes first, so a failure leaves its copies.
+func (h *Instances) removeConfig(ctx context.Context, instanceID string, dir *os.Root, name string, raw []byte) error {
+	err := instance.TrackConfigBefore(ctx, h.DB, dir, instanceID, name, raw)
+	if errors.Is(err, store.ErrConfigTooLarge) {
+		slog.WarnContext(ctx, "config file too large to keep in its history; deleted without it",
+			slog.String("instance_id", instanceID), slog.String("file", name))
+	} else if err != nil {
+		return err
+	}
+	for _, suffix := range append([]string{""}, modconfig.CopySuffixes()...) {
 		if err := dir.Remove(name + suffix); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("remove %s: %w", name+suffix, err)
 		}
@@ -901,18 +981,28 @@ func configAuditDetail(file string, current, next []byte, raw bool) string {
 	})
 }
 
-// saveConfig is the one write both paths go through: back the current bytes up, replace the
-// file atomically, mark the instance as pending a restart, and audit it. raw is whether the
-// caller replaced the whole file rather than patching keys.
+// saveConfig is the one write both paths go through: record the current bytes in the file's
+// history, replace the file atomically, mark the instance as pending a restart, audit it, and
+// record the new bytes as the caller's edit. raw is whether the caller replaced the whole file
+// rather than patching keys. New bytes equal to the current ones write nothing but the pending
+// copy's state.
 func (h *Instances) saveConfig(
 	w http.ResponseWriter, r *http.Request, u *store.User, inst *store.Instance,
 	dir *os.Root, name string, current, next []byte, raw bool,
 ) bool {
-	if err := modconfig.KeepCopies(dir, name, current); err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+	running := instance.State(inst.State) == instance.StateRunning
+	if bytes.Equal(current, next) {
+		if err := markPending(dir, name, next, running); err != nil {
+			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+			return false
+		}
+		return true
+	}
+	if err := instance.TrackConfigBefore(r.Context(), h.DB, dir, inst.ID, name, current); err != nil {
+		apierr.Write(w, r, historyError(err))
 		return false
 	}
-	if err := markPending(dir, name, next, instance.State(inst.State) == instance.StateRunning); err != nil {
+	if err := markPending(dir, name, next, running); err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
@@ -931,7 +1021,26 @@ func (h *Instances) saveConfig(
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return false
 	}
+	// The file is written; a lost revision is picked up as an outside change by the next write.
+	if !instance.KeepsHistory(name) {
+		return true
+	}
+	if err := h.DB.RecordConfigRevisions(r.Context(), []store.ConfigRevision{{
+		InstanceID: inst.ID, File: name, Source: store.ConfigEdit, UserID: u.ID, Content: next,
+	}}); err != nil {
+		slog.WarnContext(r.Context(), "config revision not recorded",
+			slog.String("instance_id", inst.ID), slog.String("file", name), slog.Any("error", err))
+	}
 	return true
+}
+
+// historyError is the response for a write refused because the current file could not be kept
+// in its history: 413 for a file too large to keep, 500 otherwise.
+func historyError(err error) error {
+	if errors.Is(err, store.ErrConfigTooLarge) {
+		return apierr.New(errcode.PayloadTooLarge).With("limit_bytes", store.MaxConfigRevisionBytes).Wrap(err)
+	}
+	return apierr.New(errcode.Internal).Wrap(err)
 }
 
 // markPending keeps the pending copy of a `.cfg` write to a running server, and drops a stale

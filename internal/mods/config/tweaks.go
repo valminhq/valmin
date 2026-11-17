@@ -1,42 +1,20 @@
 package config
 
-import (
-	"errors"
-	"fmt"
-	"io/fs"
-	"os"
-	"strings"
+import "strings"
 
-	"github.com/valminhq/valmin/internal/mods/fsutil"
-)
-
-// The copies the panel keeps beside a config file it writes.
+// The copies earlier releases kept beside a config file the panel wrote. The panel now keeps
+// earlier versions in its database and only reads these.
 const (
 	// BackupSuffix names the copy of the bytes the last write replaced.
 	BackupSuffix = ".bak"
 	// OriginalSuffix names the copy of the file as it was before the panel's first write. It is
-	// written once and then left alone; it is empty when the file did not exist yet.
+	// empty when the file did not exist yet.
 	OriginalSuffix = ".orig"
 )
 
-// KeepCopies records the bytes a write to name is about to replace: always as its backup, and
-// as its original when the panel has not written the file before.
-func KeepCopies(root *os.Root, name string, current []byte) error {
-	if err := fsutil.WriteFileAtomicIn(root, name+BackupSuffix, current); err != nil {
-		return fmt.Errorf("back up %s: %w", name, err)
-	}
-	_, err := root.Lstat(name + OriginalSuffix)
-	if errors.Is(err, fs.ErrNotExist) {
-		if err := fsutil.WriteFileAtomicIn(root, name+OriginalSuffix, current); err != nil {
-			return fmt.Errorf("keep the original of %s: %w", name, err)
-		}
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("inspect the original of %s: %w", name, err)
-	}
-	return nil
-}
+// CopySuffixes is every suffix of a file the panel keeps or kept beside a config file, which
+// go with it when it is removed.
+func CopySuffixes() []string { return []string{BackupSuffix, OriginalSuffix, PendingSuffix} }
 
 // Tweaks lists the settings of current that differ from orig as a partial config: section
 // headers and `Key = Value` lines, in file order. A setting orig lacks counts as changed unless

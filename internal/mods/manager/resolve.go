@@ -295,15 +295,12 @@ func (i *Installer) planClosure(
 		if err != nil {
 			return fmt.Errorf("plan %s: %w", p.fullName, err)
 		}
-		changes, err := installer.Diff(p.fullName, placements, serverRoot, claims)
+		changes, err := installer.Diff(p.fullName, placements, serverRoot, claims, shippedHashes(p.prevManifest))
 		if err != nil {
 			return fmt.Errorf("diff %s: %w", p.fullName, err)
 		}
 		waiting = append(waiting, installer.ApplyUnowned(changes, unowned)...)
-		manifest, err := installer.Manifest(changes)
-		if err != nil {
-			return fmt.Errorf("hash %s: %w", p.fullName, err)
-		}
+		manifest := installer.Manifest(changes)
 		raw, err := json.Marshal(manifest)
 		if err != nil {
 			return fmt.Errorf("encode manifest for %s: %w", p.fullName, err)
@@ -318,6 +315,15 @@ func (i *Installer) planClosure(
 	}
 	setStale(pkgs, claims)
 	return nil
+}
+
+// shippedHashes maps each path of an installed version's manifest to the hash it shipped.
+func shippedHashes(manifest []installer.ManifestEntry) map[string]string {
+	out := make(map[string]string, len(manifest))
+	for _, e := range manifest {
+		out[e.Path] = e.SHA256
+	}
+	return out
 }
 
 // setStale records what each package removes: its stale paths, less any that another package
@@ -379,14 +385,16 @@ func diffSummary(p *stagedPackage) string {
 	if p.remove {
 		return fmt.Sprintf("%s-%s: removed, %d files deleted", p.fullName, p.version, len(p.prevStale))
 	}
-	var created, overwritten, skipped int
+	var created, overwritten, configs, skipped int
 	for _, c := range p.changes {
-		switch c.Action {
-		case installer.ActionCreate:
+		switch {
+		case c.Action == installer.ActionCreate:
 			created++
-		case installer.ActionOverwrite:
+		case c.Action == installer.ActionOverwrite && installer.UserConfig(c.Dest):
+			configs++
+		case c.Action == installer.ActionOverwrite:
 			overwritten++
-		case installer.ActionSkip:
+		case c.Action == installer.ActionSkip:
 			skipped++
 		}
 	}
@@ -394,7 +402,8 @@ func diffSummary(p *stagedPackage) string {
 	if p.prev != nil {
 		name = fmt.Sprintf("%s %s -> %s", p.fullName, p.prev.Version, p.version)
 	}
-	return fmt.Sprintf("%s: %d new, %d replaced, %d left alone", name, created, overwritten, skipped)
+	return fmt.Sprintf("%s: %d new, %d replaced, %d config files updated, %d left alone",
+		name, created, overwritten, configs, skipped)
 }
 
 // removedPackageOf stages an installed package a plan uninstalls. Its whole manifest is stale

@@ -32,6 +32,10 @@ type Change struct {
 	// operator placed by hand. Writing it hands the file to this package, whose uninstall
 	// would then delete it, so the operator decides (see Unowned).
 	Unowned bool
+	// SHA256 is the hash of the staged bytes.
+	SHA256 string
+	// Kept marks a config file the package ships that is left as found on disk.
+	Kept bool
 }
 
 // ConflictError is a destination another package's file manifest already owns —
@@ -93,25 +97,28 @@ func ApplyUnowned(changes []Change, answer Unowned) []string {
 	return waiting
 }
 
-// configRoot is the one tree an install never overwrites: user settings live there
-// (03 §6.4, B10).
+// configRoot is the tree that holds user settings. An install writes an existing file there
+// only when the package's own shipped version of it changed.
 const configRoot = "BepInEx/config/"
 
-const skipConfigExists = "a config file already exists; user settings are never overwritten"
+const skipConfigExists = "a config file already there, or placed by another mod, is kept"
 
-// UserConfig reports whether a destination lives in the tree an install never overwrites.
-// Exported for the update and uninstall paths, which remove a package's other files but must
-// leave these where they are.
+// UserConfig reports whether a destination lives in the config tree. The update and uninstall
+// paths remove a package's other files but leave these where they are.
 func UserConfig(dest string) bool { return strings.HasPrefix(dest, configRoot) }
 
 // Diff resolves each placement against the live server root and the paths other packages
 // already own. claims maps a manifest path to the full name of the package that owns it, or
-// to "" when its owner gives it up in the same change, so any package may take it.
+// to "" when its owner gives it up in the same change, so any package may take it. prev maps
+// each path of the version being replaced to the hash it shipped; it is empty for a fresh
+// install or a repair.
 //
-// A placement landing on another package's path is a conflict, not an overwrite: the
-// overwritten file would still be listed in that package's manifest, so its uninstall would
-// later delete a file it no longer wrote (ADR-009).
-func Diff(fullName string, placements []Placement, serverRoot string, claims map[string]string) ([]Change, error) {
+// A config file that exists, or that another package places, is decided by configChange. Any
+// other placement landing on another package's path is a conflict, not an overwrite: the file
+// would still be listed in that package's manifest, so its uninstall would later delete it.
+func Diff(
+	fullName string, placements []Placement, serverRoot string, claims, prev map[string]string,
+) ([]Change, error) {
 	changes := make([]Change, 0, len(placements))
 	for _, p := range placements {
 		dest, err := CheckDest(p.Dest)
@@ -122,11 +129,21 @@ func Diff(fullName string, placements []Placement, serverRoot string, claims map
 		if err != nil {
 			return nil, err
 		}
-		if exists && strings.HasPrefix(p.Dest, configRoot) {
-			changes = append(changes, Change{Placement: p, Action: ActionSkip, Reason: skipConfigExists})
+		sum, err := sha256File(p.Source)
+		if err != nil {
+			return nil, err
+		}
+		owner := claims[p.Dest]
+		otherOwner := owner != "" && owner != fullName
+		if UserConfig(p.Dest) && (exists || otherOwner) {
+			c, err := configChange(p, sum, serverRoot, exists, prev)
+			if err != nil {
+				return nil, err
+			}
+			changes = append(changes, c)
 			continue
 		}
-		if owner, ok := claims[p.Dest]; ok && owner != "" && owner != fullName {
+		if otherOwner {
 			return nil, &ConflictError{Path: p.Dest, Owner: owner}
 		}
 		action := ActionCreate
@@ -134,9 +151,40 @@ func Diff(fullName string, placements []Placement, serverRoot string, claims map
 			action = ActionOverwrite
 		}
 		_, claimed := claims[p.Dest]
-		changes = append(changes, Change{Placement: p, Action: action, Unowned: exists && !claimed})
+		changes = append(changes, Change{Placement: p, Action: action, Unowned: exists && !claimed, SHA256: sum})
 	}
 	return changes, nil
+}
+
+// configChange decides a config file that exists or that another package places. It is
+// overwritten when it exists, the package's previous version shipped different bytes, and the
+// file does not already hold the new ones; otherwise it is kept as found.
+func configChange(p Placement, sum, serverRoot string, exists bool, prev map[string]string) (Change, error) {
+	if was, ok := prev[p.Dest]; ok && exists && was != sum {
+		have, err := hashLive(serverRoot, p.Dest)
+		if err != nil {
+			return Change{}, err
+		}
+		if have != sum {
+			return Change{Placement: p, Action: ActionOverwrite, SHA256: sum}, nil
+		}
+	}
+	return Change{Placement: p, Action: ActionSkip, Reason: skipConfigExists, SHA256: sum, Kept: true}, nil
+}
+
+// hashLive hashes the file at dest inside serverRoot, reading through a root so a symlink
+// planted in the server tree is not followed out of it.
+func hashLive(serverRoot, dest string) (string, error) {
+	rel, err := CheckDest(dest)
+	if err != nil {
+		return "", err
+	}
+	root, err := os.OpenRoot(serverRoot)
+	if err != nil {
+		return "", fmt.Errorf("open server root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	return hashIn(root, rel)
 }
 
 // ErrUnsafeDest is a placement whose destination is not a relative path inside the server root
@@ -165,27 +213,25 @@ type ManifestEntry struct {
 	// not derived from the package's enabled flag, so every consumer knows exactly where each
 	// file is, including one that was already missing when the package was disabled.
 	Parked bool `json:"parked,omitempty"`
+	// Kept marks a config file the package ships that the install left as found. SHA256 is the
+	// shipped bytes, which the next update compares against; the file itself was never written,
+	// so a rollback without a saved copy leaves it alone.
+	Kept bool `json:"kept,omitempty"`
 }
 
-// Manifest is what uninstall and rollback read (ADR-009). A skipped change is deliberately
-// absent: the file was already there, so it is not this package's to remove.
-//
-// The hash is taken from the staged source, computed before anything moves: the manifest is
-// written first (12 §9.4), so a hash derived from the destination could only exist after the
-// write it is meant to make reversible.
-func Manifest(changes []Change) ([]ManifestEntry, error) {
+// Manifest is what uninstall and rollback read: every file the changes write, plus the config
+// files the package ships that were kept as found. Any other skipped change is absent, since
+// the file is not this package's. Hashes are of the staged bytes, so the manifest can be
+// written before anything moves.
+func Manifest(changes []Change) []ManifestEntry {
 	out := make([]ManifestEntry, 0, len(changes))
 	for _, c := range changes {
-		if c.Action == ActionSkip {
+		if c.Action == ActionSkip && !c.Kept {
 			continue
 		}
-		sum, err := sha256File(c.Source)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, ManifestEntry{Path: c.Dest, SHA256: sum})
+		out = append(out, ManifestEntry{Path: c.Dest, SHA256: c.SHA256, Kept: c.Kept})
 	}
-	return out, nil
+	return out
 }
 
 // regularFileExists reports whether dest is an existing regular file. A destination that
