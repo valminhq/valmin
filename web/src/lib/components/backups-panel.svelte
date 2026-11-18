@@ -18,6 +18,7 @@
 	import BackupCompare from '#lib/components/backup-compare.svelte';
 	import RemoteBackupsPanel from '#lib/components/remote-backups-panel.svelte';
 	import WorldImport from '#lib/components/world-import.svelte';
+	import WorldImportBackup from '#lib/components/world-import-backup.svelte';
 	import { remoteBackups, type RemoteSummary } from '#lib/api/remote-backups.js';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import Problem from '#lib/components/problem.svelte';
@@ -718,6 +719,8 @@
 	back. What is there is archived first, and the server is left stopped afterwards.
 -->
 <WorldImport {instance} />
+
+<WorldImportBackup {instance} />
 
 {#if picked.length === 2}
 	<BackupCompare

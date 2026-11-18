@@ -35,6 +35,25 @@ export interface WorldAttention {
 	message: string;
 }
 
+/** A world archive a deleted server left in the data root. The daemon keeps the path to itself;
+ * the pair of server id and filename names the archive. */
+export interface OrphanedBackup {
+	instance_id: string;
+	filename: string;
+	size_bytes: number;
+	modified_at: string;
+}
+
+/** Where `POST /instances/{id}/worlds/import-backup` takes a world from: a backup of a server
+ * (`backup_id`) or a leftover archive (`filename`), and the world to take when the archive
+ * holds several. */
+export interface ImportFromBackup {
+	source_instance_id: string;
+	backup_id?: string;
+	filename?: string;
+	world?: string;
+}
+
 export interface Page<T> {
 	items: T[];
 	next_cursor: string | null;
@@ -49,6 +68,12 @@ export interface Page<T> {
 export type BackupMode = 'quiesced' | 'hot';
 
 export const backups = {
+	/** Administrator-only: the archives of servers that no longer exist, newest first. */
+	orphaned: () => api.get<Page<OrphanedBackup>>('/backups/orphaned').then((p) => p.items),
+	/** Installs one world out of an archive on the host as the target server's world. Returns a
+	 * job. An archive with several worlds and no `world` answers 422 with `details.worlds`. */
+	importWorld: (targetId: string, body: ImportFromBackup) =>
+		api.post<Job>(`/instances/${targetId}/worlds/import-backup`, body),
 	/** Returns the page, cursor included: retention can hold more archives than one page, and
 	 * an older recovery point that the panel cannot reach is a recovery point the operator does
 	 * not have (`11 §4`). */

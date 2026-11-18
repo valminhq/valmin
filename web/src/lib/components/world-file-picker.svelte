@@ -45,7 +45,9 @@
 	<Label for="world-files">Or files</Label>
 	<Input id="world-files" type="file" multiple {disabled} bind:files={picked} />
 	<p class="text-sm text-muted-foreground">
-		A zip of that folder works too. Older Valheim saved a world as a pair instead — the
+		A zip of that folder works too, and so does a world backup (<span class="font-mono"
+			>.tar.gz</span
+		>) downloaded from a Valmin server. Older Valheim saved a world as a pair instead — the
 		<span class="font-mono">.db</span> and the <span class="font-mono">.fwl</span> of the same name —
 		and both files together are that world.
 	</p>
