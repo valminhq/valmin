@@ -200,6 +200,7 @@ var globalRouteAccess = map[string]string{
 	"POST /api/v1/schedules":                              accessMember,
 	"DELETE /api/v1/schedules/{id}":                       accessMember,
 	"PATCH /api/v1/schedules/{id}":                        accessMember,
+	"POST /api/v1/schedules/{id}/run":                     accessMember,
 	"POST /api/v1/setup":                                  accessPublic,
 	"GET /api/v1/templates":                               accessAdmin,
 	"GET /api/v1/users":                                   accessHidden,

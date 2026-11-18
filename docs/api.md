@@ -117,12 +117,13 @@ after 180 days, and changing or resetting the password withdraws every such cook
 
 Schedules run jobs on a cron timetable. Paths are relative to `/api/v1`.
 
-| Method   | Path              | Purpose                                                         |
-| -------- | ----------------- | --------------------------------------------------------------- |
-| `GET`    | `/schedules`      | Schedules you can see, with their next runs.                    |
-| `POST`   | `/schedules`      | Create a schedule; returns `201` and the schedule.              |
-| `PATCH`  | `/schedules/{id}` | Change `cron`, `timezone`, `enabled`, `steps` or player policy. |
-| `DELETE` | `/schedules/{id}` | Delete a schedule; returns `204`.                               |
+| Method   | Path                  | Purpose                                                         |
+| -------- | --------------------- | --------------------------------------------------------------- |
+| `GET`    | `/schedules`          | Schedules you can see, with their next runs.                    |
+| `POST`   | `/schedules`          | Create a schedule; returns `201` and the schedule.              |
+| `PATCH`  | `/schedules/{id}`     | Change `cron`, `timezone`, `enabled`, `steps` or player policy. |
+| `DELETE` | `/schedules/{id}`     | Delete a schedule; returns `204`.                               |
+| `POST`   | `/schedules/{id}/run` | Run a server schedule now; returns `202` and the job.           |
 
 A create body has `kind`, `cron` (five fields), and `instance_id` for a kind that runs
 against one server. `timezone` and `enabled` are optional; `enabled` defaults to `true`.
@@ -182,6 +183,24 @@ chain if the server stops while it waits. A `game_update` step on a modded
 server is refused when the run is submitted, so the run is recorded as skipped. A chain
 is not resumed after the panel restarts, and one that fires while another chain on the
 server is running is skipped. Cancelling the `chain` job stops it after the step in flight.
+
+### Run a schedule now
+
+`POST /api/v1/schedules/{id}/run` submits what a server schedule runs, at once, as its clock
+would, and returns `202` with the job and its `Location`. The job carries the schedule, so
+`scheduled` is `true`, and also names the caller in `requested_by_name`. Its steps behave as
+on a scheduled run: a `stop` makes a backup when the server backs up on restarts and
+automatic stops, and a backup is recorded as scheduled. The run ignores the waiting rules and
+a planned power cut, and leaves `next_run_at`, `last_run_at` and a paused schedule as they
+are. It needs what editing the schedule needs, and is entered in the audit log as
+`schedules.run`.
+
+A schedule holding a run for players, a panel schedule (`update_check`, `prune`,
+`alert_scan`), a server in a state the kind cannot run from, and a `game_update` (or a chain
+with one) on a modded server are `409 invalid_state`. A `backup`, `restart` or `game_update`
+schedule on a server busy with another job, and a chain while another chain runs on the
+server, are `409 job_in_progress`. Otherwise a chain is accepted and, as on its time, fails at
+the first step the server cannot take.
 
 ### Read the scheduler timezone
 
@@ -284,11 +303,11 @@ A job also carries three fields that say who started it and what it changed. The
 appear on `GET /api/v1/jobs/{id}`, on each item of `GET /api/v1/instances/{id}/jobs`,
 and in the body of a `202` response:
 
-| Field               | Meaning                                                                                                                     |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `requested_by_name` | Username of the person who started the job. Omitted for system work, scheduled runs, and users since deleted.               |
-| `scheduled`         | `true` when a schedule started the job. Always present, and still `true` after the schedule is deleted.                     |
-| `changes`           | Mod jobs only, omitted for every other kind. The packages the job was asked to change, as `action` and `full_name` entries. |
+| Field               | Meaning                                                                                                                                                   |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `requested_by_name` | Username of the person who started the job, or who ran a schedule now. Omitted for system work, runs the schedule clock started, and users since deleted. |
+| `scheduled`         | `true` when a schedule started the job, run now included. Always present, and still `true` after the schedule is deleted.                                 |
+| `changes`           | Mod jobs only, omitted for every other kind. The packages the job was asked to change, as `action` and `full_name` entries.                               |
 
 `requested_by_name` is filled in when a job is read, so the `202` response leaves it
 out. Anyone who can view the server can read the names of the people who started its
@@ -1512,8 +1531,9 @@ Actions written from a request include `instances.start`, `instances.stop`, `ins
 `instances.mods.disable`, `instances.mods.lock`, `instances.mods.unlock`,
 `instances.settings.update`, `instances.configs.write`, `instances.configs.delete`,
 `instances.commands.send`, `instances.world_tools.run`,
-`schedules.create`, `schedules.update`, `schedules.delete` and `jobs.cancel`. Scheduled runs
-and jobs the panel resumes after a restart are not entered, because nobody requested them.
+`schedules.create`, `schedules.update`, `schedules.delete`, `schedules.run` and `jobs.cancel`.
+Runs the schedule clock starts and jobs the panel resumes after a restart are not entered,
+because nobody requested them.
 
 ## Errors and collection responses
 

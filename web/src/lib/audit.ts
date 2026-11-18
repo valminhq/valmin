@@ -47,6 +47,7 @@ const LABELS: Record<string, string> = {
 	'schedules.create': 'Schedule created',
 	'schedules.update': 'Schedule changed',
 	'schedules.delete': 'Schedule deleted',
+	'schedules.run': 'Schedule run now',
 	'users.password.change': 'Users password changed'
 };
 
@@ -265,6 +266,8 @@ const PHRASES: Record<string, Phrase> = {
 			rows.length ? `: ${listed(rows.map(schedulePhrase))}` : ''
 		}`;
 	},
+	'schedules.run': (d, _, on) =>
+		`ran the ${spaced(text(d.kind)) || 'maintenance'} schedule now${on}`,
 	'schedules.delete': (d, _, on) => {
 		const cron = text(d.cron);
 		return `deleted the ${spaced(text(d.kind)) || 'maintenance'} schedule${cron ? ` (${cron})` : ''}${on}`;
