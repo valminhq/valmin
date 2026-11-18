@@ -393,6 +393,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/backups?mode=quiesced`   | Stop, back up, and resume a previously running server; returns a job. |
 | `POST`   | `/instances/{id}/backups?mode=hot`        | Best-effort backup without stopping; returns a job.                   |
 | `GET`    | `/instances/{id}/backups/{bid}/download`  | Download an archive.                                                  |
+| `GET`    | `/backups/orphaned`                       | World archives left by deleted servers; administrators only.          |
 | `DELETE` | `/instances/{id}/backups/{bid}`           | Delete an unlinked archive.                                           |
 | `POST`   | `/instances/{id}/backups/{bid}/restore`   | Restore into a stopped server; returns a job.                         |
 | `POST`   | `/instances/{id}/backups/{bid}/acknowledge` | Clear the archive's world check findings; needs `backups.restore`.  |
@@ -404,6 +405,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `DELETE` | `/instances/{id}/setups/{sid}`            | Delete a setup and release its links; returns a job.                  |
 | `GET`    | `/instances/{id}/worlds`                  | Worlds in the server's save directory.                                |
 | `POST`   | `/instances/{id}/worlds/import`           | Upload a world into a stopped server; returns a job.                  |
+| `POST`   | `/instances/{id}/worlds/import-backup`    | Import a world from another server's backup or a deleted server's archive; returns a job. |
 | `POST`   | `/instances/{id}/worlds/{name}/restore`   | Load another world already on disk; returns a job.                    |
 | `DELETE` | `/instances/{id}/worlds/{name}`           | Delete a world from a stopped server; returns a job.                  |
 | `GET`    | `/instances/{id}/players/history`         | Player count history; see above.                                      |
@@ -1144,8 +1146,12 @@ some plugins save their loaded settings over the file at shutdown.
 
 `POST /api/v1/instances/{id}/worlds/import` needs `world.import` and a stopped server. Send
 the world as `multipart/form-data`, one `file` part per file, with each part's filename
-set to its path inside the world folder. A ZIP of the folder, or the `.db` and `.fwl`
-pair of an older save, works too. The files are renamed to the server's world name, and
+set to its path inside the world folder. A ZIP of the folder, a `.tar.gz` or `.tgz` such
+as a world backup the panel wrote, or the `.db` and `.fwl` pair of an older save, works
+too. A `.tar.gz` that is truncated or corrupt answers `400 invalid_parameter` rather than
+importing part of its world, as does one that expands to more than the 4 GiB upload limit.
+The game's rolling saves inside it are ignored, and an archive holding more than one world
+is refused like any other upload of several. The files are renamed to the server's world name, and
 the current world is archived first. The game's own older saves, such as `.old` files,
 are refused unless the request adds `allow_backup_variant=true`. A server takes one upload at
 a time: a second upload while one is still being received answers `409 job_in_progress`. An
@@ -1156,6 +1162,33 @@ upload whose size would leave the data directory below its free-space floor answ
 `"game_backup": true`. `POST /api/v1/instances/{id}/worlds/{name}/restore` loads one of them,
 or any other complete world in the list, in place of the current world, which is archived
 first. It needs `world.import` and a stopped server.
+
+`POST /api/v1/instances/{id}/worlds/import-backup` takes a world out of a backup archive
+that is already on the host and installs it as this server's world, as an upload would. It
+needs `world.import` on the target and a stopped server, and the body is JSON:
+`source_instance_id` and exactly one of `backup_id` or `filename`, plus an optional `world`.
+
+- With `backup_id`, the archive is that backup of `source_instance_id`. The caller needs
+  `backups.download` on the source, because the world leaves it; a source the caller
+  cannot see answers `404`.
+- With `filename`, the archive is a leftover of a server that no longer exists, named as
+  `GET /api/v1/backups/orphaned` lists it. Only administrators may use it; anyone else, and
+  any name the listing does not hold, gets `404`. The name is matched against the listing
+  and never used as a path.
+
+A backup holds every world its server kept, and one is imported. `world` names it. Without
+it the world the backup's own row names is taken if the archive holds it, and otherwise the
+only world there is. An archive with several worlds and no way to choose answers
+`422 validation_failed` with the candidates in `details.worlds`; send the request again with
+`world`. The current world is archived first, the source archive is left as it was, and the
+rest of the response is the same as for an upload. The archive is expanded inside the
+request, which is why a large one takes a while to answer `202`. A source archive that is
+missing answers `404`, and one that cannot be read `422`.
+
+`GET /api/v1/backups/orphaned` needs the administrator's adopt action (`403` otherwise) and
+lists the finished `.tar.gz` archives under `backups/<id>/` for which no server `<id>`
+exists, newest first, as `instance_id`, `filename`, `size_bytes` and `modified_at`. An
+archive still being written is not listed.
 
 The three player lists are `admins`, `bans` and `permitted` under
 `/api/v1/instances/{id}/`. Each needs `players.manage`. `GET` returns `{"ids": [...]}`
