@@ -49,7 +49,6 @@ func (s *Scanner) Submit(ctx context.Context, scheduleID string) (*store.Job, er
 
 // run evaluates every condition and reconciles the stored set against it.
 func (s *Scanner) run(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
-	jh.Progress(ctx, 10, "Reading the panel's state")
 	diff, err := s.Scan(ctx)
 	if err != nil {
 		return jobs.Outcome{Status: jobs.StatusFailed, Error: err.Error()}
