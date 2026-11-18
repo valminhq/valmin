@@ -290,6 +290,21 @@ describe('summaries of recorded actions', () => {
 			'Alex changed the backup schedule on Viking World: cron from 0 4 * * * to 0 5 * * *'
 		],
 		[
+			'a schedule whose steps changed',
+			'schedules.update',
+			{
+				kind: 'chain',
+				changes: [
+					{
+						field: 'steps',
+						from: '{"steps":[{"type":"stop"}]}',
+						to: '{"steps":[{"type":"wait","seconds":300},{"type":"stop"}]}'
+					}
+				]
+			},
+			'Alex changed the chain schedule on Viking World: steps to "wait 5 minutes → stop"'
+		],
+		[
 			'a removed schedule',
 			'schedules.delete',
 			{ kind: 'backup', cron: '0 4 * * *' },

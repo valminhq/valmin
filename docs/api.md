@@ -117,12 +117,12 @@ after 180 days, and changing or resetting the password withdraws every such cook
 
 Schedules run jobs on a cron timetable. Paths are relative to `/api/v1`.
 
-| Method   | Path              | Purpose                                                |
-| -------- | ----------------- | ------------------------------------------------------ |
-| `GET`    | `/schedules`      | Schedules you can see, with their next runs.           |
-| `POST`   | `/schedules`      | Create a schedule; returns `201` and the schedule.     |
-| `PATCH`  | `/schedules/{id}` | Change `cron`, `timezone`, `enabled` or player policy. |
-| `DELETE` | `/schedules/{id}` | Delete a schedule; returns `204`.                      |
+| Method   | Path              | Purpose                                                         |
+| -------- | ----------------- | --------------------------------------------------------------- |
+| `GET`    | `/schedules`      | Schedules you can see, with their next runs.                    |
+| `POST`   | `/schedules`      | Create a schedule; returns `201` and the schedule.              |
+| `PATCH`  | `/schedules/{id}` | Change `cron`, `timezone`, `enabled`, `steps` or player policy. |
+| `DELETE` | `/schedules/{id}` | Delete a schedule; returns `204`.                               |
 
 A create body has `kind`, `cron` (five fields), and `instance_id` for a kind that runs
 against one server. `timezone` and `enabled` are optional; `enabled` defaults to `true`.

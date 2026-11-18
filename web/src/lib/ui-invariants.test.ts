@@ -386,8 +386,10 @@ describe('the backups panel', () => {
 });
 
 describe('the schedules editor', () => {
-	// The expression is the daemon's to validate: it answers an invalid one with the field and
-	// its own help. A second parser here would drift from the one that actually runs.
+	// The expression is the daemon's to validate and interpret: it answers an invalid one with the
+	// field and its own help. The editor reads an expression back only through readCron, which
+	// accepts nothing the builder would not write itself, so no second parser can drift from the
+	// one that runs.
 	it('the cron expression is not parsed in the SPA', () => {
 		expect(
 			readFileSync(join('src', 'lib', 'components', 'schedules-editor.svelte'), 'utf8'),

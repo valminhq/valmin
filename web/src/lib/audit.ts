@@ -1,4 +1,5 @@
 import type { AuditEntry, AuditOutcome } from '#lib/api/admin.js';
+import { describeSteps, type ChainStep } from '#lib/api/schedules.js';
 import type { BadgeVariant } from '#lib/components/ui/badge/index.js';
 
 type Detail = Record<string, unknown>;
@@ -153,6 +154,14 @@ function changePhrase(row: ChangeRow): string {
 	return row.secret ? `the ${row.field}` : `${row.field} from ${row.from} to ${row.to}`;
 }
 
+/** A schedule change, with a chain's new steps said as the schedule list says them. */
+function schedulePhrase(row: ChangeRow): string {
+	const steps = row.field === 'steps' ? parse(row.to)?.steps : undefined;
+	return Array.isArray(steps)
+		? `steps to "${describeSteps(steps as ChainStep[])}"`
+		: changePhrase(row);
+}
+
 function configPhrase(row: ChangeRow): string {
 	return row.secret ? `${row.field} (value hidden)` : `${row.field} ${row.from} → ${row.to}`;
 }
@@ -253,7 +262,7 @@ const PHRASES: Record<string, Phrase> = {
 	'schedules.update': (d, _, on) => {
 		const rows = objects(d.changes).map(rowOf);
 		return `changed the ${spaced(text(d.kind)) || 'maintenance'} schedule${on}${
-			rows.length ? `: ${listed(rows.map(changePhrase))}` : ''
+			rows.length ? `: ${listed(rows.map(schedulePhrase))}` : ''
 		}`;
 	},
 	'schedules.delete': (d, _, on) => {

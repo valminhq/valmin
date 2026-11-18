@@ -71,6 +71,117 @@ export interface PatchSchedule {
 	timezone?: string;
 	enabled?: boolean;
 	steps?: ChainStep[];
+	wait_for_empty?: boolean;
+	max_deferral_seconds?: number;
+	unknown_players?: 'wait' | 'run';
+}
+
+/** How often the schedule builder runs a task. `custom` is an expression written by hand. */
+export type Every = 'hours' | 'day' | 'days' | 'month' | 'custom';
+
+/**
+ * The schedule builder's controls. `atTime` and `startAt` are `HH:MM`, as an
+ * `<input type="time">` gives them; the rest hold the values the controls offer.
+ */
+export interface CronForm {
+	every: Every;
+	atTime: string;
+	startAt: string;
+	everyHours: string;
+	weekdays: string[];
+	monthDay: string;
+	custom: string;
+}
+
+/** A fresh copy of the builder's starting values. */
+export function defaultCronForm(): CronForm {
+	return {
+		every: 'day',
+		atTime: '04:00',
+		startAt: '00:00',
+		everyHours: '6',
+		weekdays: ['0'],
+		monthDay: '1',
+		custom: '0 4 * * *'
+	};
+}
+
+/** The hour steps on offer: only the divisors of 24, so runs stay evenly spaced across midnight. */
+export const hourChoices = ['1', '2', '3', '4', '6', '8', '12'];
+
+/** The days of the week, Monday first, with cron's values, where Sunday is 0. */
+export const weekdayChoices = [
+	{ value: '1', label: 'Monday' },
+	{ value: '2', label: 'Tuesday' },
+	{ value: '3', label: 'Wednesday' },
+	{ value: '4', label: 'Thursday' },
+	{ value: '5', label: 'Friday' },
+	{ value: '6', label: 'Saturday' },
+	{ value: '0', label: 'Sunday' }
+];
+
+/** The days of the month on offer. 29 to 31 are left out, as not every month has them. */
+export const monthDays = Array.from({ length: 28 }, (_, i) => String(i + 1));
+
+/** The first hour of the day an every-few-hours run fires at. */
+export function firstHourOf(f: CronForm): number {
+	return Number(f.startAt.slice(0, 2)) % Number(f.everyHours);
+}
+
+/** The expression the builder's controls describe, or '' when they describe none yet. */
+export function buildCron(f: CronForm): string {
+	const hh = f.atTime.slice(0, 2);
+	const mm = f.atTime.slice(3, 5);
+	if (f.every === 'hours') {
+		const first = firstHourOf(f);
+		return `${Number(f.startAt.slice(3, 5))} ${first === 0 ? '*' : first}/${f.everyHours} * * *`;
+	}
+	if (f.every === 'days') {
+		if (f.weekdays.length === 0) return '';
+		const values = [...f.weekdays].sort((a, b) => Number(a) - Number(b)).join(',');
+		return `${mm} ${hh} * * ${f.weekdays.length === 7 ? '*' : values}`;
+	}
+	if (f.every === 'month') return `${mm} ${hh} ${f.monthDay} * *`;
+	if (f.every === 'day') return `${mm} ${hh} * * *`;
+	return f.custom.trim();
+}
+
+const clockTime = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** Whether every value in f is one the builder's controls offer. */
+function offered(f: CronForm): boolean {
+	return (
+		clockTime.test(f.atTime) &&
+		clockTime.test(f.startAt) &&
+		hourChoices.includes(f.everyHours) &&
+		monthDays.includes(f.monthDay) &&
+		new Set(f.weekdays).size === f.weekdays.length &&
+		f.weekdays.every((d) => weekdayChoices.some((c) => c.value === d))
+	);
+}
+
+/**
+ * The builder controls that write expr, or a hand-written expression when none do. Only an
+ * expression buildCron writes back character for character is read into the controls, so
+ * nothing is ever interpreted that the builder did not produce itself.
+ */
+export function readCron(expr: string): Partial<CronForm> {
+	const pad = (n: string) => n.padStart(2, '0');
+	let read: Partial<CronForm> | null = null;
+	let m: RegExpExecArray | null;
+	if ((m = /^(\d{2}) (\d{2}) \* \* \*$/.exec(expr))) {
+		read = { every: 'day', atTime: `${m[2]}:${m[1]}` };
+	} else if ((m = /^(\d{2}) (\d{2}) \* \* (\d(?:,\d)*)$/.exec(expr))) {
+		read = { every: 'days', atTime: `${m[2]}:${m[1]}`, weekdays: m[3].split(',') };
+	} else if ((m = /^(\d{2}) (\d{2}) (\d{1,2}) \* \*$/.exec(expr))) {
+		read = { every: 'month', atTime: `${m[2]}:${m[1]}`, monthDay: m[3] };
+	} else if ((m = /^(\d{1,2}) (\*|\d{1,2})\/(\d{1,2}) \* \* \*$/.exec(expr))) {
+		const first = m[2] === '*' ? '0' : m[2];
+		read = { every: 'hours', everyHours: m[3], startAt: `${pad(first)}:${pad(m[1])}` };
+	}
+	const form = { ...defaultCronForm(), ...read };
+	if (read && offered(form) && buildCron(form) === expr) return read;
+	return { every: 'custom', custom: expr };
 }
 
 interface Page<T> {
