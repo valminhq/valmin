@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -400,5 +401,40 @@ func TestAPackUpdateThatRewritesBepInExCfgKeepsConsoleLogging(t *testing.T) {
 	installOK(t, rt, admin, "Ns-Pack", "2.0.0")
 	if got := consoleTurnedOn(t, dataDir); !strings.Contains(got, "the pack's new default") {
 		t.Errorf("BepInEx.cfg = %q, want the pack's new file with the console turned on", got)
+	}
+}
+
+// TestAnInstallBeforeFirstBootConfiguresBeforeItsContinuation: a definition chain installs
+// with a continuation that starts the server. The install's own configuration must have run
+// by the time the continuation does, or the first boot sees the mods' defaults.
+func TestAnInstallBeforeFirstBootConfiguresBeforeItsContinuation(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := installWorld(t,
+		aPlainMod(),
+		modPackageFixture{fullName: manager.BepInExPack, version: "5.4.2333", files: bepinexZip()},
+	)
+	writeServerFile(t, dataDir, "BepInEx/config/BepInEx.cfg", "[Logging.Console]\nEnabled = false\n")
+	cfg := filepath.Join(dataDir, "server", "BepInEx", "config", "BepInEx.cfg")
+
+	seen := make(chan string, 1)
+	job, err := rt.mods.install.SubmitInstall(t.Context(), instanceRow(t, db),
+		manager.PackageRequest{FullName: "Smoothbrain-Sailing", Version: "1.1.8"}, admin.ID,
+		func(context.Context) {
+			body, _ := os.ReadFile(cfg)
+			seen <- string(body)
+		})
+	if err != nil {
+		t.Fatalf("submit install: %v", err)
+	}
+	if got := waitJob(t, rt, admin, job.ID); got.Status != "succeeded" {
+		t.Fatalf("install = %+v, want succeeded", got)
+	}
+	select {
+	case body := <-seen:
+		if !strings.Contains(body, "Enabled = true") {
+			t.Errorf("BepInEx.cfg when the continuation ran = %q, want the console key turned on", body)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the continuation never ran")
 	}
 }
