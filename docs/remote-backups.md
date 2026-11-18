@@ -152,12 +152,13 @@ also leaves remote files intact; cancel outstanding uploads before deleting it.
 1. Download the chosen `.tar.gz` archive and matching `.tar.gz.json` manifest
    through the storage provider or rclone.
 2. Compare the archive's SHA-256 with the manifest's `sha256` field.
-3. Extract the archive into a temporary directory. The manifest records server,
-   world name, creation time, and whether the archive is consistent.
-4. Create a server in a fresh Valmin installation and leave it stopped.
-5. Import the extracted world files or a ZIP containing those files through world
-   import. The importer does not directly accept `.tar.gz`.
-6. Restore mods and server configuration separately, then start the server.
+3. Create a server in a fresh Valmin installation. Under **Start from an existing
+   world**, choose the `.tar.gz` itself and enter the world name. The manifest records
+   server, world name, creation time, and whether the archive is consistent. A
+   truncated download is refused rather than partly imported. A backup holds every
+   world the server had, and an upload of several worlds is refused: if yours holds
+   more than one, extract the archive and upload the folder of the world you want.
+4. Restore mods and server configuration separately, then start the server.
 
 The archive contains existing world-backup content. It does not protect the panel
 database, accounts, secret key, installed mods, or deployment configuration.

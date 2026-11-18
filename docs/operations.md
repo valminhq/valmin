@@ -127,6 +127,11 @@ To restore, stop the server, select an archive, and confirm the world name. Rest
 replaces the server's entire `worlds_local` directory and leaves the server stopped.
 Start it after checking the job result.
 
+To put a world from one server's backup on another server, or from a deleted server's
+leftover archive, use [import a world](usage.md#import-a-world) on the target instead.
+A restore always replaces the same server's `worlds_local`; an import installs one world
+under the target's world name.
+
 An archive holds the server's whole `worlds/` directory except a top-level `cache/`
 directory and the game's own rolling saves (`<world>_backup_auto-*` in `worlds_local`):
 `worlds_local` with every world in it, and the player lists `adminlist.txt`,

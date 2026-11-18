@@ -1,7 +1,9 @@
 package api
 
 import (
+	"archive/tar"
 	"archive/zip"
+	"compress/gzip"
 	"context"
 	"database/sql"
 	"errors"
@@ -53,11 +55,15 @@ func newUploadBudget(limit int64, maxEntries int) *uploadBudget {
 	return &uploadBudget{limit: limit, remaining: limit, maxEntries: maxEntries}
 }
 
+// errTooManyFiles marks a budget overrun on the file count, which free disk space has no part in.
+var errTooManyFiles = errors.New("the upload holds more files than the limit")
+
 func (b *uploadBudget) write(src io.Reader, path string) error {
 	if b.entries >= b.maxEntries {
 		return apierr.New(errcode.PayloadTooLarge).
 			With("limit_bytes", b.limit).
-			With("limit_entries", b.maxEntries)
+			With("limit_entries", b.maxEntries).
+			Wrap(errTooManyFiles)
 	}
 	b.entries++
 	n, err := copyStaged(src, path, b.remaining)
@@ -72,6 +78,19 @@ func (b *uploadBudget) write(src io.Reader, path string) error {
 		return err
 	}
 	return nil
+}
+
+// worldRoutes registers the routes that list, import, restore and delete a server's worlds.
+// The two imports are streams, free of the request timeout: an upload can take longer than it
+// to arrive, and an import from a backup expands its archive inside the request. Only the
+// upload lifts the body cap; the other's body is a small JSON object.
+func (h *Instances) worldRoutes(rt *routeTable) {
+	rt.Handle("GET /api/v1/instances/{id}/worlds", http.HandlerFunc(h.listWorlds))
+	rt.LargeStream("POST /api/v1/instances/{id}/worlds/import", http.HandlerFunc(h.importWorld))
+	rt.Stream("POST /api/v1/instances/{id}/worlds/import-backup", http.HandlerFunc(h.importBackup))
+	rt.Handle("POST /api/v1/instances/{id}/worlds/{name}/restore", http.HandlerFunc(h.restoreWorldFromDisk))
+	rt.Handle("DELETE /api/v1/instances/{id}/worlds/{name}", http.HandlerFunc(h.deleteWorld))
+	rt.Handle("GET /api/v1/backups/orphaned", http.HandlerFunc(h.orphanedBackups))
 }
 
 // importWorld is POST /instances/{id}/worlds/import (04 §3, 12 §3.1): requires `stopped`,
@@ -215,16 +234,31 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
+	job, err := h.submitWorldImport(r, u, inst, staging, instance.BackupVariants(allowVariant),
+		"instances.worlds.import", map[string]string{"world": stagedWorldName(staging)})
+	if err != nil {
+		writeJobSubmitError(w, r, err)
+		return
+	}
+	submitted = true
+	Accepted(w, r, job.ID, toJobView(job))
+}
+
+// submitWorldImport submits the job that validates the world staged in staging and publishes
+// it as inst's world. It holds the instance lock without changing its state, and the claim
+// fails if the instance stopped being stopped since the handler looked. The job owns staging
+// once this succeeds. action and detail are the audit entry.
+func (h *Instances) submitWorldImport(
+	r *http.Request, u *store.User, inst *store.Instance, staging string,
+	variants instance.BackupVariants, action string, detail any,
+) (*store.Job, error) {
+	id := inst.ID
+	return h.Engine.Submit(r.Context(), &jobs.Spec{
 		Kind: jobs.KindWorldImport, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
-		Payload: control.WorldImportPayload{StagingDir: staging, AllowBackupVariant: allowVariant},
-		Audit: jobAudit(r.Context(), u.ID, id, "instances.worlds.import",
-			map[string]string{"world": stagedWorldName(staging)}),
+		Payload: control.WorldImportPayload{StagingDir: staging, AllowBackupVariant: bool(variants)},
+		Audit:   jobAudit(r.Context(), u.ID, id, action, detail),
 		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			// A stopped→stopped compare-and-swap. It changes nothing and that is the
-			// point: 12 §3.1 says this kind holds the lock without moving the state, and the
-			// CAS is what makes "still stopped when the lock was taken" atomic with taking it.
 			ok, err := instance.HoldStateTx(ctx, tx, id, instance.StateStopped)
 			if err != nil {
 				return fmt.Errorf("claim world_import for instance %s: %w", id, err)
@@ -234,13 +268,7 @@ func (h *Instances) importWorld(w http.ResponseWriter, r *http.Request) {
 			}
 			return nil
 		},
-	}, h.ctl.Worlds.RunWorldImport(inst, staging, instance.BackupVariants(allowVariant)))
-	if err != nil {
-		writeJobSubmitError(w, r, err)
-		return
-	}
-	submitted = true
-	Accepted(w, r, job.ID, toJobView(job))
+	}, h.ctl.Worlds.RunWorldImport(inst, staging, variants))
 }
 
 // reserveUpload takes the instance's single upload slot and returns how many bytes its staging
@@ -347,23 +375,8 @@ func (h *Instances) restoreWorldFromDisk(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
-		Kind: jobs.KindWorldImport, LockKey: jobs.InstanceLockKey(id),
-		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
-		Payload: control.WorldImportPayload{StagingDir: staging, AllowBackupVariant: true},
-		Audit: jobAudit(r.Context(), u.ID, id, "instances.worlds.restore",
-			map[string]string{"world": r.PathValue("name")}),
-		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := instance.HoldStateTx(ctx, tx, id, instance.StateStopped)
-			if err != nil {
-				return fmt.Errorf("claim world_import for instance %s: %w", id, err)
-			}
-			if !ok {
-				return fmt.Errorf("instance %s is no longer stopped", id)
-			}
-			return nil
-		},
-	}, h.ctl.Worlds.RunWorldImport(inst, staging, instance.AllowBackupVariants))
+	job, err := h.submitWorldImport(r, u, inst, staging, instance.AllowBackupVariants,
+		"instances.worlds.restore", map[string]string{"world": r.PathValue("name")})
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return
@@ -447,18 +460,9 @@ func (h *Instances) deleteWorld(w http.ResponseWriter, r *http.Request) {
 // own savedir or it is a 404 (ADR-038, B5).
 func stageWorldFromDisk(inst *store.Instance, name, staging string) error {
 	local := filepath.Join(instance.WorldsDir(inst.DataDir), instance.WorldsLocalDir)
-	scan, err := backup.ScanWorlds(local)
+	found, err := completeWorld(local, name)
 	if err != nil {
-		return apierr.New(errcode.Internal).Wrap(err)
-	}
-	found, ok := scan[name]
-	if !ok {
-		return apierr.New(errcode.NotFound)
-	}
-	if !found.Complete() {
-		return apierr.New(errcode.ValidationFailed).
-			With("world", name).
-			With("reason", "half a world: it is missing one of its two halves")
+		return err
 	}
 	for _, rel := range found.Files {
 		if err := copyInto(filepath.Join(local, rel), filepath.Join(staging, rel)); err != nil {
@@ -466,6 +470,25 @@ func stageWorldFromDisk(inst *store.Instance, name, staging string) error {
 		}
 	}
 	return nil
+}
+
+// completeWorld finds the named world under root. A name the scan did not find is a 404 and a
+// world missing one of its two halves is a validation failure.
+func completeWorld(root, name string) (*backup.WorldFiles, error) {
+	scan, err := backup.ScanWorlds(root)
+	if err != nil {
+		return nil, apierr.New(errcode.Internal).Wrap(err)
+	}
+	found, ok := scan[name]
+	if !ok {
+		return nil, apierr.New(errcode.NotFound)
+	}
+	if !found.Complete() {
+		return nil, apierr.New(errcode.ValidationFailed).
+			With("world", name).
+			With("reason", "half a world: it is missing one of its two halves")
+	}
+	return found, nil
 }
 
 // stagedWorldName is the one world an upload staged, or "" when it holds none or several: the
@@ -514,9 +537,16 @@ func copyInto(src, dst string) error {
 // A limit below UploadLimitBytes comes from free disk space, so exceeding it is reported as
 // insufficient_disk rather than as an oversized upload.
 func stageUpload(r *http.Request, staging string, limit int64) error {
-	err := stageUploadWithLimits(r, staging, limit, uploadEntryLimit)
+	return diskLimited(stageUploadWithLimits(r, staging, limit, uploadEntryLimit), limit)
+}
+
+// diskLimited reports a byte budget overrun as insufficient_disk when free space had cut the
+// budget below the upload limit, since then the disk is what ran out rather than the request.
+// Too many files stays payload_too_large.
+func diskLimited(err error, limit int64) error {
 	var apiErr *apierr.Error
-	if limit < UploadLimitBytes && errors.As(err, &apiErr) && apiErr.Code == errcode.PayloadTooLarge {
+	if limit < UploadLimitBytes && errors.As(err, &apiErr) && apiErr.Code == errcode.PayloadTooLarge &&
+		!errors.Is(err, errTooManyFiles) {
 		return apierr.New(errcode.InsufficientDisk).Wrap(err)
 	}
 	return err
@@ -613,6 +643,9 @@ func stagedName(staging, supplied string) (path string, ok bool) {
 // landed. Paths are rebuilt by stagedName, never joined, which makes zip-slip structurally
 // impossible rather than merely checked for (B5).
 func stagePart(part *multipart.Part, staging, name string, budget *uploadBudget) (int, error) {
+	if isTarGz(name) {
+		return stageArchive(part, staging, budget)
+	}
 	if !strings.EqualFold(filepath.Ext(name), ".zip") {
 		dst, ok := stagedName(staging, name)
 		if !ok {
@@ -655,6 +688,123 @@ func stagePart(part *multipart.Part, staging, name string, budget *uploadBudget)
 		wrote++
 	}
 	return wrote, nil
+}
+
+// isTarGz reports whether an upload's name is a gzipped tar, the format of the panel's own
+// world backups.
+func isTarGz(name string) bool {
+	lower := strings.ToLower(name)
+	return strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz")
+}
+
+// stageArchive expands a gzipped tar into staging the way stagePart expands a zip, and returns
+// how many files landed. It streams, so the budget is charged for what the archive expands to.
+//
+// Only regular files that wantedInUpload names are staged, and the game's rolling saves are
+// left out as a backup leaves them out. Each lands at the path stagedName rebuilds from the
+// entry name. The gzip stream is read to its end because its trailer is the only thing that
+// tells a download cut short from a whole archive. A damaged archive is invalid_parameter
+// wherever in the stream the damage is.
+func stageArchive(src io.Reader, staging string, budget *uploadBudget) (int, error) {
+	return stageArchiveCapped(src, staging, budget, UploadLimitBytes)
+}
+
+// stageArchiveCapped is stageArchive with a limit on everything the archive expands to, the
+// entries it skips included: the budget only charges what is staged.
+func stageArchiveCapped(src io.Reader, staging string, budget *uploadBudget, expandedLimit int64) (int, error) {
+	gz, err := gzip.NewReader(src)
+	if err != nil {
+		return 0, unreadableArchive(err)
+	}
+	defer func() { _ = gz.Close() }()
+
+	tr := tar.NewReader(&expansionReader{r: gz, left: expandedLimit + 1})
+	body := &trackedReader{r: tr}
+	wrote := 0
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return 0, unreadableArchive(err)
+		}
+		dst, ok := stagedName(staging, hdr.Name)
+		if hdr.Typeflag != tar.TypeReg || !wantedInUpload(hdr.Name) || isRollingSave(hdr.Name) || !ok {
+			continue
+		}
+		if err := budget.write(body, dst); err != nil {
+			// A read error from the archive reaches here as a write failure, which would
+			// answer 500 for what is a bad upload.
+			if body.err != nil {
+				return 0, unreadableArchive(body.err)
+			}
+			return 0, err
+		}
+		wrote++
+	}
+	// Past the end marker a tar holds at most block padding, so a longer tail is refused
+	// rather than decompressed without bound.
+	if n, err := io.CopyN(io.Discard, gz, archiveTailLimit+1); err != nil && !errors.Is(err, io.EOF) {
+		return 0, unreadableArchive(err)
+	} else if n > archiveTailLimit {
+		return 0, unreadableArchive(errors.New("data follows the end of the archive"))
+	}
+	return wrote, nil
+}
+
+// archiveTailLimit is the most stageArchive reads past a tar's end marker while it looks for
+// the gzip trailer.
+const archiveTailLimit = 1 << 20
+
+var errExpandsTooMuch = errors.New("the archive expands to more than the upload limit")
+
+// expansionReader fails a read once more than its limit has come through it. left starts one
+// above the limit so that a stream of exactly the limit still ends in io.EOF.
+type expansionReader struct {
+	r    io.Reader
+	left int64
+}
+
+func (e *expansionReader) Read(p []byte) (int, error) {
+	if e.left <= 0 {
+		return 0, errExpandsTooMuch
+	}
+	if int64(len(p)) > e.left {
+		p = p[:e.left]
+	}
+	n, err := e.r.Read(p)
+	e.left -= int64(n)
+	//nolint:wrapcheck // io.Reader: callers compare the error to io.EOF.
+	return n, err
+}
+
+// trackedReader remembers the first read error that is not io.EOF, so a caller that gets the
+// error back wrapped by something else can still tell the source failed.
+type trackedReader struct {
+	r   io.Reader
+	err error
+}
+
+func (t *trackedReader) Read(p []byte) (int, error) {
+	n, err := t.r.Read(p)
+	if err != nil && !errors.Is(err, io.EOF) && t.err == nil {
+		t.err = err
+	}
+	//nolint:wrapcheck // io.Reader: callers compare the error to io.EOF.
+	return n, err
+}
+
+// isRollingSave reports whether any component of an archive entry's path is one of the game's
+// rolling saves.
+func isRollingSave(name string) bool {
+	return slices.ContainsFunc(strings.Split(strings.ReplaceAll(name, `\`, "/"), "/"), backup.IsAutoSave)
+}
+
+// unreadableArchive is the answer for an upload whose gzip or tar stream is damaged.
+func unreadableArchive(err error) error {
+	return apierr.New(errcode.InvalidParameter).With("parameter", "file").
+		Wrap(fmt.Errorf("the uploaded archive could not be read: %w", err))
 }
 
 // wantedInUpload keeps a zip's world files and drops the rest, so a user who zips their whole

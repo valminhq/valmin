@@ -89,9 +89,11 @@ func worldsDirOfID(t *testing.T, db *store.DB, id string) string {
 	return filepath.Join(dataDirOfID(t, db, id), "worlds")
 }
 
-// seedExistingWorld puts a world in place so rule 6's snapshot has something to protect.
-func seedExistingWorld(t *testing.T, db *store.DB, worldName string) {
+// seedExistingWorld puts inst-a's world, World, in place so rule 6's snapshot has something
+// to protect.
+func seedExistingWorld(t *testing.T, db *store.DB) {
 	t.Helper()
+	const worldName = "World"
 	dir := filepath.Join(worldsDirOf(t, db), "worlds_local")
 	if err := os.MkdirAll(dir, 0o775); err != nil {
 		t.Fatal(err)
@@ -143,7 +145,7 @@ func TestImportRefusesALoneDB(t *testing.T) {
 	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
-	seedExistingWorld(t, db, "World")
+	seedExistingWorld(t, db)
 
 	rec := as(rt, admin, uploadRequest(t, importPath, map[string][]byte{"Lonely.db": dbBytes()}))
 	if rec.Code != http.StatusAccepted {
@@ -197,7 +199,7 @@ func TestImportSnapshotsTheExistingWorldFirst(t *testing.T) {
 	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)
 	seedInstance(t, rt, db, fake, "stopped")
-	seedExistingWorld(t, db, "World")
+	seedExistingWorld(t, db)
 
 	rec := as(rt, admin, uploadRequest(t, importPath, map[string][]byte{
 		"New.db": dbBytes(), "New.fwl": fwlBytes(37, "New"),
