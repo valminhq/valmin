@@ -476,6 +476,49 @@ describe('the schedules editor', () => {
 				screen.queryByRole('button', { name: 'Edit the Run a sequence of steps schedule' })
 			).toBeNull();
 		});
+
+		it('warns that a run now of the schedule being edited runs it as saved', async () => {
+			await editRow(schedule({ cron: '30 03 * * *', wait_for_empty: true }), [
+				actions.backupsCreate
+			]);
+			await fireEvent.input(screen.getByLabelText('Time of day'), { target: { value: '04:15' } });
+			await click(screen.getByRole('button', { name: 'Run now: Back up this server' }));
+			expect(text(await screen.findByRole('dialog'))).toContain(
+				'It runs now without waiting for players to leave, and its next run stays as it is. It runs as saved, without the changes in the form.'
+			);
+		});
+	});
+
+	it('runs a schedule now once the dialog saying what it does is confirmed', async () => {
+		await open([actions.backupsCreate], { rows: [schedule()] });
+		const ran = () => daemon.requests('POST', '/schedules/sch-1/run');
+		daemon.on('POST', '/schedules/sch-1/run', () =>
+			Response.json({ job_id: 'job-1', kind: 'backup', status: 'queued' }, { status: 202 })
+		);
+
+		await click(await screen.findByRole('button', { name: 'Run now: Back up this server' }));
+		const dialog = await screen.findByRole('dialog');
+		expect(text(dialog)).toContain(
+			'Back up this server. Connected players are disconnected. It runs now, and its next run stays as it is.'
+		);
+		expect(text(dialog), 'nothing is being edited').not.toContain('as saved');
+		expect(ran(), 'not before confirming').toHaveLength(0);
+
+		await click(within(dialog).getByRole('button', { name: 'Run now' }));
+		await vi.waitFor(() => expect(ran()).toHaveLength(1));
+		expect(await screen.findByText(/Started “Back up this server”/)).toBeTruthy();
+	});
+
+	it('offers no run now while a run waits for players', async () => {
+		const row = schedule({
+			kind: 'restart',
+			wait_for_empty: true,
+			deferred_since: '2026-09-25T03:30:00Z',
+			deferred_until: '2026-09-25T05:30:00Z'
+		});
+		await open([actions.restart], { rows: [row] });
+		await screen.findByText('waiting for players');
+		expect(screen.queryByRole('button', { name: 'Run now: Restart this server' })).toBeNull();
 	});
 
 	it('deletes a schedule once the dialog naming it is confirmed', async () => {

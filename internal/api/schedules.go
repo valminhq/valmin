@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -126,6 +127,7 @@ func scheduleRoutes(rt *routeTable, s *Schedules) {
 	rt.Handle("POST /api/v1/schedules", http.HandlerFunc(s.create))
 	rt.Handle("PATCH /api/v1/schedules/{id}", http.HandlerFunc(s.patch))
 	rt.Handle("DELETE /api/v1/schedules/{id}", http.HandlerFunc(s.delete))
+	rt.Handle("POST /api/v1/schedules/{id}/run", http.HandlerFunc(s.run))
 }
 
 // scheduleView is one schedule on the wire.
@@ -729,6 +731,67 @@ func (s *Schedules) delete(w http.ResponseWriter, r *http.Request) {
 		s.announce(row)
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// run is POST /schedules/{id}/run: it submits what a server schedule runs, now, as its clock
+// would, with the caller named on the job. Running one needs what writing it needs. The
+// schedule's waiting rules, next run and last run are left alone, so a schedule holding a run
+// for players is refused rather than run twice.
+func (s *Schedules) run(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	row, spec, ok := s.mustLoadSchedule(w, r)
+	if !ok {
+		return
+	}
+	if spec.global {
+		if !s.Authz.Can(r.Context(), u, authz.SchedulesGlobal, "") {
+			apierr.Write(w, r, apierr.New(errcode.NotFound))
+			return
+		}
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).Msg("A panel schedule runs only on its own clock."))
+		return
+	}
+	if !s.Authz.Can(r.Context(), u, authz.InstanceView, deref(row.InstanceID)) {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	steps, err := storedSteps(spec, row)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if s.lacksAction(w, r, u, spec, deref(row.InstanceID), steps) {
+		return
+	}
+	if row.DeferredSince != nil {
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).Msg(
+			"This schedule is waiting for players to leave. Turn its waiting off to run it within a minute."))
+		return
+	}
+	inst, ok := s.Instances.mustLoadInstance(w, r, deref(row.InstanceID))
+	if !ok || !checkInstanceState(w, r, inst, spec.kind) {
+		return
+	}
+	detail := struct {
+		Kind string `json:"kind"`
+	}{row.Kind}
+	job, err := s.submitSchedule(r.Context(), row, inst, control.StepOrigin{
+		ScheduleID: row.ID, RequestedBy: u.ID,
+		Audit: scheduleAudit(r.Context(), u, row, "schedules.run", detail),
+	})
+	if errors.Is(err, control.ErrModdedNotConfirmed) {
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).Msg(
+			"A schedule never updates a server with mods installed. Update it by hand, where you can confirm it."))
+		return
+	}
+	if err != nil {
+		writeJobSubmitError(w, r, err)
+		return
+	}
+	Accepted(w, r, job.ID, toJobView(job))
 }
 
 // mustLoadSchedule resolves {id} to a schedule the caller can see. One they cannot see is 404,

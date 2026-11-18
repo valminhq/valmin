@@ -214,6 +214,15 @@ differs from yours, the form offers a switch, **Run it in** followed by your zon
 **instead**, that moves the schedule to your zone; the times in the form are then read in
 your zone. A cron expression you wrote by hand opens as **Cron expression**, as written.
 
+To try a schedule without waiting for its time, choose **Run now** on its row and confirm.
+It runs at once, as saved and as it would on its time: a sequence runs its steps in order,
+and a stop step backs up as a scheduled stop does under **Back up on restarts and automatic
+stops**. It does not wait for players, and its next run stays as it is. Changes still open
+in the form are not part of the run; save them first. The job history shows the run as
+**Schedule, run by** your name. A schedule that is waiting for players to leave offers no
+**Run now**; turn its waiting off to let the held run start within a minute. A paused
+schedule can be run this way too.
+
 **Upcoming runs** lists the next runs of every enabled schedule, earliest first.
 
 A scheduled restart or backup stops the server and disconnects its players. To avoid that,

@@ -1,6 +1,6 @@
 import { session } from '#lib/state/session.svelte.js';
 import { api } from './client';
-import type { User } from './types';
+import type { Job, User } from './types';
 
 /**
  * A standing instruction to enqueue a job on a cron expression (`12 §11`). The panel owns the
@@ -346,7 +346,9 @@ export const schedules = {
 	list: () => api.get<Page<Schedule>>('/schedules'),
 	create: (body: CreateSchedule) => api.post<Schedule>('/schedules', body),
 	patch: (id: string, body: PatchSchedule) => api.patch<Schedule>(`/schedules/${id}`, body),
-	remove: (id: string) => api.del<void>(`/schedules/${id}`)
+	remove: (id: string) => api.del<void>(`/schedules/${id}`),
+	/** Runs a server schedule now, as its clock would, and answers with the job it started. */
+	run: (id: string) => api.post<Job>(`/schedules/${id}/run`)
 };
 
 /**

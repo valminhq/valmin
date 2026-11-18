@@ -175,21 +175,28 @@ func (s *Schedules) submitScheduledGlobal(ctx context.Context, sc *store.Schedul
 	}
 }
 
-// submitScheduledInstance submits what a due instance schedule runs. A chain runs as a chain
-// job; a backup, restart or game update is its one step, submitted as that step's own job.
+// submitScheduledInstance submits what a due instance schedule runs.
 func (s *Schedules) submitScheduledInstance(ctx context.Context, sc *store.Schedule, inst *store.Instance) error {
+	_, err := s.submitSchedule(ctx, sc, inst, control.StepOrigin{ScheduleID: sc.ID})
+	return err
+}
+
+// submitSchedule submits what instance schedule sc runs on inst, attributed to origin. A chain
+// runs as a chain job; a backup, restart or game update is its one step, submitted as that
+// step's own job.
+func (s *Schedules) submitSchedule(
+	ctx context.Context, sc *store.Schedule, inst *store.Instance, origin control.StepOrigin,
+) (*store.Job, error) {
 	steps, err := scheduledSteps(sc)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	chainer := s.Instances.ctl.Chainer
 	if sc.Kind == jobs.KindChain.String() {
-		_, err = chainer.Submit(ctx, &control.ChainSubmission{
-			Instance: inst, Steps: steps, ScheduleID: sc.ID,
-			Kind: jobs.KindChain, Payload: control.ChainPayload{Steps: steps},
+		return chainer.Submit(ctx, &control.ChainSubmission{
+			Instance: inst, Steps: steps, ScheduleID: origin.ScheduleID, RequestedBy: origin.RequestedBy,
+			Audit: origin.Audit, Kind: jobs.KindChain, Payload: control.ChainPayload{Steps: steps},
 		})
-		return err
 	}
-	_, err = chainer.SubmitStep(ctx, inst, &steps[0], control.StepOrigin{ScheduleID: sc.ID})
-	return err
+	return chainer.SubmitStep(ctx, inst, &steps[0], origin)
 }

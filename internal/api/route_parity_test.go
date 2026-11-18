@@ -181,6 +181,7 @@ B- GET /api/v1/schedules
 B- POST /api/v1/schedules
 B- DELETE /api/v1/schedules/{id}
 B- PATCH /api/v1/schedules/{id}
+B- POST /api/v1/schedules/{id}/run
 B- POST /api/v1/setup
 B- GET /api/v1/templates
 B- GET /api/v1/users
