@@ -186,9 +186,9 @@ On **Maintenance**, choose **What to run** and **How often**, then choose
 
 New schedules use the browser's time zone, including across daylight saving changes.
 Existing schedules keep the time zone they were created with (UTC for schedules created
-before this change) until you change their time. Upcoming runs, each schedule's next run,
-and skipped and failed runs are shown in your browser's time zone. A schedule whose cron
-expression uses another zone names it on its row.
+before this change) until you move them, as described below. Upcoming runs, each
+schedule's next run, and skipped and failed runs are shown in your browser's time zone. A
+schedule whose cron expression uses another zone names it on its row.
 
 On the days the clocks change, a schedule still runs once. A time in the hour the clocks
 skip runs when they jump past it, and a time in the hour they repeat runs the first time the
@@ -201,18 +201,26 @@ A schedule keeps running after its author loses access to the server, and after 
 account is deleted, when it shows an unnamed author. Disable or delete schedules you no
 longer want.
 
-To move a schedule to another time, choose the pencil on its row, set the new time in the
-form below the list and choose **Save new time**. What it runs, its steps and its waiting
-rules stay as they are, and it takes your current time zone. The form does not load the
-schedule's present time: it shows whatever it last held, so set the time you want.
+To change a schedule, choose the pencil on its row. The form below the list fills with its
+time, its steps and its waiting rules; change any of them and choose **Save changes**. What it
+runs cannot change, and the schedule keeps its run history and its author. Only the fields you
+changed are saved, so editing a sequence's steps or the waiting rules leaves its next run as it
+was. Changing the time moves the next run to the new time. A run already waiting for players
+stops waiting when you change the time, turn waiting off, or leave the sequence with no step
+that stops the server, which also turns waiting off.
+
+The times in the form are in the schedule's own time zone, which the form names. When that
+differs from yours, the form offers a switch, **Run it in** followed by your zone and
+**instead**, that moves the schedule to your zone; the times in the form are then read in
+your zone. A cron expression you wrote by hand opens as **Cron expression**, as written.
 
 **Upcoming runs** lists the next runs of every enabled schedule, earliest first.
 
 A scheduled restart or backup stops the server and disconnects its players. To avoid that,
-turn on **Wait until no players are connected** when you add the schedule. A due run then
-waits until the server is empty. **Wait at most** caps the wait; after it, the run starts
-with players connected. Valmin reads the player count from the server log, and it can be
-unknown for up to 10 minutes after the server starts. **If the player count is unknown**
+turn on **Wait until no players are connected** when you add or edit the schedule. A due
+run then waits until the server is empty. **Wait at most** caps the wait; after it, the run
+starts with players connected. Valmin reads the player count from the server log, and it can
+be unknown for up to 10 minutes after the server starts. **If the player count is unknown**
 chooses what that means: **Wait, as if players are connected** or **Run, as if the server
 is empty**. A waiting run shows a **waiting for players** badge in the schedule list, heads
 **Upcoming runs**, and shows a notice on the server's overview page, each with the latest
