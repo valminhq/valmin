@@ -162,8 +162,10 @@ func (s *Sessions) Authenticate(ctx context.Context, cookieValue string) (*store
 
 	// Throttled per 10 §4.1: at most one write per touchThrottle, so a live socket
 	// polling this on every frame does not hammer the single writer.
-	if err := s.db.TouchSession(ctx, sess.ID, time.Now(), s.idleTTL, s.throttle); err != nil {
-		return nil, "", fmt.Errorf("touch session: %w", err)
+	if time.Since(sess.LastSeenAt) >= s.throttle {
+		if err := s.db.TouchSession(ctx, sess.ID, time.Now(), s.idleTTL, s.throttle); err != nil {
+			return nil, "", fmt.Errorf("touch session: %w", err)
+		}
 	}
 	return u, sess.ID, nil
 }
