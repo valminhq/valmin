@@ -990,9 +990,36 @@ does not identify individual players or prove how long any one person played.
 
 Operators and administrators also see the accounts the server named in its log, with
 each account's name, platform ID and when it was last seen. Seen means the account
-reached the server, not that it played or was let in. **Copy ID** copies the ID for
-the lists below. The server prints the same names and IDs in its log, so anyone who
-can read the console can see them there.
+reached the server, not that it played or was let in. The server prints the same names
+and IDs in its log, so anyone who can read the console can see them there.
+
+Each account has these actions:
+
+| Action         | Does                                            |
+| -------------- | ----------------------------------------------- |
+| **Ban**        | Adds the ID to **Banned**.                      |
+| **Make admin** | Adds the ID to **Admins**.                      |
+| **Allow**      | Adds the ID to **Allowlist**.                   |
+| **Kick**       | Sends `kick` with the ID to the running server. |
+| **Copy ID**    | Copies the ID.                                  |
+
+Every action except **Copy ID** asks first. Ban, Make admin and Allow save the list
+the same way the editor below does. If someone changed the list in the meantime, the
+panel reads it once more and adds the ID to that version; a second change in that
+moment shows as an error. An ID already on the list, bare or with its prefix, is left
+as it is.
+An editor with no unsaved edits shows the change at once. If you have unsaved edits,
+saving them shows the conflict described under [Player lists](#player-lists).
+Allowing someone on an empty allowlist turns it on, so only players on it may join.
+
+**Kick** appears while the server runs, when it has the RCON mod and you may send
+`kick` (see [Send server commands](#send-server-commands)). It asks the server to
+disconnect the account if it is connected; it can join again unless it is banned. On a
+crossplay server the panel sends the ID as shown, and on a server without crossplay the
+SteamID without its `Steam_` prefix, which is how each names a connection. That is
+worked out from the game's and the mod's code and has not yet been confirmed on a live
+server. The answer, shown under the account, says `Kicked` whether or not the account
+was connected, so check the player count afterwards.
 
 When the server refused an account's latest attempt because of a wrong password, the
 account shows **Refused: wrong password** with the time. The mark clears on the
@@ -1020,8 +1047,16 @@ those servers only names from the server's history and ValminEye are shown.
 
 Administrators open **Players** in the header's **Administration** menu for every
 account any server has seen, newest first, with its names and the servers it was seen
-on. Search matches an ID or any name. Names and counts are the ones above, summed over
-the servers.
+on. Search matches an ID, any name, or a server's name. Names and counts are the ones
+above, summed over the servers.
+
+**Ban on every server** and **Ban on chosen servers** open a list of every server,
+with all of them ticked or only the ones the account was seen on. **Ban on** _N_
+**servers** adds the ID to each ticked server's **Banned** list, one server after
+another. Each server then shows **Banned**, **Already banned**, or why its list could
+not be saved; one failure does not stop the rest. The dialog stays open until the last
+server is done. Every server keeps its own list, and each save is recorded in the audit
+log.
 
 ### Player lists
 
@@ -1034,6 +1069,8 @@ Three lists control who may do what:
 | **Allowlist** | When it has anyone on it, only these players may join. |
 
 Enter one ID per line, bare or with a platform prefix, and choose **Save list**.
+Under the field, each ID shows the names it was [seen](#seen-on-this-server) with on
+this server, or **not seen on this server**. A bare ID matches its prefixed form.
 Comments already in a file are kept but not shown. Saving does not restart the server.
 The game usually picks up the change while running; if it does not, use **Restart
 server** on this page. If someone else changed the list while you edited it, the

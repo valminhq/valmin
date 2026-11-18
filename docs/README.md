@@ -49,6 +49,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | Share a server's setup with another panel       | [Share a server as a template](usage.md#share-a-server-as-a-template)                      |
 | See how two servers differ                      | [Compare two servers](usage.md#compare-two-servers)                                        |
 | Ban, allow or make players admins               | [Player lists](usage.md#player-lists)                                                      |
+| Ban a player on every server                    | [Players across servers](usage.md#players-across-servers)                                  |
 | See when people play                            | [Player activity](usage.md#player-activity)                                                |
 | See which names a player has used, on any server | [Names](usage.md#names), [Players across servers](usage.md#players-across-servers)         |
 | Show server status to people without an account | [Public status page](usage.md#public-status-page)                                          |
