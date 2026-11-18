@@ -47,6 +47,33 @@ func TestClaimJobRejectsSecondHolder(t *testing.T) {
 	}
 }
 
+// TestClaimJobMarksAScheduledJob asserts the claimed job reads as scheduled exactly when it
+// carries a schedule, as its stored row does.
+func TestClaimJobMarksAScheduledJob(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	scheduleID := NewID()
+	exec(t, db.Writer, `INSERT INTO scheduled_jobs (id, kind, cron) VALUES (?, 'backup', '0 3 * * *')`, scheduleID)
+	until := time.Now().Add(30 * time.Second)
+
+	scheduled := newJob(NewID(), "backup", "instance:a")
+	scheduled.ScheduleID = &scheduleID
+	byHand := newJob(NewID(), "backup", "instance:b")
+	for _, j := range []*Job{scheduled, byHand} {
+		if err := db.ClaimJob(t.Context(), j, "panel:boot-a", until, nil); err != nil {
+			t.Fatal(err)
+		}
+		stored, err := db.JobByID(t.Context(), j.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if j.Scheduled != (j.ScheduleID != nil) || stored.Scheduled != j.Scheduled {
+			t.Errorf("job %s: claimed scheduled = %v, stored %v, want both %v",
+				j.ID, j.Scheduled, stored.Scheduled, j.ScheduleID != nil)
+		}
+	}
+}
+
 // TestClaimJobOnClaimRunsInTheSameTransaction proves the seam a state flip needs: a write
 // made by onClaim commits atomically with the lock and job row, and rolls back with them if
 // onClaim fails — a side effect like an instance's transient state must never land only
