@@ -17,9 +17,11 @@ export function jobLabel(kind: string, changes?: JobChange[]): string {
 	return words ? upperFirst(words) : 'Operation';
 }
 
-/** Who started a job: the schedule clock, the person, or the panel itself. */
+/** Who started a job: the schedule clock, a person running a schedule by hand, the person, or
+ * the panel itself. */
 export function jobActor(job: Pick<Job, 'requested_by_name' | 'scheduled'>): string {
-	if (job.scheduled) return 'Schedule';
+	if (job.scheduled)
+		return job.requested_by_name ? `Schedule, run by ${job.requested_by_name}` : 'Schedule';
 	return job.requested_by_name || 'Panel';
 }
 

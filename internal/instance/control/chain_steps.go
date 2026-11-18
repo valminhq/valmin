@@ -13,11 +13,13 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// StepOrigin records who asked for a step's job: the schedule that fired it, or the person who
-// requested it.
+// StepOrigin records who asked for a step's job: the schedule that fired it, the person who
+// requested it, or both when a person runs a schedule by hand. Audit is the entry recorded with
+// the job, nil for none.
 type StepOrigin struct {
 	ScheduleID  string
 	RequestedBy string
+	Audit       *store.AuditEntry
 }
 
 // errSatisfied is returned by SubmitStep when the instance is already where the step leads, so
@@ -35,6 +37,7 @@ func (c *Chainer) SubmitStep(
 		return c.Backupper.Submit(ctx, &BackupSubmission{
 			Instance: inst, ContainerID: deref(inst.ContainerID), Mode: BackupQuiesced,
 			RequestedBy: origin.RequestedBy, ScheduleID: origin.ScheduleID, Trigger: step.Trigger,
+			Audit: origin.Audit,
 		})
 	case StepStop:
 		return c.submitStop(ctx, inst, origin)
@@ -62,7 +65,7 @@ func (c *Chainer) submitStop(ctx context.Context, inst *store.Instance, origin S
 	return c.Stopper.Submit(ctx, &StopSubmission{
 		Instance: inst, ContainerID: deref(inst.ContainerID),
 		RequestedBy: origin.RequestedBy, ScheduleID: origin.ScheduleID,
-		Archive: origin.ScheduleID != "",
+		Archive: origin.ScheduleID != "", Audit: origin.Audit,
 	})
 }
 
@@ -77,7 +80,7 @@ func (c *Chainer) submitStart(ctx context.Context, inst *store.Instance, origin 
 	}
 	return c.Starter.Submit(ctx, &StartSubmission{
 		Instance: inst, ContainerID: containerID,
-		RequestedBy: origin.RequestedBy, ScheduleID: origin.ScheduleID,
+		RequestedBy: origin.RequestedBy, ScheduleID: origin.ScheduleID, Audit: origin.Audit,
 	})
 }
 
@@ -92,7 +95,7 @@ func (c *Chainer) submitRestart(ctx context.Context, inst *store.Instance, origi
 	}
 	return c.Restarter.Submit(ctx, &RestartSubmission{
 		Instance: inst, ContainerID: containerID,
-		RequestedBy: origin.RequestedBy, ScheduleID: origin.ScheduleID,
+		RequestedBy: origin.RequestedBy, ScheduleID: origin.ScheduleID, Audit: origin.Audit,
 	})
 }
 
@@ -103,6 +106,7 @@ func (c *Chainer) submitGameUpdate(ctx context.Context, inst *store.Instance, or
 	}
 	return c.GameUpdater.Submit(ctx, &GameUpdateSubmission{
 		Instance: inst, RequestedBy: origin.RequestedBy, ScheduleID: origin.ScheduleID,
+		Audit: origin.Audit,
 	})
 }
 

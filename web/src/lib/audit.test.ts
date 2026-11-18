@@ -309,6 +309,12 @@ describe('summaries of recorded actions', () => {
 			'schedules.delete',
 			{ kind: 'backup', cron: '0 4 * * *' },
 			'Alex deleted the backup schedule (0 4 * * *) on Viking World'
+		],
+		[
+			'a schedule run by hand',
+			'schedules.run',
+			{ kind: 'chain' },
+			'Alex ran the chain schedule now on Viking World'
 		]
 	];
 
@@ -535,6 +541,7 @@ describe('action labels', () => {
 	const cases: Array<[action: string, expected: string]> = [
 		['instances.mods.install', 'Mod installed'],
 		['schedules.delete', 'Schedule deleted'],
+		['schedules.run', 'Schedule run now'],
 		['users.password.reset', 'Users password reset'],
 		['users.password.change', 'Users password changed'],
 		['instance.adopt', 'Instance adopt'],

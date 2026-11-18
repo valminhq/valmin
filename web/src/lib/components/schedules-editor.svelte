@@ -52,6 +52,7 @@
 	import ArrowUp from '@lucide/svelte/icons/arrow-up';
 	import ArrowDown from '@lucide/svelte/icons/arrow-down';
 	import Plus from '@lucide/svelte/icons/plus';
+	import Play from '@lucide/svelte/icons/play';
 	import { warningText } from '#lib/tone.js';
 
 	let { instance }: { instance: Instance } = $props();
@@ -346,6 +347,7 @@
 	async function act(call: () => Promise<unknown>) {
 		saving = true;
 		failure = null;
+		started = null;
 		try {
 			await call();
 			await load();
@@ -452,6 +454,42 @@
 		deleteOpen = true;
 	}
 
+	/** The schedule whose run now is being confirmed, and the label of the last one started. */
+	let runTarget = $state<Schedule | null>(null);
+	let runOpen = $state(false);
+	let started = $state<string | null>(null);
+
+	/** What running s now does, for its confirmation, as saved rather than as the form holds it. */
+	function runDescription(s: Schedule): string {
+		const what = s.steps ? `${label(s.kind)}: ${describeSteps(s.steps)}.` : `${label(s.kind)}.`;
+		const stops = s.steps
+			? stopsServer(s.steps)
+			: (scheduleKinds.find((k) => k.kind === s.kind)?.playerAware ?? false);
+		return [
+			what,
+			stops && 'Connected players are disconnected.',
+			`It runs now${s.wait_for_empty ? ' without waiting for players to leave' : ''}, and its next run stays as it is.`,
+			formDirty && editBase?.id === s.id && 'It runs as saved, without the changes in the form.'
+		]
+			.filter(Boolean)
+			.join(' ');
+	}
+
+	function askRun(s: Schedule) {
+		runTarget = s;
+		runOpen = true;
+	}
+
+	/** Starts the confirmed schedule's run now. */
+	function runNow() {
+		const target = runTarget;
+		if (!target) return;
+		void act(async () => {
+			await schedules.run(target.id);
+			started = label(target.kind);
+		});
+	}
+
 	const label = kindLabel;
 
 	function when(iso: string | null): string {
@@ -474,6 +512,9 @@
 			</p>
 		{:else}
 			<Problem error={failure} />
+			<p class={['text-sm text-muted-foreground', !started && 'sr-only']} role="status">
+				{started ? `Started “${started}”. Its progress shows in the server’s job history.` : ''}
+			</p>
 
 			{#if !loading && mine.length > 0}
 				<section class="grid gap-2" aria-labelledby="upcoming-runs">
@@ -513,7 +554,7 @@
 				<div class="grid gap-2">
 					{#each mine as s (s.id)}
 						<div class="flex flex-wrap items-center gap-3 rounded-lg border p-3">
-							<div class="grid flex-1 gap-1">
+							<div class="grid min-w-0 grow basis-64 gap-1">
 								<div class="flex flex-wrap items-center gap-2">
 									<span class="text-sm font-medium">{label(s.kind)}</span>
 									<Badge variant="outline" class="font-mono">{s.cron}</Badge>
@@ -539,22 +580,29 @@
 									</p>
 								{/if}
 							</div>
-							<Switch
-								checked={s.enabled}
-								disabled={saving}
-								onCheckedChange={(v) => toggle(s, v)}
-								aria-label="Enable {label(s.kind)} schedule"
-							/>
-							{#if canEdit(s)}
-								<Button variant="ghost" size="sm" disabled={saving} onclick={() => edit(s)}>
-									<Pencil />
-									<span class="sr-only">Edit the {label(s.kind)} schedule</span>
+							<div class="flex items-center gap-1">
+								<Switch
+									checked={s.enabled}
+									disabled={saving}
+									onCheckedChange={(v) => toggle(s, v)}
+									aria-label="Enable {label(s.kind)} schedule"
+								/>
+								{#if canEdit(s) && !s.deferred_since}
+									<Button variant="ghost" size="sm" disabled={saving} onclick={() => askRun(s)}>
+										<Play /> Run now<span class="sr-only">: {label(s.kind)}</span>
+									</Button>
+								{/if}
+								{#if canEdit(s)}
+									<Button variant="ghost" size="sm" disabled={saving} onclick={() => edit(s)}>
+										<Pencil />
+										<span class="sr-only">Edit the {label(s.kind)} schedule</span>
+									</Button>
+								{/if}
+								<Button variant="ghost" size="sm" disabled={saving} onclick={() => ask(s)}>
+									<Trash2 />
+									<span class="sr-only">Delete schedule</span>
 								</Button>
-							{/if}
-							<Button variant="ghost" size="sm" disabled={saving} onclick={() => ask(s)}>
-								<Trash2 />
-								<span class="sr-only">Delete schedule</span>
-							</Button>
+							</div>
 						</div>
 					{/each}
 				</div>
@@ -902,4 +950,12 @@
 		: 'another schedule'} replaces them."
 	confirmLabel="Discard changes"
 	onconfirm={discardAndEdit}
+/>
+
+<DestructiveConfirm
+	bind:open={runOpen}
+	title="Run this schedule now?"
+	description={runTarget ? runDescription(runTarget) : ''}
+	confirmLabel="Run now"
+	onconfirm={runNow}
 />

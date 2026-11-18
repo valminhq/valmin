@@ -48,7 +48,11 @@ describe('who started a job', () => {
 	const cases: Array<[name: string, job: Pick<Job, 'requested_by_name' | 'scheduled'>, string]> = [
 		['a person', { requested_by_name: 'ada' }, 'ada'],
 		['a schedule', { scheduled: true }, 'Schedule'],
-		['a schedule over a stale name', { scheduled: true, requested_by_name: 'ada' }, 'Schedule'],
+		[
+			'a schedule run by hand',
+			{ scheduled: true, requested_by_name: 'ada' },
+			'Schedule, run by ada'
+		],
 		['nobody the panel can name', {}, 'Panel'],
 		['an empty name', { requested_by_name: '' }, 'Panel']
 	];
