@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+	buildCron,
 	clockChanges,
+	defaultCronForm,
 	describeSteps,
+	hourChoices,
+	monthDays,
+	readCron,
+	type CronForm,
 	formatInstant,
 	inClockChange,
 	kindLabel,
@@ -161,5 +167,62 @@ describe('clockChanges', () => {
 			true,
 			false
 		]);
+	});
+});
+
+describe('readCron', () => {
+	const form = (f: Partial<CronForm>): CronForm => ({ ...defaultCronForm(), ...f });
+
+	// Every expression the builder can write reads back into controls that write it again.
+	it('reads back every expression the builder writes', () => {
+		const forms: CronForm[] = [];
+		for (const atTime of ['00:00', '04:05', '23:59']) {
+			forms.push(form({ every: 'day', atTime }));
+			for (const monthDay of monthDays) forms.push(form({ every: 'month', atTime, monthDay }));
+			for (const weekdays of [['0'], ['1', '3'], ['6', '0', '2'], ['1', '2', '3', '4', '5', '6']])
+				forms.push(form({ every: 'days', atTime, weekdays }));
+		}
+		for (const everyHours of hourChoices)
+			for (const startAt of ['00:00', '05:30', '11:07', '23:45'])
+				forms.push(form({ every: 'hours', everyHours, startAt }));
+
+		for (const f of forms) {
+			const expr = buildCron(f);
+			const read = readCron(expr);
+			expect(read.every, expr).not.toBe('custom');
+			expect(buildCron(form(read)), expr).toBe(expr);
+		}
+	});
+
+	it.each([
+		{ expr: '30 03 * * *', want: { every: 'day', atTime: '03:30' } },
+		{ expr: '00 04 * * 1,3', want: { every: 'days', atTime: '04:00', weekdays: ['1', '3'] } },
+		{ expr: '15 22 22 * *', want: { every: 'month', atTime: '22:15', monthDay: '22' } },
+		{ expr: '30 5/6 * * *', want: { every: 'hours', everyHours: '6', startAt: '05:30' } },
+		{ expr: '0 */12 * * *', want: { every: 'hours', everyHours: '12', startAt: '00:00' } }
+	])('reads $expr into the controls', ({ expr, want }) => {
+		expect(readCron(expr)).toEqual(want);
+	});
+
+	// None of these is what the builder writes, so none is interpreted.
+	it.each([
+		'0 4 * * *',
+		'@daily',
+		'0 */5 * * *',
+		'00 04 * * 7',
+		'00 04 * * 1-5',
+		'00 04 * * 3,1',
+		'00 04 * * 1,1',
+		'00 04 * * 0,1,2,3,4,5,6',
+		'00 04 31 * *',
+		'00 04 01 * *',
+		'0 7/6 * * *',
+		'0 0/6 * * *',
+		'05 */6 * * *',
+		'60 04 * * *',
+		'00 24 * * *',
+		' 00 04 * * *'
+	])('keeps %j as a written expression', (expr) => {
+		expect(readCron(expr)).toEqual({ every: 'custom', custom: expr });
 	});
 });
