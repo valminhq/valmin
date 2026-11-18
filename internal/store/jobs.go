@@ -127,12 +127,13 @@ func (db *DB) ClaimJobWithLocks(
 	j.CreatedAt = nowT
 	j.StartedAt = &nowT
 	j.Attempt = 1
+	j.Scheduled = j.ScheduleID != nil
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO job_runs (
 			id, kind, status, lock_key, instance_id, instance_name, schedule_id, scheduled, payload,
 			resume_after, progress, lease_owner, lease_until, requested_by, attempt, created_at, started_at
 		) VALUES (?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 1, ?, ?)`,
-		j.ID, j.Kind, j.LockKey, j.InstanceID, j.InstanceName, j.ScheduleID, j.ScheduleID != nil, j.Payload,
+		j.ID, j.Kind, j.LockKey, j.InstanceID, j.InstanceName, j.ScheduleID, j.Scheduled, j.Payload,
 		j.ResumeAfter, owner, FormatTime(leaseUntil), j.RequestedBy, now, now,
 	); err != nil {
 		return fmt.Errorf("insert job run %s: %w", j.ID, err)
