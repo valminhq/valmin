@@ -20,9 +20,13 @@ function list(ids: string[], etag: string): Response {
 
 async function open(
 	held: string[],
-	{ admins = ['76561198000000001'], state = 'running' }: { admins?: string[]; state?: string } = {}
+	{
+		admins = ['76561198000000001'],
+		state = 'running',
+		crossplay = false
+	}: { admins?: string[]; state?: string; crossplay?: boolean } = {}
 ) {
-	daemon.on('GET', '/instances/inst-a', () => Response.json(instance({ state })));
+	daemon.on('GET', '/instances/inst-a', () => Response.json(instance({ state, crossplay })));
 	daemon.on('GET', '/instances/inst-a/admins', () => list(admins, '"a1"'));
 	daemon.on('GET', '/instances/inst-a/bans', () => list([], '"b1"'));
 	daemon.on('GET', '/instances/inst-a/permitted', () => list([], '"p1"'));
@@ -246,5 +250,116 @@ describe('the seen-players list', () => {
 
 		expect(await screen.findByText('Kari')).toBeTruthy();
 		expect(screen.getByText('maybe Newbald · 2×')).toBeTruthy();
+	});
+});
+
+// Row actions write the same list files through the same conditional write as the editors.
+describe('the seen-players actions', () => {
+	const bans = () => daemon.requests('PUT', '/instances/inst-a/bans');
+	const kari = 'Steam_76561198000000007';
+
+	/** Picks an action on Kari's row and confirms it. */
+	async function act(name: string, confirm: string) {
+		await click(await screen.findByRole('button', { name: `${name} ${kari}` }));
+		const dialog = await screen.findByRole('dialog');
+		await click(within(dialog).getByRole('button', { name: confirm }));
+	}
+
+	it('names a listed id, bare or prefixed, after the account the server saw', async () => {
+		await open([actions.view, actions.playersManage], {
+			admins: ['76561198000000007', 'Steam_76561198000000008', 'stranger']
+		});
+		const names = within(await card('Admins')).getByRole('list', { name: 'Admins: names' });
+
+		expect(within(names).getByText('76561198000000007').closest('li')?.textContent).toContain(
+			'Kari'
+		);
+		expect(within(names).getByText('stranger').closest('li')?.textContent).toContain(
+			'not seen on this server'
+		);
+	});
+
+	it('bans through the list write, with its ETag, and reloads the Banned list', async () => {
+		await open([actions.view, actions.playersManage]);
+		await card('Banned');
+		daemon.on('PUT', '/instances/inst-a/bans', () => list([kari], '"b2"'));
+
+		await act('Ban', 'Ban');
+		await vi.waitFor(() => expect(bans()).toHaveLength(1));
+		expect(bans()[0].headers['If-Match']).toBe('"b1"');
+		expect(bans()[0].body).toEqual({ ids: [kari] });
+
+		daemon.on('GET', '/instances/inst-a/bans', () => list([kari], '"b2"'));
+		const notice = await screen.findByText('Added to Banned.');
+		expect(notice.closest('li')?.textContent, 'on the row acted on').toContain(kari);
+	});
+
+	it('re-reads and appends once more when the list changed under it', async () => {
+		await open([actions.view, actions.playersManage]);
+		let reads = 0;
+		daemon.on('GET', '/instances/inst-a/bans', () =>
+			++reads < 3 ? list([], '"b1"') : list(['other'], '"b5"')
+		);
+		daemon.on('PUT', '/instances/inst-a/bans', () =>
+			bans().length === 1
+				? envelope(412, 'stale_write', 'The list changed since you opened it.')
+				: list(['other', kari], '"b6"')
+		);
+		await card('Banned');
+
+		await act('Ban', 'Ban');
+		await vi.waitFor(() => expect(bans()).toHaveLength(2));
+		expect(bans()[1].headers['If-Match']).toBe('"b5"');
+		expect(bans()[1].body).toEqual({ ids: ['other', kari] });
+	});
+
+	it('writes nothing for an id already on the list, even in its bare form', async () => {
+		await open([actions.view, actions.playersManage]);
+		daemon.on('GET', '/instances/inst-a/bans', () => list(['76561198000000007'], '"b1"'));
+		await card('Banned');
+
+		await act('Ban', 'Ban');
+		expect(await screen.findByText('Already on Banned.')).toBeTruthy();
+		expect(bans()).toHaveLength(0);
+	});
+
+	it('warns that allowing someone can turn the allowlist on', async () => {
+		await open([actions.view, actions.playersManage]);
+		await click(await screen.findByRole('button', { name: `Allow ${kari}` }));
+		expect(within(await screen.findByRole('dialog')).getByText(/turns it on/)).toBeTruthy();
+	});
+
+	// The game matches a connection's host name: the platform id on crossplay, the bare
+	// SteamID on a Steam-only server.
+	it.each([
+		{ crossplay: true, command: `kick ${kari}` },
+		{ crossplay: false, command: 'kick 76561198000000007' }
+	])(
+		'kicks crossplay=$crossplay by the id the game names the connection with',
+		async ({ crossplay, command }) => {
+			daemon.on('GET', '/instances/inst-a/capabilities', () =>
+				Response.json({ command_channel: 'rcon', allowed_commands: ['kick'] })
+			);
+			daemon.on('POST', '/instances/inst-a/commands', () =>
+				Response.json({ accepted: true, output: 'Kicked Steam_76561198000000007' })
+			);
+			await open([actions.view, actions.playersManage, actions.commandsSend], { crossplay });
+
+			await act('Kick', 'Kick');
+
+			await vi.waitFor(() =>
+				expect(daemon.requests('POST', '/instances/inst-a/commands')).toHaveLength(1)
+			);
+			expect(daemon.requests('POST', '/instances/inst-a/commands')[0].body).toEqual({ command });
+		}
+	);
+
+	it('offers no kick on a stopped server', async () => {
+		daemon.on('GET', '/instances/inst-a/capabilities', () =>
+			Response.json({ command_channel: 'rcon', allowed_commands: [] })
+		);
+		await open([actions.view, actions.playersManage, actions.commandsSend], { state: 'stopped' });
+		await screen.findByRole('button', { name: `Ban ${kari}` });
+		expect(screen.queryByRole('button', { name: `Kick ${kari}` })).toBeNull();
 	});
 });
