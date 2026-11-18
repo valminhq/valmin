@@ -161,8 +161,8 @@ the server first starts, which matters for mods that shape world generation.
 ### Start from an existing world
 
 Open **Start from an existing world** and choose the world folder under
-`worlds_local`, a ZIP of that folder, or both the `.db` and `.fwl` files of an older
-save. Keep the page open until provisioning and import finish. The imported files
+`worlds_local`, a ZIP of that folder, a world backup `.tar.gz` downloaded from a Valmin
+server, or both the `.db` and `.fwl` files of an older save. Keep the page open until provisioning and import finish. The imported files
 are renamed to the world name you entered. The server stays stopped during the import
 and starts after it when **Start server after setup** is on. See
 [import a world](#import-a-world) for the rules.
@@ -474,9 +474,10 @@ Administrators find **Delete this server** under **Manage server** at the bottom
 Deleting removes the container, the game installation with its mods and
 configuration, the logs, and the server's settings in the panel. The world files under
 `instances/<id>/worlds/` and the backup archives under `backups/<id>/` stay in the data
-root. No server lists them again, and they cannot be attached to another server. Copy out
-what you want to keep, for example to [import a world](#import-a-world) into another
-server, and delete the folders when you no longer need them.
+root. Administrators can still bring a world back from those backups through
+[Import from a backup](#import-a-world) on any server, under **Deleted servers**. The
+world folders are not listed anywhere; copy out what you want to keep and delete the
+folders when you no longer need them.
 
 ## Update the game
 
@@ -584,8 +585,10 @@ Bring a save from a single-player game or another server, either on the
 [creation form](#start-from-an-existing-world) or, for an existing stopped server,
 under **Import world** on **Backups**.
 
-Choose the world folder under `worlds_local`, a ZIP of that folder, or both the `.db`
-and `.fwl` files of an older save. Keep the complete folder for saves that include
+Choose the world folder under `worlds_local`, a ZIP of that folder, a world backup
+`.tar.gz` downloaded from a Valmin server, or both the `.db` and `.fwl` files of an
+older save. A backup that holds several worlds is refused; import one world at a time.
+Keep the complete folder for saves that include
 chunk files. The files are checked before anything is written and renamed to the
 server's world name. On an existing server, the current world is backed up first, so
 an import can be undone from the backups list. Type the world's name to confirm.
@@ -593,6 +596,14 @@ an import can be undone from the backups list. Type the world's name to confirm.
 The game keeps its own older saves, such as `.old` files. The importer refuses those
 unless you turn on **Import an older game backup**, which restores the world to that
 earlier save.
+
+**Import from a backup**, below the upload, takes the world from a backup that is
+already on this host, with no download. Choose a server and one of its backups; servers
+appear when you can download their backups. Administrators also see **Deleted
+servers**: the backups a deleted server left behind. If the backup holds more than one
+world, choose which one to import. The backup itself is not changed, and the rest works
+as an upload does: the world is checked, renamed to this server's world name, and the
+current world is backed up first.
 
 ### Worlds on disk
 
