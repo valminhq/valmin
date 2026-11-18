@@ -174,8 +174,17 @@ func (db *DB) DueRemoteCopies(ctx context.Context, now time.Time) ([]RemoteCopy,
 }
 
 // ReconcileRemoteCopies settles uploads whose job is gone, cancelled or failed or back to retry,
-// and fails waiting uploads whose deadline passed or whose server or archive is gone.
+// and fails waiting uploads whose deadline passed or whose server or archive is gone. With no
+// copy in flight it returns after one read, without taking the writer.
 func (db *DB) ReconcileRemoteCopies(ctx context.Context) error {
+	var active bool
+	if err := db.Reader.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM remote_copies
+ WHERE status IN ('pending','retry_wait','uploading'))`).Scan(&active); err != nil {
+		return fmt.Errorf("check remote copies: %w", err)
+	}
+	if !active {
+		return nil
+	}
 	_, err := db.Writer.ExecContext(ctx, `UPDATE remote_copies SET status=CASE
  WHEN cancel_requested=TRUE THEN 'cancelled'
  WHEN deadline_at<=? THEN 'failed' ELSE 'retry_wait' END,
