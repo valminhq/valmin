@@ -50,6 +50,7 @@ B- GET /api/v1/audit/filters
 B- POST /api/v1/auth/login
 B- POST /api/v1/auth/logout
 B- GET /api/v1/auth/me
+B- GET /api/v1/backups/orphaned
 B- GET /api/v1/game/options
 B- GET /api/v1/game/patch-notes
 B- GET /api/v1/instances
@@ -158,6 +159,7 @@ B- PATCH /api/v1/instances/{id}/webhooks/{wid}
 B- POST /api/v1/instances/{id}/webhooks/{wid}/test
 B- GET /api/v1/instances/{id}/worlds
 SL POST /api/v1/instances/{id}/worlds/import
+S- POST /api/v1/instances/{id}/worlds/import-backup
 B- DELETE /api/v1/instances/{id}/worlds/{name}
 B- POST /api/v1/instances/{id}/worlds/{name}/restore
 B- GET /api/v1/invites

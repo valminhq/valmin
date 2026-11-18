@@ -125,6 +125,7 @@ var instanceRouteAccess = map[string]string{
 	"POST /api/v1/instances/{id}/webhooks/{wid}/test":             "notifications.manage",
 	"GET /api/v1/instances/{id}/worlds":                           accessView,
 	"POST /api/v1/instances/{id}/worlds/import":                   "world.import",
+	"POST /api/v1/instances/{id}/worlds/import-backup":            "world.import",
 	"DELETE /api/v1/instances/{id}/worlds/{name}":                 "world.import",
 	"POST /api/v1/instances/{id}/worlds/{name}/restore":           "world.import",
 }
@@ -179,6 +180,7 @@ var globalRouteAccess = map[string]string{
 	"GET /api/v1/instances/inbox":                         accessMember,
 	"POST /api/v1/instances/manifest/preview":             accessAdmin,
 	"GET /api/v1/instances/orphans":                       accessAdmin,
+	"GET /api/v1/backups/orphaned":                        accessAdmin,
 	"GET /api/v1/invites":                                 accessHidden,
 	"POST /api/v1/invites":                                accessHidden,
 	"DELETE /api/v1/invites/{id}":                         accessHidden,

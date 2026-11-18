@@ -41,6 +41,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | See or undo earlier versions of a config file   | [Compare with an earlier version](usage.md#compare-with-an-earlier-version)                |
 | Import, reset or roll back a world              | [Manage worlds](usage.md#manage-worlds)                                                    |
 | Back up and restore a world                     | [Back up or restore a world](operations.md#back-up-or-restore-a-world)                     |
+| Move a world or backup to another server        | [Import a world](usage.md#import-a-world)                                                  |
 | Keep backups off the host                       | [Remote backups](remote-backups.md)                                                        |
 | Find out when a backup holds a broken world     | [World check](operations.md#world-check)                                                   |
 | See what happened between two backups           | [Compare two backups](operations.md#compare-two-backups)                                   |
