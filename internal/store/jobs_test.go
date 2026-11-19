@@ -596,3 +596,89 @@ func TestUsernamesByID(t *testing.T) {
 		})
 	}
 }
+
+// TestJobListsLeaveTheLogOut asserts the history and running lists read no log, while one job's
+// detail and the stale sweep, which writes the log back, still read it.
+func TestJobListsLeaveTheLogOut(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	ctx := t.Context()
+	instanceID := seedInstance(t, db, NewID(), 2491)
+	id := NewID()
+	exec(t, db.Writer, `
+		INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name, payload,
+			lease_owner, log, created_at, started_at)
+		VALUES (?, 'start', 'running', ?, ?, 'test', '{}', 'gone:boot', 'line one', ?, ?)`,
+		id, "instance:"+id, instanceID, Now(), Now())
+
+	listed, err := db.ListJobsForInstance(ctx, instanceID, "", "", 10, JobFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, err := db.RunningJobs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, jobs := range map[string][]Job{"history": listed, "running": running} {
+		if len(jobs) != 1 || jobs[0].ID != id || jobs[0].Log != nil {
+			t.Errorf("%s = %+v, want the one job without its log", name, jobs)
+		}
+	}
+
+	detail, err := db.JobByID(ctx, id)
+	if err != nil || detail == nil || detail.Log == nil || *detail.Log != "line one" {
+		t.Errorf("JobByID = %+v, %v; want the log", detail, err)
+	}
+	stale, err := db.StaleJobs(ctx, "this:boot")
+	if err != nil || len(stale) != 1 || stale[0].Log == nil {
+		t.Errorf("StaleJobs = %+v, %v; want the job with its log", stale, err)
+	}
+}
+
+// TestLatestJobsPickTheNewestPerGroup asserts the terminal read returns the newest terminal job
+// of each instance and kind, global jobs grouped by kind, and the clean read the newest job per
+// instance that recorded a clean flag.
+func TestLatestJobsPickTheNewestPerGroup(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	ctx := t.Context()
+	instanceID := seedInstance(t, db, NewID(), 2496)
+	base := time.Now().Add(-time.Hour)
+	insert := func(kind, status string, instance *string, clean *bool, age time.Duration) string {
+		t.Helper()
+		id := NewID()
+		exec(t, db.Writer, `
+			INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name, payload,
+				clean, created_at)
+			VALUES (?, ?, ?, ?, ?, 'test', '{}', ?, ?)`,
+			id, kind, status, "lock:"+id, instance, clean, FormatTime(base.Add(-age)))
+		return id
+	}
+	yes, no := true, false
+	insert("stop", "succeeded", &instanceID, &yes, 3*time.Minute)
+	newestStop := insert("stop", "failed", &instanceID, &no, 2*time.Minute)
+	backup := insert("backup", "succeeded", &instanceID, nil, time.Minute)
+	insert("update_check", "failed", nil, nil, 2*time.Minute)
+	newestCheck := insert("update_check", "succeeded", nil, nil, time.Minute)
+	insert("stop", "running", &instanceID, nil, 0)
+
+	terminal, err := db.LatestTerminalJobPerInstanceKind(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, j := range terminal {
+		got[j.ID] = true
+	}
+	if len(terminal) != 3 || !got[newestStop] || !got[backup] || !got[newestCheck] {
+		t.Errorf("latest terminal jobs = %v, want the newest stop, the backup and the newest check", got)
+	}
+
+	clean, err := db.LatestCleanSignalPerInstance(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(clean) != 1 || clean[0].ID != newestStop || clean[0].Clean == nil || *clean[0].Clean {
+		t.Errorf("latest clean signals = %+v, want the newest stop with clean=false", clean)
+	}
+}
