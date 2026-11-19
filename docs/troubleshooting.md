@@ -213,7 +213,7 @@ SteamCMD and checks the mod registries from the panel's own container.
 ## The mod catalogue is empty or out of date
 
 The panel searches its own copy of each registry's index and refreshes it on the
-interval set by `VALMIN_THUNDERSTORE_SYNC_INTERVAL`, one hour by default. A fresh
+interval set by `VALMIN_THUNDERSTORE_SYNC_INTERVAL`, six hours by default. A fresh
 install has no catalogue until that first refresh finishes, and the **Mods** screen
 says which registry it is still waiting for.
 
@@ -229,6 +229,12 @@ or upstream problem rather than a typo.
 Hexium serves no cache validators, so it re-downloads its whole index on every
 refresh by design. That is expected traffic of a few megabytes per interval and not
 a fault; set `VALMIN_HEXIUM_ENABLED=false` if it is unwanted.
+
+A mod download that fails with "download exceeds size limit: … downloaded N bytes,
+mod_versions declared M" is not a size cap: the registry now serves different bytes under
+that version than the catalogue recorded, because Hexium republishes versions in place. An
+admin can refresh the catalogue with the button beside **Catalogue updated** on **Browse
+mods**; otherwise the next scheduled refresh fixes it. Then try again.
 
 ## A profile code is not found
 
