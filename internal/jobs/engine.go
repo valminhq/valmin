@@ -57,7 +57,7 @@ type Engine struct {
 
 // Announce registers a state publisher. The engine is one of the two writers of
 // instances.state, and calls every publisher only after a claim or finish transaction has
-// committed, never from inside one.
+// committed, never from inside one; AnnounceInstance calls them for a handler's committed write.
 //
 // Two call sites here cover every job-driven flip, rather than one at each OnClaim and
 // OnFinish.
@@ -65,6 +65,12 @@ func (e *Engine) Announce(fn func(ctx context.Context, instanceID string)) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.announce = append(e.announce, fn)
+}
+
+// AnnounceInstance calls every registered publisher for instanceID, after a handler commits a
+// change outside a job.
+func (e *Engine) AnnounceInstance(ctx context.Context, instanceID string) {
+	e.announced(ctx, &instanceID)
 }
 
 // announced publishes a state change for an instance to every registered publisher.

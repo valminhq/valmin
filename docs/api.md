@@ -1596,6 +1596,10 @@ Available topics:
 
 The server checks permission per topic and replies with `subscribed` or `error`.
 
+A `state` message is also sent, with the state unchanged, when a job on the server starts or
+finishes and when its setup operation is abandoned. Read `GET /instances/{id}/jobs` and
+`GET /instances/{id}/operation` again on each one.
+
 `{"type":"mods","instance":"ID"}` means the mod install queue submitted an install, or one
 finished with nothing queued after it. Read `GET /instances/{id}/mods` and
 `GET /instances/{id}/mods/queue` again.

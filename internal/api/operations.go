@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -167,6 +168,7 @@ func (h *Instances) abandonOperation(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
+	h.Engine.AnnounceInstance(context.WithoutCancel(r.Context()), id)
 	op.State = store.OperationAbandoned
 	JSON(w, r, http.StatusOK, toOperationView(op, steps))
 }
