@@ -114,6 +114,24 @@ export const PANEL_EVENTS: PanelEvent[] = [
 		}
 	},
 	{
+		kind: 'update_test_finished',
+		group: 'Maintenance',
+		label: 'Update test finished',
+		when: 'An update test on a copy of a server ended, whether every mod loaded or not.',
+		headline: 'Update test finished',
+		accent: '#5865F2',
+		template:
+			'**Result:** {status}\n**Game build:** {build}\n**Mods updated:** {mods}\n**Failed to load:** {failed_mods}\n**Finished:** {time}',
+		placeholders: ['status', 'build', 'mods', 'failed_mods', 'time', 'server', 'event'],
+		sample: {
+			status: 'Not every mod loaded: 1 failed: EpicLoot. Not applied.',
+			build: '21981590 to 22110001',
+			mods: 'ValheimModding-Jotunn 2.20.2, RandyKnapp-EpicLoot 0.10.4',
+			failed_mods: 'RandyKnapp-EpicLoot',
+			time: SERVER_TIME
+		}
+	},
+	{
 		kind: 'power_cut',
 		group: 'Server status',
 		label: 'Power cut soon',
@@ -300,15 +318,21 @@ export const TIMED: RuleKind[] = [
 	'stale_backup',
 	'backup_attention',
 	'instance_down',
-	'game_updated'
+	'game_updated',
+	'update_test_finished'
 ];
 /** Whether a kind is a condition, sent when it opens and edited when it clears, rather than a
  * one-off event. */
 export const isCondition = (kind: RuleKind) =>
 	PANEL_EVENTS.some((e) => e.kind === kind) &&
-	!['server_started', 'server_stopped', 'power_cut', 'instance_down', 'game_updated'].includes(
-		kind
-	);
+	![
+		'server_started',
+		'server_stopped',
+		'power_cut',
+		'instance_down',
+		'game_updated',
+		'update_test_finished'
+	].includes(kind);
 
 /** alerts.Params.Defaults: what an empty threshold means. */
 export const DEFAULT_CRASH_COUNT = 3;

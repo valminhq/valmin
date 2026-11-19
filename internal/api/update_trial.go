@@ -107,11 +107,15 @@ func (h *Instances) applyUpdateTest(w http.ResponseWriter, r *http.Request) {
 	Accepted(w, r, job.ID, toJobView(job))
 }
 
-// writeUpdateTestError answers the refusals of an update test or its apply.
+// writeUpdateTestError answers the refusals of an update test or its apply, and any other job
+// submission error as writeJobSubmitError does.
 func writeUpdateTestError(w http.ResponseWriter, r *http.Request, err error) {
 	var exists *control.UpdateTestExistsError
 	var lowMemory *control.LowMemoryError
 	switch {
+	case errors.Is(err, errNothingToTest):
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).
+			Msg("No game or mod updates are pending, so there is nothing to test."))
 	case errors.As(err, &exists):
 		apierr.Write(w, r, apierr.New(errcode.InvalidState).With("test_copy_id", exists.CopyID).
 			Msg("This server already has an update test copy. Apply it or discard it first."))

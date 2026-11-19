@@ -187,6 +187,9 @@ func (s *Schedules) submitScheduledInstance(ctx context.Context, sc *store.Sched
 func (s *Schedules) submitSchedule(
 	ctx context.Context, sc *store.Schedule, inst *store.Instance, origin control.StepOrigin,
 ) (*store.Job, error) {
+	if sc.Kind == jobs.KindUpdateTest.String() {
+		return s.submitUpdateTest(ctx, sc, inst, origin)
+	}
 	steps, err := scheduledSteps(sc)
 	if err != nil {
 		return nil, err
@@ -199,4 +202,36 @@ func (s *Schedules) submitSchedule(
 		})
 	}
 	return chainer.SubmitStep(ctx, inst, &steps[0], origin)
+}
+
+// errNothingToTest is a scheduled update test with no game or mod update to try.
+var errNothingToTest = errors.New("no game or mod updates are pending")
+
+// submitUpdateTest queues the update test schedule sc runs on inst: the game unless the last
+// check found it current, and the mods when any update is pending. With neither it refuses with
+// errNothingToTest.
+func (s *Schedules) submitUpdateTest(
+	ctx context.Context, sc *store.Schedule, inst *store.Instance, origin control.StepOrigin,
+) (*store.Job, error) {
+	status, err := observeUpdateStatus(ctx, s.DB, inst)
+	if err != nil {
+		return nil, err
+	}
+	tester := s.Instances.ctl.UpdateTester
+	mods, err := tester.PendingMods(ctx, inst.ID)
+	if err != nil {
+		return nil, err
+	}
+	game := status.UpdateAvailable == nil || *status.UpdateAvailable
+	if !game && len(mods) == 0 {
+		return nil, errNothingToTest
+	}
+	job, err := tester.Submit(ctx, &control.UpdateTestSubmission{
+		Instance: inst, Game: game, Mods: len(mods) > 0, Apply: scheduledApply(sc),
+		RequestedBy: origin.RequestedBy, ScheduleID: origin.ScheduleID, Audit: origin.Audit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("submit scheduled update test: %w", err)
+	}
+	return job, nil
 }

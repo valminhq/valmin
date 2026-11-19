@@ -39,6 +39,7 @@ function schedule(overrides: Partial<Schedule> = {}): Schedule {
 		deferred_until: null,
 		upcoming_runs: [],
 		steps: null,
+		apply: null,
 		...overrides
 	};
 }
@@ -321,6 +322,33 @@ describe('the schedules editor', () => {
 			);
 		});
 
+		it('sends a changed apply choice alone', async () => {
+			await editRow(
+				schedule({
+					kind: 'update_test',
+					apply: true,
+					cron: '30 03 * * *',
+					timezone: 'Asia/Kolkata'
+				}),
+				[actions.gameUpdate]
+			);
+			expect(text(document.body)).toContain('applies the updates when every mod loads');
+			await click(screen.getByLabelText('Apply when every mod loads and nobody is on'));
+			await click(save());
+
+			await vi.waitFor(() => expect(patched()).toHaveLength(1));
+			expect(patched()[0].body).toEqual({ apply: false });
+		});
+
+		it('does not carry an edited apply choice into a new schedule', async () => {
+			await editRow(schedule({ kind: 'update_test', apply: true }), [actions.gameUpdate]);
+			await click(screen.getByRole('button', { name: 'Cancel' }));
+
+			await choose(screen.getByLabelText('What to run'), 'Test updates on a copy');
+			const apply = screen.getByLabelText('Apply when every mod loads and nobody is on');
+			expect(apply.getAttribute('aria-checked')).toBe('false');
+		});
+
 		it('opens an expression the builder did not write as written', async () => {
 			await editRow(schedule({ cron: '30 3 * * *' }), [actions.backupsCreate]);
 			expect((screen.getByLabelText('Cron expression') as HTMLInputElement).value).toBe(
@@ -594,6 +622,29 @@ describe('the schedules editor', () => {
 			max_deferral_seconds: 14400,
 			unknown_players: 'run'
 		});
+	});
+
+	it('sends whether an update test schedule applies what it tested', async () => {
+		await open([actions.gameUpdate]);
+		await choose(screen.getByLabelText('What to run'), 'Test updates on a copy');
+		expect(screen.queryByLabelText('Wait until no players are connected')).toBeNull();
+		await click(screen.getByLabelText('Apply when every mod loads and nobody is on'));
+
+		await click(add());
+		await vi.waitFor(() => expect(created()).toHaveLength(1));
+		expect(created()[0].body).toEqual({
+			instance_id: 'inst-a',
+			kind: 'update_test',
+			cron: '00 04 * * *',
+			timezone: 'Asia/Kolkata',
+			apply: true
+		});
+	});
+
+	it('offers no apply choice for other kinds', async () => {
+		await open([actions.gameUpdate]);
+		await choose(screen.getByLabelText('What to run'), 'Update the game');
+		expect(screen.queryByLabelText('Apply when every mod loads and nobody is on')).toBeNull();
 	});
 
 	it('shows a held run and the latest time it starts', async () => {

@@ -70,6 +70,8 @@ type UpdateTester struct {
 	// ReadyTimeout is the longest a test waits for its copy's world to load before it reads the
 	// mod loader's log.
 	ReadyTimeout time.Duration
+	// Notify announces how a test ended. Nil announces nothing.
+	Notify func(context.Context, *UpdateTestResult)
 }
 
 // UpdateTestPayload is what an update-test job records.
@@ -77,14 +79,40 @@ type UpdateTestPayload struct {
 	Game   bool   `json:"game"`
 	Mods   bool   `json:"mods"`
 	CopyID string `json:"copy_id"`
+	// Apply asks for the tested updates to be applied when every mod loaded and nobody is on.
+	Apply bool `json:"apply,omitempty"`
 }
 
 // UpdateTestSubmission carries the inputs recorded when an update test is queued.
 type UpdateTestSubmission struct {
 	Instance    *store.Instance
 	Game, Mods  bool
+	Apply       bool
 	RequestedBy string
-	Audit       *store.AuditEntry
+	// ScheduleID is the schedule that queued the test, "" for one a person started.
+	ScheduleID string
+	Audit      *store.AuditEntry
+}
+
+// UpdateTestResult is how an update test ended, for its announcement.
+type UpdateTestResult struct {
+	Instance *store.Instance
+	// Error is why the test failed, "" when it ran to the end.
+	Error string
+	// Changes and Verdict are what the copy runs and how its mods loaded, nil when the test
+	// failed or they could not be read.
+	Changes *TestChanges
+	Verdict *TestVerdict
+	// Applying is whether the tested updates are being applied. NotApplied says why an apply
+	// the test asked for is not, and is "" otherwise.
+	Applying   bool
+	NotApplied string
+}
+
+// Unchanged reports whether the copy runs nothing newer than its server, so an apply only
+// deletes the copy.
+func (r *UpdateTestResult) Unchanged() bool {
+	return r.Changes != nil && !r.Changes.GameNewer() && len(r.Changes.Mods) == 0
 }
 
 // Submit queues an update test of sub.Instance. It refuses a server that has a copy already, a
@@ -105,13 +133,13 @@ func (t *UpdateTester) Submit(ctx context.Context, sub *UpdateTestSubmission) (*
 		return nil, err
 	}
 
-	payload := UpdateTestPayload{Game: sub.Game, Mods: sub.Mods, CopyID: store.NewID()}
+	payload := UpdateTestPayload{Game: sub.Game, Mods: sub.Mods, Apply: sub.Apply, CopyID: store.NewID()}
 	id := src.ID
 	job, err := t.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindUpdateTest, LockKey: jobs.ChainLockKey(id),
 		InstanceID: &id, InstanceName: src.Name, RequestedBy: sub.RequestedBy,
-		Payload: payload, Audit: sub.Audit,
-	}, t.runTest(src, &payload, sub.RequestedBy))
+		ScheduleID: sub.ScheduleID, Payload: payload, Audit: sub.Audit,
+	}, t.runTest(src, &payload, StepOrigin{ScheduleID: sub.ScheduleID, RequestedBy: sub.RequestedBy}))
 	if err != nil {
 		return nil, fmt.Errorf("submit update test for instance %s: %w", id, err)
 	}
@@ -145,58 +173,186 @@ func (t *UpdateTester) testCPULimit(src *store.Instance) *float64 {
 }
 
 // runTest is the update-test job: copy the server, put the updates on the copy, boot it and
-// report which mods failed to load. The copy is left running.
-func (t *UpdateTester) runTest(src *store.Instance, p *UpdateTestPayload, requestedBy string) jobs.Runner {
+// report which mods failed to load. The copy is left running. Once the job has finished, a test
+// that was not cancelled applies the updates when it may and announces how it ended.
+func (t *UpdateTester) runTest(src *store.Instance, p *UpdateTestPayload, origin StepOrigin) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
-		jh.Progress(ctx, 5, "copying the server")
-		copyInst, err := t.cloneForTest(ctx, jh, src, p.CopyID, requestedBy)
+		out := t.test(ctx, jh, src, p, origin.RequestedBy)
+		if out.Status != jobs.StatusCancelled {
+			out.AfterFinish = func(ctx context.Context) { t.finishTest(ctx, src.ID, p, origin, out.Error) }
+		}
+		return out
+	}
+}
+
+// test is the work of an update-test job, as runTest describes it.
+func (t *UpdateTester) test(
+	ctx context.Context, jh *jobs.Handle, src *store.Instance, p *UpdateTestPayload, requestedBy string,
+) jobs.Outcome {
+	jh.Progress(ctx, 5, "copying the server")
+	copyInst, err := t.cloneForTest(ctx, jh, src, p.CopyID, requestedBy)
+	if err != nil {
+		return trialFailure(ctx, err, "copy the server")
+	}
+	jh.Log(fmt.Sprintf("the copy is %q, limited to %s", copyInst.Name, limitsText(copyInst)))
+
+	if p.Game {
+		jh.Progress(ctx, 30, "installing the new game build on the copy")
+		err := t.updateGame(ctx, jh, copyInst.ID, "", requestedBy)
 		if err != nil {
-			return trialFailure(ctx, err, "copy the server")
-		}
-		jh.Log(fmt.Sprintf("the copy is %q, limited to %s", copyInst.Name, limitsText(copyInst)))
-
-		if p.Game {
-			jh.Progress(ctx, 30, "installing the new game build on the copy")
-			err := t.updateGame(ctx, jh, copyInst.ID, "", requestedBy)
-			if err != nil {
-				return trialFailure(ctx, err, "update the game on the copy")
-			}
-		}
-		if p.Mods {
-			jh.Progress(ctx, 55, "updating mods on the copy")
-			if err := t.updateMods(ctx, jh, copyInst.ID, nil, requestedBy); err != nil {
-				return trialFailure(ctx, err, "update the mods on the copy")
-			}
-		}
-
-		jh.Progress(ctx, 70, "starting the copy")
-		if err := t.Chainer.runStep(
-			ctx,
-			jh,
-			trialChain(copyInst, requestedBy),
-			&ChainStep{Type: StepStart},
-		); err != nil {
-			return trialFailure(ctx, err, "start the copy")
-		}
-		// The mod loader finishes before the world loads, so its log is whole only after this.
-		jh.Progress(ctx, 85, "waiting for the copy's world to load")
-		if err := t.Chainer.runStep(ctx, jh, trialChain(copyInst, requestedBy), &ChainStep{
-			Type: StepWaitFor, Condition: ConditionReady, Seconds: waitSeconds(t.ReadyTimeout),
-		}); err != nil {
-			return trialFailure(ctx, err, "wait for the copy to load")
-		}
-		// The wait skips a copy that already stopped, which must fail the test, not pass it.
-		if err := t.Chainer.requireState(ctx, copyInst.ID, instance.StateRunning); err != nil {
-			return trialFailure(ctx, err, "check the copy is still running")
-		}
-		jh.Progress(ctx, 100, t.bootReport(ctx, jh, copyInst.ID))
-		return jobs.Outcome{
-			Status: jobs.StatusSucceeded,
-			OnFinish: func(ctx context.Context, tx *sql.Tx) error {
-				return store.TxMarkTestPassed(ctx, tx, copyInst.ID)
-			},
+			return trialFailure(ctx, err, "update the game on the copy")
 		}
 	}
+	if p.Mods {
+		jh.Progress(ctx, 55, "updating mods on the copy")
+		if err := t.updateMods(ctx, jh, copyInst.ID, nil, requestedBy); err != nil {
+			return trialFailure(ctx, err, "update the mods on the copy")
+		}
+	}
+
+	jh.Progress(ctx, 70, "starting the copy")
+	if err := t.Chainer.runStep(
+		ctx,
+		jh,
+		trialChain(copyInst, requestedBy),
+		&ChainStep{Type: StepStart},
+	); err != nil {
+		return trialFailure(ctx, err, "start the copy")
+	}
+	// The mod loader finishes before the world loads, so its log is whole only after this.
+	jh.Progress(ctx, 85, "waiting for the copy's world to load")
+	if err := t.Chainer.runStep(ctx, jh, trialChain(copyInst, requestedBy), &ChainStep{
+		Type: StepWaitFor, Condition: ConditionReady, Seconds: waitSeconds(t.ReadyTimeout),
+	}); err != nil {
+		return trialFailure(ctx, err, "wait for the copy to load")
+	}
+	// The wait skips a copy that already stopped, which must fail the test, not pass it.
+	if err := t.Chainer.requireState(ctx, copyInst.ID, instance.StateRunning); err != nil {
+		return trialFailure(ctx, err, "check the copy is still running")
+	}
+	jh.Progress(ctx, 100, t.bootReport(ctx, jh, copyInst.ID))
+	return jobs.Outcome{
+		Status: jobs.StatusSucceeded,
+		OnFinish: func(ctx context.Context, tx *sql.Tx) error {
+			return store.TxMarkTestPassed(ctx, tx, copyInst.ID)
+		},
+	}
+}
+
+// finishTest runs once an update test of the server srcID started by origin has finished, with
+// the failure it recorded or "": it applies the tested updates when p asked for that and
+// applyDecision allows it, then announces the result.
+func (t *UpdateTester) finishTest(
+	ctx context.Context, srcID string, p *UpdateTestPayload, origin StepOrigin, failure string,
+) {
+	src, err := t.Chainer.fresh(ctx, srcID)
+	if err != nil {
+		slog.WarnContext(ctx, "read the server after its update test",
+			slog.String("instance_id", srcID), slog.Any("error", err))
+		return
+	}
+	res := &UpdateTestResult{Instance: src, Error: failure}
+	if failure == "" {
+		t.readResult(ctx, src, p.CopyID, res)
+	}
+	if p.Apply && failure == "" {
+		t.applyTested(ctx, srcID, origin, res)
+	}
+	if t.Notify != nil {
+		t.Notify(ctx, res)
+	}
+}
+
+// applyTested queues the apply of the server srcID's passed test, on behalf of origin, when
+// applyDecision allows it for the server as it is now, and records in res whether it did and
+// why not.
+func (t *UpdateTester) applyTested(ctx context.Context, srcID string, origin StepOrigin, res *UpdateTestResult) {
+	src, err := t.Chainer.fresh(ctx, srcID)
+	if err != nil {
+		res.NotApplied = "the server could not be read: " + err.Error()
+		return
+	}
+	apply, why := applyDecision(res.Verdict, instance.State(src.State), t.players(src.ID))
+	if !apply {
+		res.NotApplied = why
+		return
+	}
+	if _, err := t.SubmitApply(ctx, &UpdateApplySubmission{
+		Instance: src, RequestedBy: origin.RequestedBy, ScheduleID: origin.ScheduleID,
+	}); err != nil {
+		res.NotApplied = "the apply could not be queued: " + err.Error()
+		return
+	}
+	res.Applying = true
+}
+
+// readResult fills res with what the copy copyID runs and how its mods loaded. What cannot be
+// read is left nil and logged.
+func (t *UpdateTester) readResult(ctx context.Context, src *store.Instance, copyID string, res *UpdateTestResult) {
+	testCopy, err := t.Chainer.fresh(ctx, copyID)
+	if err != nil {
+		slog.WarnContext(ctx, "read the update test copy",
+			slog.String("instance_id", copyID), slog.Any("error", err))
+		return
+	}
+	if changes, err := t.Changes(ctx, src, testCopy); err == nil {
+		res.Changes = &changes
+	} else {
+		slog.WarnContext(ctx, "compare the update test copy with its server",
+			slog.String("instance_id", copyID), slog.Any("error", err))
+	}
+	if verdict, err := t.Verify(ctx, testCopy); err == nil {
+		res.Verdict = verdict
+	} else {
+		slog.WarnContext(ctx, "read the update test copy's mod load",
+			slog.String("instance_id", copyID), slog.Any("error", err))
+	}
+}
+
+// players is the server id's player count from its log, nil while unknown or without a reader.
+func (t *UpdateTester) players(id string) *int {
+	if reader := t.Streams.Reader(id); reader != nil {
+		return reader.Players()
+	}
+	return nil
+}
+
+// applyDecision says whether a passed test's updates may be applied unattended to a server in
+// state with players on it, and why not when they may not: every mod must have loaded on the
+// copy, and the server must be stopped or running with nobody on it.
+func applyDecision(verdict *TestVerdict, state instance.State, players *int) (apply bool, why string) {
+	if verdict == nil {
+		return false, "the copy's mods could not be checked"
+	}
+	if problems := verdict.Problems(); len(problems) > 0 {
+		return false, strings.Join(problems, "; ")
+	}
+	switch {
+	case state == instance.StateStopped:
+		return true, ""
+	case state != instance.StateRunning:
+		return false, fmt.Sprintf("the server was %s", state)
+	case players == nil:
+		return false, "the server's player count was unknown"
+	case *players == 1:
+		return false, "a player was on the server"
+	case *players > 1:
+		return false, fmt.Sprintf("%d players were on the server", *players)
+	}
+	return true, ""
+}
+
+// PendingMods lists the mod updates pending on the server id. A panel without a mod engine has
+// none.
+func (t *UpdateTester) PendingMods(ctx context.Context, id string) ([]manager.UpdateTarget, error) {
+	if t.Installer == nil {
+		return nil, nil
+	}
+	targets, err := t.Installer.Planner().PendingUpdates(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("find the pending mod updates: %w", err)
+	}
+	return targets, nil
 }
 
 // limitsText describes a copy's memory and CPU limits for the job log.
@@ -303,8 +459,8 @@ func (t *UpdateTester) updateMods(
 	}
 	if targets == nil {
 		var err error
-		if targets, err = t.Installer.Planner().PendingUpdates(ctx, id); err != nil {
-			return fmt.Errorf("find the pending mod updates: %w", err)
+		if targets, err = t.PendingMods(ctx, id); err != nil {
+			return err
 		}
 	}
 	if len(targets) == 0 {
@@ -510,7 +666,9 @@ type UpdateApplyPayload struct {
 type UpdateApplySubmission struct {
 	Instance    *store.Instance
 	RequestedBy string
-	Audit       *store.AuditEntry
+	// ScheduleID is the schedule whose test queued the apply, "" for one a person started.
+	ScheduleID string
+	Audit      *store.AuditEntry
 }
 
 // ErrNoUpdateTest is a refusal to apply a test that has no copy.
@@ -563,7 +721,7 @@ func (t *UpdateTester) SubmitApply(ctx context.Context, sub *UpdateApplySubmissi
 	job, err := t.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindUpdateApply, LockKey: jobs.ChainLockKey(id),
 		InstanceID: &id, InstanceName: src.Name, RequestedBy: sub.RequestedBy,
-		Payload: payload, Audit: sub.Audit,
+		ScheduleID: sub.ScheduleID, Payload: payload, Audit: sub.Audit,
 	}, t.runApply(src.ID, &payload, sub.RequestedBy))
 	if err != nil {
 		return nil, fmt.Errorf("submit update apply for instance %s: %w", id, err)
