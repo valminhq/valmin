@@ -1,7 +1,7 @@
 // Command valmind is the Valmin panel daemon.
 //
-// Startup sequence: 10 §2 (validation gate) then 12 §9.1 (lease, job sweep,
-// reconciliation, resume intents, streams).
+// Startup sequence: the validation gate, then the daemon lock, job recovery, reconciliation,
+// resume intents and streams.
 package main
 
 import (
@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"syscall"
 	"time"
@@ -110,7 +111,7 @@ func logPatterns(ctx context.Context, cfg *config.Config) (instance.PatternSet, 
 }
 
 // runAdmin dispatches the recovery verbs (09 §6). They open the database directly and never
-// touch Docker, the lease or the HTTP surface.
+// touch Docker, the daemon lock or the HTTP surface.
 func runAdmin(ctx context.Context, args []string, getenv func(string) string) error {
 	switch {
 	case len(args) > 0 && args[0] == "reset":
@@ -176,7 +177,7 @@ func runAdminReset(ctx context.Context, args []string, getenv func(string) strin
 type daemon struct {
 	db      *store.DB
 	owner   string
-	lease   *store.DaemonLease
+	lock    *store.DaemonLock
 	keeper  *crypto.Keeper
 	docker  *runtime.Docker
 	jobs    *jobs.Engine
@@ -203,7 +204,12 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 		slog.String("version", build.Version), slog.String("commit", build.Commit),
 		slog.String("data_root", cfg.Data.Root), slog.String("listen", cfg.Server.Listen))
 
+	// Taken before the database is opened, so a second daemon refuses before it migrates or
+	// writes anything.
 	var err error
+	if d.lock, err = store.AcquireDaemonLock(ctx, daemonDirs(cfg)...); err != nil {
+		return nil, fmt.Errorf("daemon lock: %w", err)
+	}
 	if d.db, err = store.Open(ctx, cfg.DB.Driver, cfg.DB.DSN); err != nil {
 		return nil, fmt.Errorf("database %s: %w", cfg.DB.DSN, err)
 	}
@@ -220,13 +226,8 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 	if d.owner, err = store.Owner(ctx, d.db); err != nil {
 		return nil, fmt.Errorf("daemon identity: %w", err)
 	}
-	if d.lease, err = store.AcquireDaemonLease(
-		ctx, d.db, cfg.Data.Root, d.owner, cfg.Jobs.LeaseTTL.Std()); err != nil {
-		return nil, fmt.Errorf("daemon lease: %w", err)
-	}
-	// The same owner as the daemon lease (12 §5.2): both are crash markers for this
-	// process, and a job's lease_owner must agree with the lease's when crash recovery
-	// sweep asks "is the process that claimed this still alive?"
+	// Every job this process claims carries its owner, so crash recovery can tell a dead
+	// daemon's jobs from this one's.
 	d.jobs = jobs.New(d.db, d.owner, jobs.Config{
 		LeaseTTL:         cfg.Jobs.LeaseTTL.Std(),
 		ProgressInterval: cfg.Jobs.ProgressInterval.Std(),
@@ -306,9 +307,9 @@ func (d *daemon) close(ctx context.Context) {
 			slog.WarnContext(ctx, "closing docker client", slog.Any("error", err))
 		}
 	}
-	if d.lease != nil {
-		if err := d.lease.Release(context.WithoutCancel(ctx)); err != nil {
-			slog.WarnContext(ctx, "releasing daemon lease", slog.Any("error", err))
+	if d.lock != nil {
+		if err := d.lock.Release(); err != nil {
+			slog.WarnContext(ctx, "releasing daemon lock", slog.Any("error", err))
 		}
 	}
 	if d.db != nil {
@@ -318,7 +319,13 @@ func (d *daemon) close(ctx context.Context) {
 	}
 }
 
-// serve runs until ctx is cancelled or the lease is lost, then shuts down per 11 §10.
+// daemonDirs are the directories a daemon locks: data.root, and the database's own directory
+// when db.dsn keeps it elsewhere.
+func daemonDirs(cfg *config.Config) []string {
+	return []string{cfg.Data.Root, filepath.Dir(store.SQLitePath(cfg.DB.DSN))}
+}
+
+// serve runs until ctx is cancelled or the listener fails, then shuts down per 11 §10.
 func (d *daemon) serve(ctx context.Context, cfg *config.Config, patterns instance.PatternSet) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -370,9 +377,6 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config, patterns instanc
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}
 
-	lost := make(chan error, 1)
-	go func() { lost <- d.lease.Renew(ctx) }()
-
 	serveErr := make(chan error, 1)
 	go func() {
 		slog.InfoContext(ctx, "listening", slog.String("addr", cfg.Server.Listen))
@@ -387,12 +391,6 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config, patterns instanc
 			return fmt.Errorf("listen on %s: %w", cfg.Server.Listen, err)
 		}
 		return nil
-	case err := <-lost:
-		if err != nil {
-			cancel()
-			shutdown(context.WithoutCancel(ctx), srv, server, runDone, d.jobs, cfg.Server.ShutdownGrace.Std())
-			return err
-		}
 	case <-ctx.Done():
 	}
 
@@ -401,7 +399,7 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config, patterns instanc
 	return nil
 }
 
-// shutdown is 11 §10: drain, stop accepting, wait out the grace period, exit. The daemon lease
+// shutdown is 11 §10: drain, stop accepting, wait out the grace period, exit. The daemon lock
 // and the database are released by the caller's deferred close.
 //
 // It takes no Runtime, so nothing here can signal a game container: servers keep running and

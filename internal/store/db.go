@@ -87,6 +87,13 @@ func openPool(ctx context.Context, dsn string, readOnly bool, maxConns int) (*sq
 	return db, nil
 }
 
+// SQLitePath is the database file a sqlite DSN names: the DSN without its file: prefix or its
+// query parameters.
+func SQLitePath(dsn string) string {
+	path, _, _ := strings.Cut(strings.TrimPrefix(dsn, "file:"), "?")
+	return path
+}
+
 // withParams appends query parameters to a DSN that may or may not already have some.
 func withParams(dsn string, params []string) string {
 	sep := "?"

@@ -6,10 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
-
-const testTTL = 30 * time.Second
 
 func TestOwnerReusesThePanelIDAndVariesTheBootID(t *testing.T) {
 	t.Parallel()
@@ -30,209 +27,123 @@ func TestOwnerReusesThePanelIDAndVariesTheBootID(t *testing.T) {
 		t.Errorf("panel id changed across calls: %q then %q", firstPanel, secondPanel)
 	}
 	if firstBoot == secondBoot {
-		t.Error("boot id repeated; a dead daemon's job rows would look like this boot's (12 §9.1)")
+		t.Error("boot id repeated; a dead daemon's job rows would look like this boot's")
 	}
 }
 
-func TestSecondDaemonOnOneHostIsRefusedByTheFlock(t *testing.T) {
+func TestSecondDaemonOnOneDataRootIsRefused(t *testing.T) {
 	t.Parallel()
-	db := open(t)
 	root := t.TempDir()
 
-	first, err := AcquireDaemonLease(t.Context(), db, root, "panel:boot-1", testTTL)
+	first, err := AcquireDaemonLock(t.Context(), root)
 	if err != nil {
 		t.Fatalf("first acquire: %v", err)
 	}
-	t.Cleanup(func() { _ = first.Release(t.Context()) })
+	t.Cleanup(func() { _ = first.Release() })
 
-	_, err = AcquireDaemonLease(t.Context(), db, root, "panel:boot-2", testTTL)
-	if !errors.Is(err, ErrLeaseHeld) {
-		t.Fatalf("second acquire on the same data.root: got %v, want ErrLeaseHeld", err)
+	_, err = AcquireDaemonLock(t.Context(), root)
+	if !errors.Is(err, ErrDaemonLocked) {
+		t.Fatalf("second acquire on the same data.root: got %v, want ErrDaemonLocked", err)
 	}
 	if !strings.Contains(err.Error(), LockFile) {
 		t.Errorf("error does not name the lock file: %v", err)
 	}
 }
 
-// The flock only reaches one host. Two hosts pointed at one database meet at the kv row,
-// which is the case ADR-031 exists for.
-func TestSecondDaemonOnAnotherHostIsRefusedByTheLeaseRow(t *testing.T) {
+// TestTwoDataRootsOnOneDatabaseAreRefused asserts the lock beside a database kept outside
+// data.root stops a second daemon that names the same database from another data.root, and
+// that a refused acquire holds nothing.
+func TestTwoDataRootsOnOneDatabaseAreRefused(t *testing.T) {
 	t.Parallel()
-	db := open(t)
+	shared := t.TempDir()
+	firstRoot, secondRoot := t.TempDir(), t.TempDir()
 
-	first, err := AcquireDaemonLease(t.Context(), db, t.TempDir(), "panel:boot-1", testTTL)
+	first, err := AcquireDaemonLock(t.Context(), firstRoot, shared)
 	if err != nil {
 		t.Fatalf("first acquire: %v", err)
 	}
-	t.Cleanup(func() { _ = first.Release(t.Context()) })
-
-	_, err = AcquireDaemonLease(t.Context(), db, t.TempDir(), "panel:boot-2", testTTL)
-	if !errors.Is(err, ErrLeaseHeld) {
-		t.Fatalf("second acquire against the same database: got %v, want ErrLeaseHeld", err)
+	if _, err := AcquireDaemonLock(t.Context(), secondRoot, shared); !errors.Is(err, ErrDaemonLocked) {
+		t.Fatalf("second acquire on the shared database: got %v, want ErrDaemonLocked", err)
 	}
-
-	host, _ := os.Hostname()
-	for _, want := range []string{host, "pid"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("refusal does not name %q, so the operator cannot find the other daemon: %v", want, err)
-		}
+	if running, err := DaemonRunning(secondRoot); err != nil || running {
+		t.Errorf("the refused acquire still holds its data.root: DaemonRunning = %v, %v", running, err)
+	}
+	if err := first.Release(); err != nil {
+		t.Fatal(err)
 	}
 }
 
-// After a SIGKILL the lock file is closed by the kernel but the lease row survives, so the
-// restart waits out the TTL and no longer. 30 s of self-healing delay is ADR-031's stated
-// cost; a restart blocked until a human intervenes would not be.
-func TestAHardKillBlocksARestartForNoLongerThanTheTTL(t *testing.T) {
+// TestOneDirectoryUnderTwoNamesIsLockedOnce asserts a daemon whose database directory is its
+// data.root under another spelling does not refuse itself.
+func TestOneDirectoryUnderTwoNamesIsLockedOnce(t *testing.T) {
 	t.Parallel()
-	db := open(t)
 	root := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Fatal(err)
+	}
 
-	killed, err := AcquireDaemonLease(t.Context(), db, root, "panel:boot-1", testTTL)
+	l, err := AcquireDaemonLock(t.Context(), root, alias)
 	if err != nil {
-		t.Fatalf("acquire: %v", err)
+		t.Fatalf("acquire through two names for one directory: %v", err)
 	}
-	// A SIGKILL releases the flock and nothing else: no Release, no row deleted.
-	if err := killed.lock.Close(); err != nil {
-		t.Fatalf("close lock: %v", err)
+	if running, err := DaemonRunning(alias); err != nil || !running {
+		t.Errorf("DaemonRunning through the alias = %v, %v; want true", running, err)
 	}
-
-	if _, err := AcquireDaemonLease(t.Context(), db, root, "panel:boot-2", testTTL); !errors.Is(err, ErrLeaseHeld) {
-		t.Fatalf("restart inside the TTL: got %v, want ErrLeaseHeld", err)
-	}
-
-	expire(t, db, -time.Second)
-
-	next, err := AcquireDaemonLease(t.Context(), db, root, "panel:boot-2", testTTL)
-	if err != nil {
-		t.Fatalf("restart after the TTL expired: %v", err)
-	}
-	_ = next.Release(t.Context())
+	_ = l.Release()
 }
 
 func TestReleaseLetsTheNextStartInImmediately(t *testing.T) {
 	t.Parallel()
-	db := open(t)
 	root := t.TempDir()
 
-	first, err := AcquireDaemonLease(t.Context(), db, root, "panel:boot-1", testTTL)
+	first, err := AcquireDaemonLock(t.Context(), root)
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
-	if err := first.Release(t.Context()); err != nil {
+	if err := first.Release(); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 
-	second, err := AcquireDaemonLease(t.Context(), db, root, "panel:boot-2", testTTL)
+	second, err := AcquireDaemonLock(t.Context(), root)
 	if err != nil {
 		t.Fatalf("acquire after release: %v", err)
 	}
-	_ = second.Release(t.Context())
-}
-
-// C17's shape at the daemon level: a renewal that finds another owner must stop this
-// daemon, because continuing is the two-workers-one-restore failure ADR-031 removes.
-func TestRenewalRefusesAfterTheLeaseIsStolen(t *testing.T) {
-	t.Parallel()
-	db := open(t)
-
-	l, err := AcquireDaemonLease(t.Context(), db, t.TempDir(), "panel:boot-1", testTTL)
-	if err != nil {
-		t.Fatalf("acquire: %v", err)
-	}
-	t.Cleanup(func() { _ = l.Release(t.Context()) })
-
-	if err := db.KVSet(t.Context(), leaseKey, Lease{
-		Owner:     "panel:boot-2",
-		Host:      "elsewhere",
-		PID:       4242,
-		ExpiresAt: time.Now().UTC().Add(testTTL),
-	}); err != nil {
-		t.Fatalf("steal the lease: %v", err)
-	}
-
-	if err := l.claim(t.Context()); !errors.Is(err, ErrLeaseHeld) {
-		t.Fatalf("renewal after theft: got %v, want ErrLeaseHeld", err)
-	}
-}
-
-func TestReleaseLeavesAStolenLeaseAlone(t *testing.T) {
-	t.Parallel()
-	db := open(t)
-
-	l, err := AcquireDaemonLease(t.Context(), db, t.TempDir(), "panel:boot-1", testTTL)
-	if err != nil {
-		t.Fatalf("acquire: %v", err)
-	}
-	stolen := Lease{
-		Owner: "panel:boot-2", Host: "elsewhere", PID: 4242,
-		ExpiresAt: time.Now().UTC().Add(testTTL),
-	}
-	if err := db.KVSet(t.Context(), leaseKey, stolen); err != nil {
-		t.Fatalf("steal the lease: %v", err)
-	}
-
-	if err := l.Release(t.Context()); err != nil {
-		t.Fatalf("release: %v", err)
-	}
-
-	var got Lease
-	found, err := db.KVGet(t.Context(), leaseKey, &got)
-	if err != nil {
-		t.Fatalf("KVGet: %v", err)
-	}
-	if !found || got.Owner != stolen.Owner {
-		t.Errorf("release deleted the live owner's lease: found=%v owner=%q", found, got.Owner)
-	}
+	_ = second.Release()
 }
 
 func TestLockFileLivesUnderDataRoot(t *testing.T) {
 	t.Parallel()
-	db := open(t)
 	root := t.TempDir()
 
-	l, err := AcquireDaemonLease(t.Context(), db, root, "panel:boot-1", testTTL)
+	l, err := AcquireDaemonLock(t.Context(), root)
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
-	t.Cleanup(func() { _ = l.Release(t.Context()) })
+	t.Cleanup(func() { _ = l.Release() })
 
 	if _, err := os.Stat(filepath.Join(root, LockFile)); err != nil {
 		t.Errorf("stat lock file: %v", err)
 	}
 }
 
-// expire shifts the stored lease's expiry by d, so a test does not have to wait one out.
-func expire(t *testing.T, db *DB, d time.Duration) {
-	t.Helper()
-	var l Lease
-	found, err := db.KVGet(t.Context(), leaseKey, &l)
-	if err != nil || !found {
-		t.Fatalf("read lease: found=%v err=%v", found, err)
-	}
-	l.ExpiresAt = time.Now().UTC().Add(d)
-	if err := db.KVSet(t.Context(), leaseKey, l); err != nil {
-		t.Fatalf("write lease: %v", err)
-	}
-}
-
-// TestDaemonRunningFollowsTheLeaseLock asserts that DaemonRunning reports the lock a daemon
-// holds, and leaves it free for a daemon to take when there is none.
-func TestDaemonRunningFollowsTheLeaseLock(t *testing.T) {
+// TestDaemonRunningFollowsTheLock asserts that DaemonRunning reports the lock a daemon holds,
+// and leaves it free for a daemon to take when there is none.
+func TestDaemonRunningFollowsTheLock(t *testing.T) {
 	t.Parallel()
-	db := open(t)
 	root := t.TempDir()
 
 	if running, err := DaemonRunning(root); err != nil || running {
 		t.Fatalf("DaemonRunning with no daemon = %v, %v; want false", running, err)
 	}
-	lease, err := AcquireDaemonLease(t.Context(), db, root, "panel:boot-1", testTTL)
+	lock, err := AcquireDaemonLock(t.Context(), root)
 	if err != nil {
 		t.Fatalf("acquire after the probe: %v", err)
 	}
 	if running, err := DaemonRunning(root); err != nil || !running {
 		t.Errorf("DaemonRunning with a daemon = %v, %v; want true", running, err)
 	}
-	if err := lease.Release(t.Context()); err != nil {
+	if err := lock.Release(); err != nil {
 		t.Fatal(err)
 	}
 	if running, err := DaemonRunning(root); err != nil || running {
