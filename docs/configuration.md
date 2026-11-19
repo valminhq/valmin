@@ -76,7 +76,7 @@ override should name a digest too.
 | `VALMIN_GAME_LOG_PATTERNS`                  | Log-line pattern overrides; empty. See [log patterns](#override-log-patterns).     |
 | `VALMIN_PORTS_BASE` / `VALMIN_PORTS_STRIDE` | Port allocation start and spacing; `2456` / `5`.                                   |
 | `VALMIN_THUNDERSTORE_BASE_URL`              | Thunderstore host; `https://thunderstore.io`.                                      |
-| `VALMIN_THUNDERSTORE_SYNC_INTERVAL`         | How often every enabled registry is refreshed; `1h`.                               |
+| `VALMIN_THUNDERSTORE_SYNC_INTERVAL`         | How often every enabled registry is refreshed; `6h`.                               |
 | `VALMIN_HEXIUM_BASE_URL`                    | Hexium host; `https://valheim.hexium.gg`.                                          |
 | `VALMIN_HEXIUM_ENABLED`                     | Whether Hexium is searched and installable; `true`.                                |
 | `VALMIN_AUTH_SESSION_IDLE_TTL`              | Sign-out after this long without activity; `24h`.                                  |
