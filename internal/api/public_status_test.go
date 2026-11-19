@@ -8,8 +8,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -511,5 +514,41 @@ func TestPublicActivity(t *testing.T) {
 		if got := publicActivity(tt.state, tt.kind); got != tt.want {
 			t.Errorf("publicActivity(%q, %q) = %q, want %q", tt.state, tt.kind, got, tt.want)
 		}
+	}
+}
+
+// TestPublicPlayersFollowTheRunningServer asserts that the public page reports a player
+// observation while the server is sampled, and none once its streams close, though the log
+// reader outlives them.
+func TestPublicPlayersFollowTheRunningServer(t *testing.T) {
+	t.Parallel()
+	fake := runtime.NewFake()
+	id := startedStub(t, fake)
+	streams := instance.NewStreams(fake, instance.DefaultPatterns, instance.StreamHooks{})
+	defer streams.Shutdown()
+	streams.Open("inst-a", id)
+	h := &PublicStatus{Streams: streams}
+
+	var view publicStatusView
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); {
+		view = publicStatusView{}
+		h.addPlayers(&view, "inst-a")
+		if view.ObservedAt != nil {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	// The fake logs no player lines, so the count is unknown rather than zero.
+	if view.ObservedAt == nil || view.Players != nil {
+		t.Fatalf("running server: players = %v, observed_at = %v, want null and a time",
+			view.Players, view.ObservedAt)
+	}
+
+	streams.Close("inst-a")
+	view = publicStatusView{}
+	h.addPlayers(&view, "inst-a")
+	if view.Players != nil || view.ObservedAt != nil {
+		t.Errorf("stopped server: players = %v, observed_at = %v, want neither",
+			view.Players, view.ObservedAt)
 	}
 }
