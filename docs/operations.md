@@ -183,7 +183,7 @@ World restoration follows the [world restore procedure](#back-up-or-restore-a-wo
 ## Schedule maintenance
 
 On **Maintenance**, choose **What to run** and **How often**, then choose
-**Add schedule** to run backups, restarts, or game updates on their own.
+**Add schedule** to run backups, restarts, game updates or update tests on their own.
 
 New schedules use the browser's time zone, including across daylight saving changes.
 Existing schedules keep the time zone they were created with (UTC for schedules created
@@ -196,7 +196,8 @@ skip runs when they jump past it, and a time in the hour they repeat runs the fi
 clock reaches it.
 
 Backups, restarts and game updates stop the server, so their schedules may run at most once
-an hour, as may a sequence with a step that stops it. `@every` expressions are not accepted.
+an hour, as may a sequence with a step that stops it and an update test, which can apply
+what it tested. `@every` expressions are not accepted.
 
 A schedule keeps running after its author loses access to the server, and after their
 account is deleted, when it shows an unnamed author. Disable or delete schedules you no
@@ -271,6 +272,29 @@ listed under [send server commands](usage.md#send-server-commands), and only an
 administrator can add an update step or a command outside that list. **Wait until no
 players are connected** works for a sequence with a step that stops the server, and holds
 the whole sequence until the server is empty.
+
+### Test updates on a schedule
+
+A modded server cannot take a scheduled game update, because the update needs a person to
+confirm it. Choose **Test updates on a copy** instead, which administrators can schedule. Each
+run does what [Test an update on a copy](usage.md#test-an-update-on-a-copy) does by hand: it
+copies the server, installs the new game build and the pending mod updates on the copy,
+starts it and reads what the mod loader said. The game is tried unless the panel's hourly
+update check found the server current, and the mods when any update is pending. A run with
+no game or mod update to try is skipped, and so is one while the server still has a copy
+from an earlier test: apply or discard that copy first.
+
+Turn on **Apply when every mod loads and nobody is on** to finish the job unattended. When the
+test ends, the updates are applied as **Apply to the server** applies them, but only if the
+copy's mod loader finished, named every enabled mod and reported no failure, and the server is
+stopped or running with nobody on it. A server whose player count is unknown counts as
+occupied. Otherwise the copy is kept for you to look at, apply or discard. A copy that runs
+nothing newer than the server is only removed: the server is not stopped. The apply shows in
+the job history as part of the schedule.
+
+Add an alert rule for **Update test finished** to hear how each test went: whether every mod
+loaded, which ones failed, and whether the updates are being applied or why not. An apply
+that updates the server also sends **Server updated**.
 
 **Skipped and failed runs** lists the scheduled runs, among the last 50, that did not
 complete. A run is **Skipped** when the server is busy with another task or is in a state
@@ -584,7 +608,8 @@ the database and are not affected.
 
 Use the server's update action to update the Valheim installation. On a modded server,
 [test the update on a copy](usage.md#test-an-update-on-a-copy) first: the copy downloads the
-new build into the cache and applying it reuses that download. The game build and mod
+new build into the cache and applying it reuses that download. To do this unattended, see
+[Test updates on a schedule](#test-updates-on-a-schedule). The game build and mod
 packages stay cached on the host after a test, and discarding the copy does not remove
 them. Rebuilding the runtime image alone does not download a new game build. Preload any new runtime
 or SteamCMD image before configuring Valmin to use it: the daemon does not pull images.

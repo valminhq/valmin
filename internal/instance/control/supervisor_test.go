@@ -618,6 +618,8 @@ func (n *recordingNotifier) NotifyPublicBuild(context.Context, string, string) f
 	return nil
 }
 
+func (n *recordingNotifier) NotifyUpdateTest(context.Context, *UpdateTestResult) {}
+
 func incidentCount(t *testing.T, db *store.DB) int {
 	t.Helper()
 	var n int

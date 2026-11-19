@@ -83,6 +83,7 @@ export type RuleKind =
 	| 'server_stopped'
 	| 'instance_down'
 	| 'game_updated'
+	| 'update_test_finished'
 	| GameKind;
 
 /** Which destinations hear about one kind of event, on one server or on every server, with the

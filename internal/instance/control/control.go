@@ -27,6 +27,7 @@ const defaultPluginLoadWindow = 5 * time.Second
 type Notifier interface {
 	NotifyUnexpectedStop(ctx context.Context, inst *store.Instance, to, reason string)
 	NotifyPublicBuild(ctx context.Context, previous, observed string) func(context.Context, *sql.Tx) error
+	NotifyUpdateTest(ctx context.Context, res *UpdateTestResult)
 }
 
 // Deps are the collaborators control's components share.
@@ -148,6 +149,9 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		Streams: d.Streams, ReadMods: d.ReadMods, DataRoot: dataRoot,
 		CPUs: goruntime.NumCPU(), AvailableMemoryMB: instance.AvailableMemoryMB,
 		ReadyTimeout: readyTimeout,
+	}
+	if d.Notifier != nil {
+		c.UpdateTester.Notify = d.Notifier.NotifyUpdateTest
 	}
 	c.UpdateChecker = &UpdateChecker{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Config: cfg, Notifier: d.Notifier,

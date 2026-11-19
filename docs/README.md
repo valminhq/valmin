@@ -28,6 +28,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | Set memory and CPU limits                       | [Resource limits](usage.md#resource-limits)                                                |
 | Update Valheim                                  | [Update the game](usage.md#update-the-game)                                                |
 | Try an update before changing a modded server   | [Test an update on a copy](usage.md#test-an-update-on-a-copy)                              |
+| Update a modded server unattended               | [Test updates on a schedule](operations.md#test-updates-on-a-schedule)                     |
 | Delete a server                                 | [Delete a server](usage.md#delete-a-server)                                                |
 | Read the console or send commands               | [Send server commands](usage.md#send-server-commands)                                      |
 | Install, update, lock or downgrade mods         | [Manage mods](usage.md#manage-mods)                                                        |
