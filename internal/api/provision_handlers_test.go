@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
@@ -29,7 +28,7 @@ func provisionWorld(t *testing.T) (rt *Server, db *store.DB, admin, member *stor
 	t.Helper()
 	dir := t.TempDir()
 
-	cfg := config.Defaults()
+	cfg := testConfig(t)
 	cfg.Server.ExternalURL = testOrigin
 	cfg.Data.Root = dir
 	cfg.Data.HostRoot = dir

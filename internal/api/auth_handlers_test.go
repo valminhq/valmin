@@ -29,7 +29,7 @@ func pendingRouter(t *testing.T) (*Server, *store.DB) {
 // pendingRouterWith is pendingRouter with edit applied to the configuration first.
 func pendingRouterWith(t *testing.T, edit func(*config.Config)) (*Server, *store.DB) {
 	t.Helper()
-	cfg := config.Defaults()
+	cfg := testConfig(t)
 	cfg.Server.ExternalURL = testOrigin
 	cfg.Auth.SessionIdleTTL = config.Duration(time.Hour)
 	cfg.Auth.SessionAbsoluteTTL = config.Duration(24 * time.Hour)
