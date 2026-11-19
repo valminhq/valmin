@@ -436,16 +436,19 @@ func (db *DB) JobRanAt(ctx context.Context, instanceID string, at time.Time) (bo
 	return ran, nil
 }
 
-// SweepTerminalJobs is 12 §7's retention sweep: one DELETE at daemon start. A row is pruned once
-// it is older than retentionDays or falls outside the most recent 500 terminal rows for its
-// instance_id, whichever bites first. Global jobs share one such group.
+// SweepTerminalJobs prunes terminal jobs in one DELETE: a row goes once it is older than
+// retentionDays or falls outside the most recent 500 terminal rows of its instance and kind,
+// whichever bites first. Global jobs group by kind alone, so a frequent kind never evicts the
+// last run of a rare one.
 func (db *DB) SweepTerminalJobs(ctx context.Context, now time.Time, retentionDays int) (int64, error) {
 	cutoff := FormatTime(now.AddDate(0, 0, -retentionDays))
 	res, err := db.Writer.ExecContext(ctx, `
 		DELETE FROM job_runs WHERE id IN (
 			SELECT id FROM (
 				SELECT id, created_at,
-				       ROW_NUMBER() OVER (PARTITION BY instance_id ORDER BY created_at DESC) AS rn
+				       ROW_NUMBER() OVER (
+					       PARTITION BY COALESCE(instance_id, ''), kind ORDER BY created_at DESC
+				       ) AS rn
 				FROM job_runs
 				WHERE status IN ('succeeded', 'failed', 'cancelled')
 			) ranked

@@ -116,7 +116,8 @@ built, explored or destroyed.
   snapshot it took first only as it finishes, so that job is listed in the period that ends
   at its snapshot, not the one that starts there.
   Finished jobs are kept for 30 days by default (`jobs.retention_days`) and at most the
-  newest 500 per server, so an old period, or a long one on a busy server, may be incomplete.
+  newest 500 of each kind per server, so an old period, or a long one on a busy server, may
+  be incomplete.
 - **Other changes** (administrators only): audit log entries for the server that are not
   jobs, such as configuration edits. When the period holds more entries than the dialog
   reads, a link opens the audit log for those days.

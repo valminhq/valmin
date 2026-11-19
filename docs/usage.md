@@ -1469,8 +1469,8 @@ Add as many rules as you like, including several for the same event: for example
 rules for the same event gets one message.
 
 Each rule in the list shows where it posts and its settings in brief. Its switch pauses it;
-nothing is deleted. **Deliveries** shows what it has sent, **Duplicate** opens a copy to save
-as a new rule, the pencil edits it, and the bin deletes it.
+nothing is deleted. **Deliveries** shows what it has sent in the last 30 days, **Duplicate**
+opens a copy to save as a new rule, the pencil edits it, and the bin deletes it.
 
 A problem or maintenance event is sent when it starts. When it clears, Valmin edits that same
 Discord message: it turns green and its title reads **Resolved after 23 minutes: …**. If the
