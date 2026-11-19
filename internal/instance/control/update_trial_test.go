@@ -152,6 +152,48 @@ func TestApplyReport(t *testing.T) {
 	}
 }
 
+// TestVerdictProblems asserts a verdict says every mod loaded only when the loader finished,
+// kept its count and named every enabled plugin package without a failure.
+func TestVerdictProblems(t *testing.T) {
+	t.Parallel()
+	done := func(plugins int, failed ...instance.FailedPlugin) *instance.PluginLoad {
+		load := &instance.PluginLoad{Declared: plugins, Complete: true, Failed: failed}
+		for range plugins {
+			load.Plugins = append(load.Plugins, instance.LoadedPlugin{Name: "P"})
+		}
+		return load
+	}
+	tests := []struct {
+		name    string
+		verdict TestVerdict
+		want    int
+	}{
+		{"every mod loaded", TestVerdict{Load: done(2)}, 0},
+		{"no loader log", TestVerdict{}, 1},
+		{"loader not finished", TestVerdict{Load: &instance.PluginLoad{Declared: 0}}, 1},
+		{
+			"loader not finished, with packages still to come",
+			TestVerdict{Load: &instance.PluginLoad{Declared: 3}, NotSeen: []string{"A-Mod"}},
+			1,
+		},
+		{
+			"a plugin failed",
+			TestVerdict{Load: done(1, instance.FailedPlugin{LoadedPlugin: instance.LoadedPlugin{Name: "P"}})},
+			1,
+		},
+		{"a package not named", TestVerdict{Load: done(1), NotSeen: []string{"A-Mod"}}, 1},
+		{"count not kept", TestVerdict{Load: &instance.PluginLoad{Declared: 3, Complete: true}}, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tt.verdict.Problems(); len(got) != tt.want {
+				t.Errorf("Problems() = %q, want %d problems", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestSubmitCloneTakesTheNextNameWhenOneIsTaken asserts a copy whose usual name belongs to
 // another server is queued under that name with a number appended.
 func TestSubmitCloneTakesTheNextNameWhenOneIsTaken(t *testing.T) {

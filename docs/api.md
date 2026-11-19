@@ -542,7 +542,8 @@ in the `stopped` or `running` state.
 `POST /api/v1/instances/{id}/update-test` with `{"game": true, "mods": true}` returns a
 `202` `update_test` job. At least one of the two must be true, or the request answers
 `422`. The job copies the server, puts the new game build (`game`) and the pending mod
-updates (`mods`) on the copy, starts it and logs what the mod loader said about each plugin.
+updates (`mods`) on the copy, starts it, waits for its world to load and logs what the mod
+loader said about each plugin.
 A running source is copied live, so the copy's world is as of the game's last save and its
 seed backup is not marked consistent. The copy is a server whose `test_of` is the source's
 id. It is not public, has crossplay off, runs with the source's `mem_limit_mb` and half its
@@ -563,8 +564,9 @@ stopped or running and its test ran to the end), `apply_blocker` (why it is not 
 a sentence, or null), the
 `mod_changes` (`full_name`, `from`, `to`, `source`) where the copy runs a newer version,
 `failed` (`full_name`, `load_error`) and `not_seen` for the copy's load verification, and
-`plugin_load`, which is null until the copy's loader has written a log. While the copy is
-being created the build ids are empty and the lists are empty. The copy has no grants of
+`plugin_load`, which is null until the copy's loader has written a log. Its `complete` is
+false while the loader has not logged that it finished, and the counts are then partial.
+While the copy is being created the build ids are empty and the lists are empty. The copy has no grants of
 its own, so an account that cannot see the copy, which is anyone but an administrator, gets
 `{"test": null}` even when the server has one.
 

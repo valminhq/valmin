@@ -364,6 +364,34 @@ func TestAFailureReasonIsBounded(t *testing.T) {
 	}
 }
 
+// TestCompleteIsTheChainloadersFinishLine asserts a run counts as complete only once the
+// chainloader logged that it finished, and that a later run starts incomplete again.
+func TestCompleteIsTheChainloadersFinishLine(t *testing.T) {
+	t.Parallel()
+	cut := strings.Replace(bootLog, "[Message:   BepInEx] Chainloader startup complete\n", "", 1)
+	tests := []struct {
+		name, log string
+		want      bool
+	}{
+		{"finished", bootLog, true},
+		{"cut off while loading", cut, false},
+		{"a finished run followed by one still loading", bootLog + cut, false},
+		{"two finished runs", bootLog + bootLog, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			load, err := ReadPluginLoad(writeBepInExLog(t, tt.log), DefaultPatterns)
+			if err != nil || load == nil {
+				t.Fatalf("ReadPluginLoad = %v, %v", load, err)
+			}
+			if load.Complete != tt.want {
+				t.Errorf("Complete = %v, want %v", load.Complete, tt.want)
+			}
+		})
+	}
+}
+
 // TestPluginLinesAfterTheChainloaderAreNotCounted asserts that once the chainloader finished, a
 // line of the same shape, from BepInEx or from a mod under its own name, is not counted.
 func TestPluginLinesAfterTheChainloaderAreNotCounted(t *testing.T) {

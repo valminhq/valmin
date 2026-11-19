@@ -45,6 +45,9 @@ type PluginLoad struct {
 	// FirstError is the run's first Error or Fatal line that names no plugin failure, as
 	// failureReason bounds it, or "" if there was none.
 	FirstError string
+	// Complete is whether the chainloader logged that it finished. Until it does, plugins after
+	// the last named one may still load or fail.
+	Complete bool
 	// ObservedAt is when BepInEx last wrote to the log, which is the run these results come
 	// from. The lines themselves carry no timestamp (03 §5.3's captures), so this is the
 	// file's own — near enough to say which boot, and not presented as more than that.
@@ -116,7 +119,6 @@ func ClearPluginLog(dataDir string) error {
 // literal is minted here.
 func parsePluginLoad(r io.Reader, patterns PatternSet) PluginLoad {
 	load := PluginLoad{Declared: -1}
-	done := false
 	br := bufio.NewReader(r)
 	for {
 		line, err := readBoundedLine(br)
@@ -132,11 +134,11 @@ func parsePluginLoad(r io.Reader, patterns PatternSet) PluginLoad {
 				if convErr != nil {
 					n = -1
 				}
-				load, done = PluginLoad{Declared: n}, false
-			case done:
+				load = PluginLoad{Declared: n}
+			case load.Complete:
 				// After the chainloader finished, until the next run's count line.
 			case ev.Kind == EventChainloaderDone:
-				done = true
+				load.Complete = true
 			case ev.Kind == EventPluginLoading:
 				load.Plugins = append(load.Plugins, parseLoadedPlugin(ev.Groups[1]))
 			case ev.Kind == EventPluginFailed || ev.Kind == EventPluginSkipped:
@@ -284,6 +286,34 @@ func (l *PluginLoad) Loaded(fullName string, manifestPaths []string) bool {
 		}
 	}
 	return false
+}
+
+// ModLoad is what a chainloader run said about one installed package.
+type ModLoad string
+
+// ModLoad values. ModNotSeen is a plugin the run said nothing about, which stays the superset
+// for a failure no failure line describes.
+const (
+	ModLoaded  ModLoad = "loaded"
+	ModNotSeen ModLoad = "not_seen"
+	ModFailed  ModLoad = "failed"
+)
+
+// ModStatus reports what this run said about the package fullName whose manifest placed paths,
+// with the loader's line when it failed. "" is no answer: there is no run, or the package places
+// no plugin. A failure line outranks a load line, since a plugin whose load threw was named
+// `Loading [...]` on its way to the exception.
+func (l *PluginLoad) ModStatus(fullName string, paths []string) (status ModLoad, reason string) {
+	if l == nil || !IsPlugin(paths) {
+		return "", ""
+	}
+	if why, failed := l.FailedFor(fullName, paths); failed {
+		return ModFailed, why
+	}
+	if l.Loaded(fullName, paths) {
+		return ModLoaded, ""
+	}
+	return ModNotSeen, ""
 }
 
 // IsPlugin reports whether a package places anything BepInEx would load. A framework package's
