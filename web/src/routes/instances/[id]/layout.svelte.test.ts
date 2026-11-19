@@ -176,6 +176,28 @@ describe('the running job in the server header', () => {
 		}
 	});
 
+	it('shows a job that starts while the server state stays the same', async () => {
+		try {
+			await open('/instances/inst-a/backups', { 'inst-a': [actions.stop] }, live);
+			await vi.waitFor(() =>
+				expect(daemon.requests('GET', '/instances/inst-a/jobs')).toHaveLength(1)
+			);
+
+			jobs = [job({ job_id: 'job-1', kind: 'backup', status: 'running' })];
+			socket.push('instance.inst-a.state', {
+				type: 'state',
+				instance: 'inst-a',
+				state: 'running',
+				restart_required: false,
+				pending_restart: false
+			});
+
+			expect(await screen.findByRole('link', { name: /Backup running/ })).toBeTruthy();
+		} finally {
+			jobs = [];
+		}
+	});
+
 	it('says nothing while no job runs', async () => {
 		await open('/instances/inst-a/backups', { 'inst-a': [actions.stop] }, live);
 		await vi.waitFor(() =>

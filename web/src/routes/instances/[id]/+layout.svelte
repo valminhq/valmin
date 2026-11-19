@@ -7,6 +7,7 @@
 	import { session } from '#lib/state/session.svelte.js';
 	import { instanceList } from '#lib/state/instances.svelte.js';
 	import { socket } from '#lib/socket/index.svelte.js';
+	import { topics, type ServerMessage } from '#lib/socket/messages.js';
 	import ServerNav from '#lib/components/server-nav.svelte';
 	import StateBadge from '#lib/components/state-badge.svelte';
 	import ServerControls from '#lib/components/server-controls.svelte';
@@ -30,20 +31,21 @@
 	// The socket cannot say what changed while it was gone, so a reconnect re-reads the list.
 	$effect(() => socket.onConnected(() => void instanceList.load()));
 
-	// The job running on this server and the setup steps it still owes. Polled, because the
-	// socket has a topic per job and none for a server's jobs; a state change re-reads at once.
-	const serverState = $derived(instance?.state);
+	// The job running on this server and the setup steps it still owes, re-read on each state
+	// message, on the subscription's ack, on reconnect and on a slow timer. Only the newest
+	// reply is shown.
 	let working = $state<Job | null>(null);
 	let owed = $state<Operation | null>(null);
 	$effect(() => {
 		if (!session.user || !id) return;
-		void serverState;
 		let current = true;
+		let latest = 0;
 		async function read() {
 			if (document.hidden) return;
+			const seq = ++latest;
 			try {
 				const [jobs, operation] = await Promise.all([instances.jobs(id), operations.get(id)]);
-				if (!current) return;
+				if (!current || seq !== latest) return;
 				working = jobs.find((job) => job.status === 'running') ?? null;
 				owed = operation;
 			} catch {
@@ -51,10 +53,16 @@
 			}
 		}
 		void read();
-		const timer = setInterval(read, 5000);
+		const off = socket.subscribe(topics.state(id), (m: ServerMessage) => {
+			if (m.type === 'state' || m.type === 'subscribed') void read();
+		});
+		const unhook = socket.onConnected(() => void read());
+		const timer = setInterval(read, 60_000);
 		document.addEventListener('visibilitychange', read);
 		return () => {
 			current = false;
+			off();
+			unhook();
 			clearInterval(timer);
 			document.removeEventListener('visibilitychange', read);
 		};

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/valminhq/valmin/internal/crypto"
@@ -598,6 +599,31 @@ func TestResumeWritesOneAuditEntryAndNoneForItsStep(t *testing.T) {
 	}
 	if got := lifecycleAuditRows(t, db, "instances.start"); len(got) != 0 {
 		t.Errorf("start audit rows = %+v, want none: the resume already records the chain step", got)
+	}
+}
+
+// TestAbandonAnnouncesTheInstance asserts that giving up a chain publishes the instance's state.
+func TestAbandonAnnouncesTheInstance(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _ := provisionWorld(t)
+	h := rt.instances
+
+	inst := seedStoppedInstance(t, db, "chain-abandon-announce")
+	seedChain(t, h, db, inst.ID, &control.OperationPlan{Start: true})
+	var announced atomic.Bool
+	h.Engine.Announce(func(_ context.Context, instanceID string) {
+		if instanceID == inst.ID {
+			announced.Store(true)
+		}
+	})
+
+	rec := as(rt, admin, httptest.NewRequest(
+		http.MethodPost, "/api/v1/instances/"+inst.ID+"/operation/abandon", http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	if !announced.Load() {
+		t.Error("abandoning published nothing for the instance")
 	}
 }
 
