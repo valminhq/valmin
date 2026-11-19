@@ -187,6 +187,22 @@ func TestCloneWithProgressCopiesFilesAndReachesComplete(t *testing.T) {
 	}
 }
 
+// TestCloneWithoutAReportStillClones asserts that a nil report only drops the progress.
+func TestCloneWithoutAReportStillClones(t *testing.T) {
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, binaryMarker), make([]byte, 4096), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dst := filepath.Join(t.TempDir(), "server")
+
+	if err := CloneWithProgress(t.Context(), src, dst, time.Millisecond, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dst, binaryMarker)); err != nil {
+		t.Errorf("clone did not publish the binary: %v", err)
+	}
+}
+
 func TestCloneWithProgressSkipsAnAlreadyCompleteClone(t *testing.T) {
 	dst := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dst, binaryMarker), []byte("already here"), 0o755); err != nil {
