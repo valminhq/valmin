@@ -147,6 +147,7 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		Ports:   instance.NewAllocator(d.DB, d.Runtime, cfg.Ports.Base, cfg.Ports.Stride),
 		Streams: d.Streams, ReadMods: d.ReadMods, DataRoot: dataRoot,
 		CPUs: goruntime.NumCPU(), AvailableMemoryMB: instance.AvailableMemoryMB,
+		ReadyTimeout: readyTimeout,
 	}
 	c.UpdateChecker = &UpdateChecker{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Config: cfg, Notifier: d.Notifier,
