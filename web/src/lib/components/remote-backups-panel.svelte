@@ -5,6 +5,8 @@
 	import { actions, instances, type Instance } from '#lib/api/instances.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { unsaved } from '#lib/state/dirty.svelte.js';
+	import { socket } from '#lib/socket/index.svelte.js';
+	import { topics, type ServerMessage } from '#lib/socket/messages.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
@@ -31,6 +33,7 @@
 	const canSetPolicy = $derived(allowed.includes(actions.backupsRestore));
 	const canUpload = $derived(allowed.includes(actions.backupsCreate));
 	const canAdmin = $derived(session.allowedGlobally().includes(actions.panelSettings));
+	const inFlight = new Set<RemoteCopy['status']>(['pending', 'retry_wait', 'uploading']);
 	let copies = $state<RemoteCopy[]>([]);
 	const configured = $derived(Boolean(summary?.destination_id));
 	let cursor = $state<string | null>(null);
@@ -60,15 +63,19 @@
 			instance.remote_keep_snapshots ?? 10
 		]);
 	});
+	// Re-read on each state message of the server and on a timer: every 5 s while a copy is
+	// waiting or uploading, otherwise every minute.
 	$effect(() => {
 		const id = instance.id;
 		void refreshKey;
 		if (!canList) return;
 		let disposed = false;
 		let fetching = false;
+		let readAt = 0;
 		async function refresh() {
 			if (fetching) return;
 			fetching = true;
+			readAt = Date.now();
 			try {
 				const page = await remoteBackups.list(id);
 				if (disposed) return;
@@ -86,11 +93,20 @@
 			}
 		}
 		void refresh();
+		const off = socket.subscribe(topics.state(id), (m: ServerMessage) => {
+			if (m.type === 'state') void refresh();
+		});
+		const unhook = socket.onConnected(() => void refresh());
 		const timer = setInterval(() => {
-			if (!document.hidden) void refresh();
+			if (document.hidden) return;
+			if (copies.some((copy) => inFlight.has(copy.status)) || Date.now() - readAt >= 60_000) {
+				void refresh();
+			}
 		}, 5000);
 		return () => {
 			disposed = true;
+			off();
+			unhook();
 			clearInterval(timer);
 		};
 	});
