@@ -3,12 +3,14 @@ package control
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/valminhq/valmin/internal/backup"
 	"github.com/valminhq/valmin/internal/errcode"
@@ -65,6 +67,9 @@ type UpdateTester struct {
 	CPUs int
 	// AvailableMemoryMB reads the host's available memory.
 	AvailableMemoryMB func() (int, error)
+	// ReadyTimeout is the longest a test waits for its copy's world to load before it reads the
+	// mod loader's log.
+	ReadyTimeout time.Duration
 }
 
 // UpdateTestPayload is what an update-test job records.
@@ -172,6 +177,17 @@ func (t *UpdateTester) runTest(src *store.Instance, p *UpdateTestPayload, reques
 			&ChainStep{Type: StepStart},
 		); err != nil {
 			return trialFailure(ctx, err, "start the copy")
+		}
+		// The mod loader finishes before the world loads, so its log is whole only after this.
+		jh.Progress(ctx, 85, "waiting for the copy's world to load")
+		if err := t.Chainer.runStep(ctx, jh, trialChain(copyInst, requestedBy), &ChainStep{
+			Type: StepWaitFor, Condition: ConditionReady, Seconds: waitSeconds(t.ReadyTimeout),
+		}); err != nil {
+			return trialFailure(ctx, err, "wait for the copy to load")
+		}
+		// The wait skips a copy that already stopped, which must fail the test, not pass it.
+		if err := t.Chainer.requireState(ctx, copyInst.ID, instance.StateRunning); err != nil {
+			return trialFailure(ctx, err, "check the copy is still running")
 		}
 		jh.Progress(ctx, 100, t.bootReport(ctx, jh, copyInst.ID))
 		return jobs.Outcome{
@@ -309,30 +325,112 @@ func (t *UpdateTester) updateMods(
 	return t.Chainer.waitChild(ctx, jh, job)
 }
 
+// waitSeconds is d as a wait step's seconds, within the bounds a step accepts.
+func waitSeconds(d time.Duration) int {
+	return min(max(int(d/time.Second), 1), MaxWaitSeconds)
+}
+
 // bootReport logs what the copy's loader said about each plugin and returns the job's result
-// line. A copy whose loader log says nothing is reported as such rather than as a success.
+// line. A copy whose loader log says nothing, or had not finished, is reported as such rather
+// than as a success.
 func (t *UpdateTester) bootReport(ctx context.Context, jh *jobs.Handle, copyID string) string {
 	copyInst, err := t.Chainer.fresh(ctx, copyID)
 	if err != nil {
 		return "the copy started; its mods could not be checked: " + err.Error()
 	}
-	load, err := instance.ReadPluginLoad(copyInst.DataDir, t.Streams.Patterns())
+	verdict, err := t.Verify(ctx, copyInst)
 	switch {
 	case err != nil:
 		return "the copy started; its mods could not be checked: " + err.Error()
-	case load == nil:
+	case verdict.Load == nil:
 		return "the copy started; the mod loader wrote no log, so no mod was checked"
 	}
-	failed := make([]string, 0, len(load.Failed))
-	for _, f := range load.Failed {
+	for _, f := range verdict.Load.Failed {
 		jh.Log(fmt.Sprintf("%s %s did not load: %s", f.Name, f.Version, f.Reason))
-		failed = append(failed, f.Name)
 	}
-	if len(failed) == 0 {
-		return fmt.Sprintf("the copy started; %d mods loaded and none failed", load.LoadedCount())
+	loaded := fmt.Sprintf("the copy started; %d mods loaded", verdict.Load.LoadedCount())
+	if problems := verdict.Problems(); len(problems) > 0 {
+		return loaded + "; " + strings.Join(problems, "; ")
 	}
-	return fmt.Sprintf("the copy started; %d mods loaded and %d failed: %s",
-		load.LoadedCount(), len(failed), strings.Join(failed, ", "))
+	return loaded + " and none failed"
+}
+
+// TestVerdict is what a test copy's mod loader said about the copy's enabled mods.
+type TestVerdict struct {
+	// Load is the loader's last run, nil when the copy wrote no loader log.
+	Load *instance.PluginLoad
+	// Failed are the enabled packages the loader said it could not load.
+	Failed []FailedMod
+	// NotSeen are the enabled plugin packages the loader did not name.
+	NotSeen []string
+}
+
+// FailedMod is an installed package the mod loader could not load, with the loader's line.
+type FailedMod struct {
+	FullName, Reason string
+}
+
+// Problems lists, as phrases, everything that keeps the verdict from saying every mod loaded:
+// no loader log, a loader that had not finished, failed plugins, packages it never named and a
+// count it did not keep. An unfinished run reports only itself and its failures so far, since
+// the rest are still to come. Empty means every mod loaded.
+func (v *TestVerdict) Problems() []string {
+	if v.Load == nil {
+		return []string{"the mod loader wrote no log, so no mod was checked"}
+	}
+	var problems []string
+	if !v.Load.Complete {
+		problems = append(problems, "the mod loader had not finished when the copy was checked")
+	}
+	if n := len(v.Load.Failed); n > 0 {
+		names := make([]string, 0, n)
+		for _, f := range v.Load.Failed {
+			names = append(names, f.Name)
+		}
+		problems = append(problems, fmt.Sprintf("%d failed: %s", n, strings.Join(names, ", ")))
+	}
+	if !v.Load.Complete {
+		return problems
+	}
+	if len(v.NotSeen) > 0 {
+		problems = append(problems, "the loader said nothing about "+strings.Join(v.NotSeen, ", "))
+	}
+	if d := v.Load.Discrepancy(); d != "" {
+		problems = append(problems, d)
+	}
+	return problems
+}
+
+// Verify reads what testCopy's mod loader said about each of its enabled mods.
+func (t *UpdateTester) Verify(ctx context.Context, testCopy *store.Instance) (*TestVerdict, error) {
+	load, err := instance.ReadPluginLoad(testCopy.DataDir, t.Streams.Patterns())
+	if err != nil {
+		return nil, fmt.Errorf("read the mod loader log of %s: %w", testCopy.Name, err)
+	}
+	verdict := &TestVerdict{Load: load}
+	if load == nil {
+		return verdict, nil
+	}
+	mods, err := t.DB.InstanceMods(ctx, testCopy.ID)
+	if err != nil {
+		return nil, fmt.Errorf("read the mods of %s: %w", testCopy.Name, err)
+	}
+	for i := range mods {
+		if !mods[i].Enabled {
+			continue
+		}
+		var manifest []installer.ManifestEntry
+		// A manifest that will not decode places no plugin, so the mod has no status.
+		_ = json.Unmarshal([]byte(mods[i].FileManifest), &manifest)
+		switch status, reason := load.ModStatus(mods[i].FullName, installer.Paths(manifest)); status {
+		case instance.ModFailed:
+			verdict.Failed = append(verdict.Failed, FailedMod{FullName: mods[i].FullName, Reason: reason})
+		case instance.ModNotSeen:
+			verdict.NotSeen = append(verdict.NotSeen, mods[i].FullName)
+		case instance.ModLoaded:
+		}
+	}
+	return verdict, nil
 }
 
 // TestChanges is what an update-test copy runs that its source does not.

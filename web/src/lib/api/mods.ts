@@ -175,6 +175,8 @@ export interface PluginLoad {
 	loaded: number;
 	/** How many plugins the loader said it could not load. */
 	failed: number;
+	/** Whether the loader logged that it finished; until then the counts are partial. */
+	complete: boolean;
 	/** The panel's own sentence when the two numbers disagree, rendered as sent. The
 	 * gap is reported, never resolved, and the wording belongs to the daemon — a frontend
 	 * that composed it would be holding a piece of game knowledge (F2, `02 §2.1`). */

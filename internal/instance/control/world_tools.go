@@ -169,10 +169,9 @@ func hasWorlds(inst *store.Instance) (bool, error) {
 // start, a wait for the world to load, then the tool's console line. The line must be delivered,
 // so its step is strict.
 func worldToolSteps(line string, ready time.Duration, snapshot bool) []ChainStep {
-	wait := min(max(int(ready/time.Second), 1), MaxWaitSeconds)
 	steps := []ChainStep{
 		{Type: StepStart},
-		{Type: StepWaitFor, Condition: ConditionReady, Seconds: wait},
+		{Type: StepWaitFor, Condition: ConditionReady, Seconds: waitSeconds(ready)},
 		{Type: StepCommand, Command: line, MustSend: true},
 	}
 	if snapshot {

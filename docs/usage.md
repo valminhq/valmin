@@ -521,7 +521,8 @@ Valmin then:
    the game's last save, so it can lag behind by up to the save interval, 30 minutes by
    default.
 2. Installs the new game build and the pending mod updates on the copy.
-3. Starts the copy and reads what the mod loader said.
+3. Starts the copy, waits up to 3 minutes for its world to load, and reads what the mod
+   loader said.
 
 The copy is an ordinary server in the server list, named after the original with
 **update test** added, and a number after that when another server already has the name.
@@ -536,7 +537,9 @@ The card then shows the copy's state, the game build before and after, and each 
 that moved to another version, with a **Changelog** under it (see
 [Read what changed in a mod](#read-what-changed-in-a-mod)). Mods the loader said it could
 not load are listed in red with the loader's own line. A copy whose loader wrote no log is
-reported as not checked rather than as a success.
+reported as not checked rather than as a success, and one whose loader had not finished
+when it was read is reported with the count so far. The test job's last line says the
+same, and also names enabled mods the loader said nothing about.
 
 - **Apply to the server** stops the original with its world saved if it is running,
   backs up the world, installs the game build and mod versions the copy runs, starts the

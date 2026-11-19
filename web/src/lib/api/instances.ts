@@ -382,6 +382,8 @@ export interface UpdateTest {
 		declared: number | null;
 		loaded: number;
 		failed: number;
+		/** Whether the loader logged that it finished; until then the counts are partial. */
+		complete: boolean;
 	} | null;
 }
 
