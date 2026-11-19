@@ -173,6 +173,17 @@ func (db *DB) DueRemoteCopies(ctx context.Context, now time.Time) ([]RemoteCopy,
  ORDER BY next_attempt_at,id LIMIT 1`, FormatTime(now), FormatTime(now))
 }
 
+// RemoteWorkPending reports whether any copy is waiting, uploading or holds an archive to
+// delete: the only rows the remote-copy worker reconciles or dispatches.
+func (db *DB) RemoteWorkPending(ctx context.Context) (bool, error) {
+	var pending bool
+	if err := db.Reader.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM remote_copies
+ WHERE status IN ('pending','retry_wait','uploading') OR cleanup_pending=TRUE)`).Scan(&pending); err != nil {
+		return false, fmt.Errorf("check remote work: %w", err)
+	}
+	return pending, nil
+}
+
 // ReconcileRemoteCopies settles uploads whose job is gone, cancelled or failed or back to retry,
 // and fails waiting uploads whose deadline passed or whose server or archive is gone. With no
 // copy in flight it returns after one read, without taking the writer.
