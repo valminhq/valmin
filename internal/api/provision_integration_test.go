@@ -56,7 +56,7 @@ func waitForJobTerminal(t *testing.T, rt *Server, admin *store.User, jobID strin
 func TestCreateInstanceProvisionsEndToEnd(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	cfg := config.Defaults()
+	cfg := testConfig(t)
 	cfg.Server.ExternalURL = testOrigin
 	cfg.Data.Root = dir
 	cfg.Data.HostRoot = dir
