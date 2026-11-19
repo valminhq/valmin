@@ -492,21 +492,28 @@ const binaryMarker = "valheim_server.x86_64"
 
 // CloneWithProgress copies the cached build into an instance's server/ via a temp directory
 // renamed on completion, so a half-copied server/ is never visible under its real name. report
-// receives the percentage of srcDir's bytes copied so far, polled at pollInterval. A dstDir
-// that already holds a complete clone is left untouched.
+// receives the percentage of srcDir's bytes copied so far, polled at pollInterval; a nil report
+// walks neither tree. A dstDir that already holds a complete clone is left untouched.
 func CloneWithProgress(
 	ctx context.Context,
 	srcDir, dstDir string,
 	pollInterval time.Duration,
 	report func(pct int),
 ) error {
+	progress := report != nil
+	if !progress {
+		report = func(int) {}
+	}
 	if _, err := os.Stat(filepath.Join(dstDir, binaryMarker)); err == nil {
 		report(100)
 		return nil
 	}
-	total, err := dirSize(srcDir)
-	if err != nil {
-		return fmt.Errorf("measure %s: %w", srcDir, err)
+	var total int64
+	if progress {
+		var err error
+		if total, err = dirSize(srcDir); err != nil {
+			return fmt.Errorf("measure %s: %w", srcDir, err)
+		}
 	}
 
 	tmp := dstDir + ".tmp"
@@ -521,13 +528,17 @@ func CloneWithProgress(
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 
-	ticker := time.NewTicker(max(pollInterval, time.Millisecond))
-	defer ticker.Stop()
+	var tick <-chan time.Time
+	if progress {
+		ticker := time.NewTicker(max(pollInterval, time.Millisecond))
+		defer ticker.Stop()
+		tick = ticker.C
+	}
 	for {
 		select {
 		case waitErr := <-done:
 			return finishClone(waitErr, tmp, dstDir, report)
-		case <-ticker.C:
+		case <-tick:
 			reportCloneProgress(tmp, total, report)
 		}
 	}
