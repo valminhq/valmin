@@ -147,6 +147,31 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 	return nil
 }
 
+// CompactIfSparse rebuilds the database file with VACUUM when more than half its pages are free,
+// as after a migration drops a large table: SQLite reuses free pages but never shrinks the file
+// on its own. The rebuild copies only the live pages, and holds the writer while it runs. It
+// then truncates the write-ahead logs of every attached file, which a large migration leaves
+// at their largest.
+func CompactIfSparse(ctx context.Context, db *sql.DB) (bool, error) {
+	var free, total int64
+	if err := db.QueryRowContext(ctx, `PRAGMA freelist_count`).Scan(&free); err != nil {
+		return false, fmt.Errorf("read free pages: %w", err)
+	}
+	if err := db.QueryRowContext(ctx, `PRAGMA page_count`).Scan(&total); err != nil {
+		return false, fmt.Errorf("read page count: %w", err)
+	}
+	if free*2 <= total {
+		return false, nil
+	}
+	if _, err := db.ExecContext(ctx, `VACUUM`); err != nil {
+		return false, fmt.Errorf("compact the database: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		return false, fmt.Errorf("truncate the write-ahead logs: %w", err)
+	}
+	return true, nil
+}
+
 func appliedChecksums(ctx context.Context, db *sql.DB) (map[int]string, error) {
 	rows, err := db.QueryContext(ctx, `SELECT version, checksum FROM schema_migrations`)
 	if err != nil {

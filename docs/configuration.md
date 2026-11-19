@@ -343,7 +343,8 @@ direct variable and its `_FILE` form is an error.
 The panel generates the key only on its first start. Afterwards a missing or
 different key stops startup; see [key recovery](operations.md#recover-from-a-lost-master-key).
 The database defaults to `panel.db` under the same root. Preserve both in
-[installation backups](operations.md#back-up-the-whole-installation).
+[installation backups](operations.md#back-up-the-whole-installation). The mod catalogue
+lives at `cache/catalogue.db` under the data root whatever `db.dsn` says, and needs no backup.
 
 Durations accept values such as `30s`, `24h`, and whole days such as `7d`.
 Environment variables for lists, such as trusted proxy CIDRs, use comma-separated

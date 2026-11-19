@@ -100,7 +100,7 @@ func TestSnapshotBeforeMigrate(t *testing.T) {
 		t.Errorf("snapshot mode is %#o, want 0600", perm)
 	}
 
-	cp, err := Open(t.Context(), "sqlite", "file:"+path)
+	cp, err := Open(t.Context(), "sqlite", "file:"+path, CataloguePath(t.TempDir()))
 	if err != nil {
 		t.Fatalf("open snapshot: %v", err)
 	}
@@ -128,7 +128,12 @@ func padVersion(v int) string {
 func TestSnapshotBeforeMigrateSkips(t *testing.T) {
 	t.Parallel()
 	fresh := func(t *testing.T) *DB {
-		db, err := Open(t.Context(), "sqlite", "file:"+filepath.Join(t.TempDir(), "panel.db"))
+		db, err := Open(
+			t.Context(),
+			"sqlite",
+			"file:"+filepath.Join(t.TempDir(), "panel.db"),
+			CataloguePath(t.TempDir()),
+		)
 		if err != nil {
 			t.Fatal(err)
 		}
