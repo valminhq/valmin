@@ -28,6 +28,40 @@ func remoteBackup(t *testing.T, db *DB, instanceID, backupID string) *Backup {
 	return b
 }
 
+// TestRemoteWorkPendingSeesQueuedCopiesAndCleanup asserts that the worker's idle check finds a
+// waiting copy and an archive to delete, and nothing once both are settled.
+func TestRemoteWorkPendingSeesQueuedCopiesAndCleanup(t *testing.T) {
+	t.Parallel()
+	db, instanceID := remoteBackupFixture(t)
+	pending := func() bool {
+		t.Helper()
+		got, err := db.RemoteWorkPending(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if pending() {
+		t.Fatal("RemoteWorkPending = true with no copies")
+	}
+
+	exec(t, db.Writer, `UPDATE instances SET remote_backup_enabled=TRUE WHERE id=?`, instanceID)
+	remoteBackup(t, db, instanceID, "queued")
+	if !pending() {
+		t.Error("RemoteWorkPending = false with a pending copy")
+	}
+
+	exec(t, db.Writer, `UPDATE remote_copies SET status='succeeded'`)
+	if pending() {
+		t.Error("RemoteWorkPending = true with only settled copies")
+	}
+
+	exec(t, db.Writer, `UPDATE remote_copies SET cleanup_pending=TRUE`)
+	if !pending() {
+		t.Error("RemoteWorkPending = false with a copy to delete")
+	}
+}
+
 func TestCreateBackupAutomaticallyQueuesRemoteCopy(t *testing.T) {
 	t.Parallel()
 	db, instanceID := remoteBackupFixture(t)
