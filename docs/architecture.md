@@ -83,8 +83,9 @@ lock prevents conflicting operations from changing the same server at once. A
 transaction covers the change of state, never the work itself, so a slow Docker call
 or file copy never holds the database.
 
-The daemon holds a database lease to prevent multiple active daemons from managing
-the same installation. On startup, the supervisor removes helper containers a killed
+The daemon holds an exclusive lock on `.valmind.lock` in the data directory, so a second
+daemon refuses to start against the same installation. The kernel releases the lock when
+the process exits, so a restart after a crash is never kept waiting. On startup, the supervisor removes helper containers a killed
 daemon left behind, closes out the jobs a crash interrupted, reconciles database records with
 Docker containers, and resumes starts that a crash cut short. Interrupted multi-step
 operations, such as provisioning, wait for an operator to resume or abandon them.
