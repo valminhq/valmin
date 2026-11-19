@@ -81,6 +81,7 @@ type Server struct {
 	remoteBackups *RemoteBackups
 	diagnostics   *Diagnostics
 	discord       *discord.Bot
+	retention     *Retention
 	hub           *ws.Hub
 }
 
@@ -100,7 +101,7 @@ func (s *Server) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, run := range []func(context.Context){
 		s.supervisor.Run, s.mods.Run, s.scheduler.Run, s.shutdowns.Run, s.notifier.Run, s.notifier.Dispatcher.Run,
-		s.remoteBackups.worker.Run, s.players.Run, s.discord.Run,
+		s.remoteBackups.worker.Run, s.players.Run, s.discord.Run, s.retention.Run,
 	} {
 		wg.Go(func() { run(ctx) })
 	}
@@ -226,6 +227,7 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 		router: rt, health: health, supervisor: ctl.Supervisor, instances: instances, mods: mods,
 		scheduler: sched, shutdowns: shutdowns, players: players, webhooks: webhooks, notifier: notifier,
 		remoteBackups: remoteBackups, diagnostics: diagnostics, discord: bot, hub: hub,
+		retention: &Retention{DB: w.db, Engine: w.engine},
 	}
 	w.engine.OnFinish(srv.onJobFinished)
 	registerCancellationPolicies(w.engine)

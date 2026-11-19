@@ -84,10 +84,6 @@ func (s *Scanner) Scan(ctx context.Context) (store.ConditionDiff, error) {
 	if s.Dispatcher != nil {
 		s.Dispatcher.DispatchAlerts(ctx)
 	}
-
-	if _, err := s.DB.SweepIncidents(ctx, time.Now().UTC().Add(-alerts.IncidentRetention)); err != nil {
-		slog.WarnContext(ctx, "sweep incidents", slog.Any("error", err))
-	}
 	return diff, nil
 }
 

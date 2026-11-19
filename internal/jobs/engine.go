@@ -506,8 +506,8 @@ func (e *Engine) Get(ctx context.Context, id string) (*store.Job, error) {
 	return j, nil
 }
 
-// Sweep is 12 §7's retention sweep, run once at daemon start: terminal jobs older than
-// jobs.retention_days or beyond the most recent 500 per instance are pruned in one DELETE.
+// Sweep prunes terminal jobs older than jobs.retention_days or beyond the most recent 500 per
+// instance and kind, in one DELETE. The caller runs it daily.
 func (e *Engine) Sweep(ctx context.Context) error {
 	n, err := e.db.SweepTerminalJobs(ctx, time.Now(), e.cfg.RetentionDays)
 	if err != nil {

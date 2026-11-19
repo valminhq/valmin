@@ -1268,7 +1268,8 @@ name_taken`. The URL is write-only: no response contains it, because it is the w
 that channel. A URL the panel refuses, such as a private address, is `422` on `url`.
 Deliveries can be narrowed with `webhook_id`, `rule_id` and `status` (`pending`,
 `delivered` or `failed`). Each record has the event kind, the server, the number of
-attempts and the last error, which never contains the URL.
+attempts and the last error, which never contains the URL. A delivered or failed record is
+kept for 30 days; the records of an alert are kept until 30 days after it resolves.
 
 A rule has `condition_kind`, `instance_id` (`null` for every server), `webhook_ids`,
 `enabled`, `params` and the quiet hours fields described below. Every webhook a rule names

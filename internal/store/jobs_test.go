@@ -345,13 +345,19 @@ func TestLastJobForInstanceReturnsTheMostRecent(t *testing.T) {
 	}
 }
 
-// TestSweepTerminalJobsKeepsMostRecent500PerInstance is 12 §7's retention sweep.
-func TestSweepTerminalJobsKeepsMostRecent500PerInstance(t *testing.T) {
+// TestSweepTerminalJobsKeepsMostRecent500PerKind asserts the count cap applies per instance and
+// kind, so 600 starts never evict an older backup of the same server.
+func TestSweepTerminalJobsKeepsMostRecent500PerKind(t *testing.T) {
 	t.Parallel()
 	db := open(t)
 	instanceID := seedInstance(t, db, NewID(), 2461)
 
 	now := time.Now()
+	backup := NewID()
+	exec(t, db.Writer, `
+		INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name, payload, created_at, finished_at)
+		VALUES (?, 'backup', 'succeeded', ?, ?, 'test', '{}', ?, ?)`,
+		backup, "instance:"+backup, instanceID, FormatTime(now.Add(-time.Second)), FormatTime(now))
 	for i := 0; i < 600; i++ {
 		id := NewID()
 		exec(t, db.Writer, `
@@ -373,8 +379,11 @@ func TestSweepTerminalJobsKeepsMostRecent500PerInstance(t *testing.T) {
 		`SELECT COUNT(*) FROM job_runs WHERE instance_id = ?`, instanceID).Scan(&remaining); err != nil {
 		t.Fatal(err)
 	}
-	if remaining != 500 {
-		t.Errorf("remaining = %d, want 500", remaining)
+	if remaining != 501 {
+		t.Errorf("remaining = %d, want 500 starts and the backup", remaining)
+	}
+	if got, err := db.JobByID(t.Context(), backup); err != nil || got == nil {
+		t.Errorf("the older backup was swept: %+v, err %v", got, err)
 	}
 }
 
