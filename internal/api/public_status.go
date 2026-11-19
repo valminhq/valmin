@@ -119,11 +119,7 @@ func (h *PublicStatus) status(w http.ResponseWriter, r *http.Request) {
 		ConnectInfo: st.ConnectInfo,
 		Activity:    publicActivity(st.State, st.JobKind),
 	}
-	if sampler := h.Streams.Sampler(id); sampler != nil {
-		if latest, ok := sampler.Latest(); ok {
-			view.Players, view.ObservedAt = latest.Players, &latest.TS
-		}
-	}
+	h.addPlayers(&view, id)
 	if st.Show.Join {
 		h.addJoin(&view, id, st)
 	}
@@ -138,6 +134,20 @@ func (h *PublicStatus) status(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	JSON(w, r, http.StatusOK, view)
+}
+
+// addPlayers adds the log reader's current player count while the server's container is
+// sampled, which it is not once the server stops.
+func (h *PublicStatus) addPlayers(view *publicStatusView, id string) {
+	sampler, reader := h.Streams.Sampler(id), h.Streams.Reader(id)
+	if sampler == nil || reader == nil {
+		return
+	}
+	if _, ok := sampler.Latest(); !ok {
+		return
+	}
+	now := time.Now().UTC()
+	view.Players, view.ObservedAt = reader.Players(), &now
 }
 
 // addJoin fills in how to join: the join code this boot logged on a crossplay server, else the
