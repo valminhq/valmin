@@ -492,10 +492,11 @@ you can check it before starting. The world itself is not touched by the update.
 On a modded server, the update puts every installed mod and your configs back onto the new
 build. Files a mod wrote under `BepInEx` while it ran, outside its own package files and
 configs, are not carried over; the update's log lists them. A new game build can still break
-a mod, and the panel cannot check that in advance. For
-that reason nothing updates a modded server on its own: a
-[scheduled game update](operations.md#schedule-maintenance) skips it and records the
-skip.
+a mod, and this update does not check that in advance. For
+that reason a [scheduled game update](operations.md#schedule-maintenance) skips a modded
+server and records the skip. To update one on a schedule,
+[test the updates on a copy](operations.md#test-updates-on-a-schedule), which checks the mods
+first.
 
 Rebuilding the game runtime image does not download a new game build; only this action
 does.
@@ -559,7 +560,10 @@ same, and also names enabled mods the loader said nothing about.
 - **Discard the copy** deletes it with its world and backups. The original is not touched.
   A running copy has to be stopped first.
 
-A copy cannot itself be tested.
+A copy cannot itself be tested. To run the test on a schedule, and optionally apply it when
+every mod loads and nobody is on, see
+[Test updates on a schedule](operations.md#test-updates-on-a-schedule). An alert rule for
+**Update test finished** reports each test's result.
 
 ### Change the game version
 
@@ -1440,6 +1444,7 @@ Select **Add rule** and choose the event:
 | Maintenance            | **Restart required**                  | A change is waiting for a restart.                                   |
 | Maintenance            | **Backups stale**                     | Scheduled backups are not producing archives.                        |
 | Maintenance            | **Mod updates**                       | Newer versions of a server's mods are available. Only checked while such a rule exists. |
+| Maintenance            | **Update test finished**              | An [update test on a copy](#test-an-update-on-a-copy) ended: how its mods loaded, and whether the updates are being applied. |
 | Maintenance            | **Low disk**                          | The host is running out of disk space. Administration page only.     |
 | Players, Bosses, Raids | [Game events](#game-events-valmineye) | What happens in the game, reported by ValminEye.                     |
 

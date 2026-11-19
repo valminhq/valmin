@@ -74,6 +74,8 @@
 	let waitForEmpty = $state(false);
 	let maxDeferral = $state('7200');
 	let unknownPlayers = $state<'wait' | 'run'>('wait');
+	/** Whether an update test schedule applies what it tested. */
+	let applyTested = $state(false);
 
 	const everyLabels: Record<Every, string> = {
 		hours: 'Every few hours',
@@ -199,6 +201,7 @@
 
 	const effectiveKind = $derived(editBase?.kind ?? kind);
 	const isChain = $derived(effectiveKind === 'chain');
+	const isUpdateTest = $derived(effectiveKind === 'update_test');
 	/** Each step is offered to whoever may do it by hand; the daemon checks it again on write. */
 	const offeredSteps = $derived(
 		chainSteps.filter((c) => c.action === null || allowed.includes(c.action))
@@ -271,6 +274,7 @@
 		if (built !== editBase.cron || moveZone) body.cron = built;
 		if (moveZone) body.timezone = viewer;
 		if (isChain && JSON.stringify(steps) !== baseSteps) body.steps = steps;
+		if (isUpdateTest && applyTested !== (editBase.apply ?? false)) body.apply = applyTested;
 		if (!playerAware) {
 			if (editBase.wait_for_empty) body.wait_for_empty = false;
 			return body;
@@ -372,6 +376,7 @@
 				cron: built,
 				timezone: viewer,
 				...(isChain ? { steps } : {}),
+				...(isUpdateTest ? { apply: applyTested } : {}),
 				...(playerAware
 					? {
 							wait_for_empty: waitForEmpty,
@@ -382,6 +387,7 @@
 			});
 			kind = '';
 			draft = [];
+			applyTested = false;
 		});
 	}
 
@@ -400,6 +406,7 @@
 		waitForEmpty = s.wait_for_empty;
 		maxDeferral = String(s.max_deferral_seconds);
 		unknownPlayers = s.unknown_players;
+		applyTested = s.apply ?? false;
 		await tick();
 		formHeading?.focus();
 	}
@@ -414,6 +421,7 @@
 		waitForEmpty = false;
 		maxDeferral = '7200';
 		unknownPlayers = 'wait';
+		applyTested = false;
 	}
 
 	/** Leaves an edit the user ended and moves focus back to the form's heading. */
@@ -507,8 +515,9 @@
 	<Card.Header>
 		<Card.Title>Schedules</Card.Title>
 		<Card.Description>
-			Run backups, restarts, game updates and sequences of steps automatically at scheduled times.
-			If the server is busy when a task is due, that run is skipped.
+			Run backups, restarts, game updates, update tests on a copy and sequences of steps
+			automatically at scheduled times. If the server is busy when a task is due, that run is
+			skipped.
 		</Card.Description>
 	</Card.Header>
 	<Card.Content class="grid gap-4">
@@ -576,6 +585,7 @@
 									{#if s.created_by_username}· set up by {s.created_by_username}{/if}
 									{#if s.wait_for_empty}· waits up to {deferral(s.max_deferral_seconds)} for players to
 										leave{/if}
+									{#if s.apply}· applies the updates when every mod loads and nobody is on{/if}
 								</p>
 								{#if s.deferred_since}
 									<p class="text-sm">
@@ -866,6 +876,23 @@
 							id="schedule-move-zone"
 							aria-describedby="schedule-move-zone-help"
 							bind:checked={moveZone}
+						/>
+					</div>
+				{/if}
+
+				{#if isUpdateTest}
+					<div class="flex items-center justify-between gap-4">
+						<div class="grid gap-1">
+							<Label for="schedule-apply">Apply when every mod loads and nobody is on</Label>
+							<p id="schedule-apply-help" class="text-sm text-muted-foreground">
+								Otherwise the copy is kept for you to apply or discard. Either way, an Update test
+								finished rule tells you the result.
+							</p>
+						</div>
+						<Switch
+							id="schedule-apply"
+							aria-describedby="schedule-apply-help"
+							bind:checked={applyTested}
 						/>
 					</div>
 				{/if}

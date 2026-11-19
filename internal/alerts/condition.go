@@ -72,6 +72,8 @@ var (
 	KindInstanceDown = Kind{"instance_down"}
 	// KindGameUpdated is a game update, or tested updates, applied to a server.
 	KindGameUpdated = Kind{"game_updated"}
+	// KindUpdateTestFinished is an update test on a copy of a server that ended, passed or not.
+	KindUpdateTestFinished = Kind{"update_test_finished"}
 )
 
 // Game event kinds are events ValminEye reports from inside the game. A rule renders them through
@@ -98,7 +100,10 @@ var gameEvents = []Kind{
 }
 
 var events = slices.Concat(
-	[]Kind{KindPowerCut, KindServerStarted, KindServerStopped, KindInstanceDown, KindGameUpdated}, gameEvents)
+	[]Kind{
+		KindPowerCut, KindServerStarted, KindServerStopped, KindInstanceDown, KindGameUpdated,
+		KindUpdateTestFinished,
+	}, gameEvents)
 
 // ParseKind resolves a condition or event kind name to its constant. An unresolved name is the
 // caller's cue to answer 422.
