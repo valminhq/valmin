@@ -334,12 +334,6 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config, patterns instanc
 		return fmt.Errorf("print setup token: %w", err)
 	}
 
-	// The job retention sweep: one DELETE, once at start, so the table stays self-limiting
-	// without a scheduler.
-	if err := d.jobs.Sweep(ctx); err != nil {
-		return fmt.Errorf("job retention sweep: %w", err)
-	}
-
 	// The rule for a partial artefact, applied to the mod zip cache: a
 	// .part a killed panel left behind is deleted unconditionally before anything else
 	// touches the cache directory.
