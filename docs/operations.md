@@ -415,6 +415,7 @@ mods. With the default configuration, the data root contains:
 | `backups/`               | World backup archives and pre-upgrade database copies.           |
 | `cache/steam/896660/`    | Downloaded game builds, one directory per build of any branch.   |
 | `cache/<registry>/`      | Downloaded mod packages, one directory per registry.             |
+| `cache/catalogue.db`     | The registries' mod catalogue. A cache; it needs no backup.      |
 | `setups/blobs/`          | Package files retained for saved setups.                         |
 | `exports/`               | The latest [installation export](#move-to-a-new-host).           |
 

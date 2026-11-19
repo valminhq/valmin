@@ -114,7 +114,12 @@ func TestReadyzNamesTheFailingComponent(t *testing.T) {
 // socket that is not answering: 11 §10 names "migrations are applied" as its own component.
 func TestReadyzFailsOnAnUnmigratedDatabase(t *testing.T) {
 	t.Parallel()
-	db, err := store.Open(t.Context(), "sqlite", "file:"+filepath.Join(t.TempDir(), "panel.db"))
+	db, err := store.Open(
+		t.Context(),
+		"sqlite",
+		"file:"+filepath.Join(t.TempDir(), "panel.db"),
+		store.CataloguePath(t.TempDir()),
+	)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

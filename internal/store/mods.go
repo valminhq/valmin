@@ -55,14 +55,14 @@ type ModVersion struct {
 	FileSize         int64
 }
 
-// UpsertModPackages writes one batch of packages and their versions in a single transaction.
-// The fetch and decode that produced the rows have already happened, so nothing here touches the
-// network (12 §6). synced_at is stamped once through the one formatter every TIMESTAMP column
-// requires (ADR-052).
+// UpsertModPackages writes one batch of packages and their versions in a single transaction on
+// the catalogue's writer. The fetch and decode that produced the rows have already happened, so
+// nothing here touches the network. A written package is listed again, so its unlisted_at is
+// cleared; a row whose values are unchanged costs no write.
 //
 // Every row must name its registry. An unspecified source is rejected rather than written,
 // because a row that claims no registry is one no sync will ever refresh and no install can
-// resolve bytes for (B14).
+// resolve bytes for.
 func (db *DB) UpsertModPackages(ctx context.Context, packages []ModPackage, versions []ModVersion) error {
 	if len(packages) == 0 && len(versions) == 0 {
 		return nil
@@ -78,46 +78,56 @@ func (db *DB) UpsertModPackages(ctx context.Context, packages []ModPackage, vers
 				versions[i].FullName, versions[i].Version)
 		}
 	}
-	tx, err := db.Writer.BeginTx(ctx, nil)
+	tx, err := db.Catalogue.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin mod sync batch: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	syncedAt := Now()
+	upsertPackage, err := tx.PrepareContext(ctx, `
+		INSERT INTO mod_packages (
+			full_name, source, namespace, name, description, latest_version,
+			downloads, rating, is_deprecated, categories, icon_url
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (full_name, source) DO UPDATE SET
+			namespace = excluded.namespace,
+			name = excluded.name,
+			description = excluded.description,
+			latest_version = excluded.latest_version,
+			downloads = excluded.downloads,
+			rating = excluded.rating,
+			is_deprecated = excluded.is_deprecated,
+			categories = excluded.categories,
+			icon_url = excluded.icon_url,
+			unlisted_at = NULL`)
+	if err != nil {
+		return fmt.Errorf("prepare mod_packages upsert: %w", err)
+	}
+	defer func() { _ = upsertPackage.Close() }()
 	for i := range packages {
 		p := &packages[i]
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO mod_packages (
-				full_name, source, namespace, name, description, latest_version,
-				downloads, rating, is_deprecated, categories, icon_url, synced_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			ON CONFLICT (full_name, source) DO UPDATE SET
-				namespace = excluded.namespace,
-				name = excluded.name,
-				description = excluded.description,
-				latest_version = excluded.latest_version,
-				downloads = excluded.downloads,
-				rating = excluded.rating,
-				is_deprecated = excluded.is_deprecated,
-				categories = excluded.categories,
-				icon_url = excluded.icon_url,
-				synced_at = excluded.synced_at`,
+		if _, err := upsertPackage.ExecContext(ctx,
 			p.FullName, p.Source.String(), p.Namespace, p.Name, p.Description, p.LatestVersion,
-			p.Downloads, p.Rating, p.IsDeprecated, p.CategoriesJSON, p.IconURL, syncedAt,
+			p.Downloads, p.Rating, p.IsDeprecated, p.CategoriesJSON, p.IconURL,
 		); err != nil {
 			return fmt.Errorf("upsert mod_packages %s: %w", p.FullName, err)
 		}
 	}
 
-	for _, v := range versions {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO mod_versions (full_name, source, version, dependencies, download_url, file_size)
-			VALUES (?, ?, ?, ?, ?, ?)
-			ON CONFLICT (full_name, source, version) DO UPDATE SET
-				dependencies = excluded.dependencies,
-				download_url = excluded.download_url,
-				file_size = excluded.file_size`,
+	upsertVersion, err := tx.PrepareContext(ctx, `
+		INSERT INTO mod_versions (full_name, source, version, dependencies, download_url, file_size)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT (full_name, source, version) DO UPDATE SET
+			dependencies = excluded.dependencies,
+			download_url = excluded.download_url,
+			file_size = excluded.file_size`)
+	if err != nil {
+		return fmt.Errorf("prepare mod_versions upsert: %w", err)
+	}
+	defer func() { _ = upsertVersion.Close() }()
+	for i := range versions {
+		v := &versions[i]
+		if _, err := upsertVersion.ExecContext(ctx,
 			v.FullName, v.Source.String(), v.Version, v.DependenciesJSON, v.DownloadURL, v.FileSize,
 		); err != nil {
 			return fmt.Errorf("upsert mod_versions %s-%s: %w", v.FullName, v.Version, err)

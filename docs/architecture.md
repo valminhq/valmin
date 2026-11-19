@@ -45,6 +45,13 @@ files. Valmin starts a temporary SteamCMD container to download a dedicated serv
 build into `cache/steam/896660/<build-id>/`. Each instance gets its own writable
 copy under `instances/<id>/server/`.
 
+The registries' mod catalogue, which search, install plans and update checks read, is a
+SQLite file of its own at `cache/catalogue.db`, apart from `panel.db`. It is a cache: a
+sync rewrites it, and a damaged file, or one a build with another catalogue layout wrote, is
+deleted at startup and filled again by the next sync. Upgrading from a release that kept the
+catalogue inside `panel.db` moves it across. `panel.db` keeps only the panel's own state, so
+its pre-upgrade copies and installation exports stay small.
+
 Mod packages are downloaded once and cached under `cache/<registry>/`, shared by
 every server that installs them. Each registry has its own directory: two registries
 can publish different files under one package name and version, so a shared directory
