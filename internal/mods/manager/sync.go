@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/valminhq/valmin/internal/diag"
@@ -37,10 +38,17 @@ func (m *Syncer) timeout() time.Duration {
 	return defaultTimeout
 }
 
-func ETagKey(s source.Source) string           { return s.String() + "_etag" }
-func SyncedAtKey(s source.Source) string       { return s.String() + "_synced_at" }
-func SyncResultKey(s source.Source) string     { return s.String() + "_sync_result" }
-func ListingStartedKey(s source.Source) string { return s.String() + "_listing_started_at" }
+// ETagKey is the catalogue state key of the ETag of s's last listing.
+func ETagKey(s source.Source) string { return s.String() + "_etag" }
+
+// SyncedAtKey is the catalogue state key of when s's catalogue was last confirmed current.
+func SyncedAtKey(s source.Source) string { return s.String() + "_synced_at" }
+
+// SyncResultKey is the catalogue state key of s's last sync outcome.
+func SyncResultKey(s source.Source) string { return s.String() + "_sync_result" }
+
+// ListingCompletedKey is the catalogue state key of when a complete listing of s last landed.
+func ListingCompletedKey(s source.Source) string { return s.String() + "_listing_completed_at" }
 
 // Run is the sync scheduler: a clock, not a worker (12 §11) — it only ever enqueues, on
 // the interval the operator configured, and never executes the sync itself. It returns
@@ -122,7 +130,7 @@ func (m *Syncer) RunSync(ctx context.Context, h *jobs.Handle) jobs.Outcome {
 		if err != nil {
 			result.Error = err.Error()
 		}
-		if writeErr := m.DB.KVSet(ctx, SyncResultKey(src), result); writeErr != nil {
+		if writeErr := m.DB.CatalogueStateSet(ctx, SyncResultKey(src), result); writeErr != nil {
 			slog.WarnContext(ctx, "record registry refresh result", slog.Any("error", writeErr))
 		}
 		if err != nil {
@@ -146,12 +154,11 @@ func (m *Syncer) syncRegistry(
 	ctx context.Context, h *jobs.Handle, src source.Source, client *thunderstore.Client,
 ) error {
 	var etag string
-	if _, err := m.DB.KVGet(ctx, ETagKey(src), &etag); err != nil {
+	if _, err := m.DB.CatalogueStateGet(ctx, ETagKey(src), &etag); err != nil {
 		return fmt.Errorf("read cached etag: %w", err)
 	}
-	// Taken before the first batch is stamped, so it precedes every row this listing writes.
-	started := store.Now()
 
+	listed := map[string]bool{}
 	var packages []store.ModPackage
 	var versions []store.ModVersion
 	total := 0
@@ -173,6 +180,7 @@ func (m *Syncer) syncRegistry(
 		if err != nil {
 			return err
 		}
+		listed[row.FullName] = true
 		packages = append(packages, row)
 		versions = append(versions, vs...)
 		if len(packages) >= syncBatchSize {
@@ -186,7 +194,7 @@ func (m *Syncer) syncRegistry(
 	if result.NotModified {
 		h.Log(fmt.Sprintf("%s: index unchanged since the last sync (304)", src))
 		// A confirmed-current index is as fresh as a rewritten one.
-		if err := m.DB.KVSet(ctx, SyncedAtKey(src), store.Now()); err != nil {
+		if err := m.DB.CatalogueStateSet(ctx, SyncedAtKey(src), store.Now()); err != nil {
 			return fmt.Errorf("write synced_at: %w", err)
 		}
 		return nil
@@ -195,16 +203,20 @@ func (m *Syncer) syncRegistry(
 		return fmt.Errorf("write mod index: %w", err)
 	}
 
-	if err := m.DB.KVSet(ctx, ETagKey(src), result.ETag); err != nil {
-		return fmt.Errorf("write etag: %w", err)
+	// Never on a 304 or a failed listing: only a listing that landed whole can say what the
+	// registry does not carry.
+	if err := m.DB.MarkUnlisted(ctx, src, listed, time.Now()); err != nil {
+		return fmt.Errorf("mark unlisted packages: %w", err)
 	}
-	if err := m.DB.KVSet(ctx, SyncedAtKey(src), store.Now()); err != nil {
+	if err := m.DB.CatalogueStateSet(ctx, SyncedAtKey(src), store.Now()); err != nil {
 		return fmt.Errorf("write synced_at: %w", err)
 	}
-	// Last, and never on a 304 or a failed listing: only a listing that landed whole can say
-	// what the registry does not carry.
-	if err := m.DB.KVSet(ctx, ListingStartedKey(src), started); err != nil {
-		return fmt.Errorf("write listing start: %w", err)
+	if err := m.DB.CatalogueStateSet(ctx, ListingCompletedKey(src), store.Now()); err != nil {
+		return fmt.Errorf("write listing completion: %w", err)
+	}
+	// Last: a stored ETag turns the next sync into a 304, which records nothing above.
+	if err := m.DB.CatalogueStateSet(ctx, ETagKey(src), result.ETag); err != nil {
+		return fmt.Errorf("write etag: %w", err)
 	}
 
 	h.Log(fmt.Sprintf("%s: synced %d packages", src, total))
@@ -219,7 +231,11 @@ func syncFailed(err error) jobs.Outcome {
 // downloads and icon_url are derived from Latest() and TotalDownloads(), the v1 listing carrying
 // none of them at the top level (F7).
 func ToStoreRows(p *thunderstore.Package, src source.Source) (store.ModPackage, []store.ModVersion, error) {
-	categories, err := json.Marshal(p.Categories)
+	// Sorted, since a registry sends one package's categories in no stable order and a reorder
+	// alone would rewrite the row on every sync. Clone keeps an empty list "[]", not null.
+	sorted := slices.Clone(p.Categories)
+	slices.Sort(sorted)
+	categories, err := json.Marshal(sorted)
 	if err != nil {
 		return store.ModPackage{}, nil, fmt.Errorf("encode categories for %s: %w", p.FullName, err)
 	}

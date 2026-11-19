@@ -210,7 +210,7 @@ func gate(ctx context.Context, cfg *config.Config, getenv func(string) string) (
 	if d.lock, err = store.AcquireDaemonLock(ctx, daemonDirs(cfg)...); err != nil {
 		return nil, fmt.Errorf("daemon lock: %w", err)
 	}
-	if d.db, err = store.Open(ctx, cfg.DB.Driver, cfg.DB.DSN); err != nil {
+	if d.db, err = store.Open(ctx, cfg.DB.Driver, cfg.DB.DSN, store.CataloguePath(cfg.Data.Root)); err != nil {
 		return nil, fmt.Errorf("database %s: %w", cfg.DB.DSN, err)
 	}
 	if err := migrate(ctx, cfg, d.db); err != nil {
@@ -285,8 +285,8 @@ func verifyHost(ctx context.Context, rt runtime.Runtime, cfg *config.Config) err
 	return config.VerifyGameNetwork(ctx, rt, cfg, command.DefaultRCONPort)
 }
 
-// migrate copies the database into the backups directory when a migration is pending, then
-// applies the pending migrations.
+// migrate copies the database into the backups directory when a migration is pending, applies
+// the pending migrations, and compacts a file they left mostly empty.
 func migrate(ctx context.Context, cfg *config.Config, db *store.DB) error {
 	path, err := store.SnapshotBeforeMigrate(ctx, db.Writer, instance.BackupsDir(cfg.Data.Root), time.Now())
 	if err != nil {
@@ -297,6 +297,13 @@ func migrate(ctx context.Context, cfg *config.Config, db *store.DB) error {
 	}
 	if err := store.Migrate(ctx, db.Writer); err != nil {
 		return fmt.Errorf("migrations: %w", err)
+	}
+	compacted, err := store.CompactIfSparse(ctx, db.Writer)
+	if err != nil {
+		return err
+	}
+	if compacted {
+		slog.InfoContext(ctx, "compacted the database after migrating")
 	}
 	return nil
 }

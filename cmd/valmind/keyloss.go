@@ -277,14 +277,19 @@ func openAdminDB(ctx context.Context, getenv func(string) string) (*config.Confi
 	}
 	slog.SetDefault(cfg.Log.Logger(os.Stderr))
 
-	db, err := store.Open(ctx, cfg.DB.Driver, cfg.DB.DSN)
-	if err != nil {
-		return nil, nil, fmt.Errorf("database %s: %w", cfg.DB.DSN, err)
-	}
 	running, err := store.DaemonRunning(daemonDirs(cfg)...)
 	if err != nil {
-		_ = db.Close()
 		return nil, nil, fmt.Errorf("check for a running panel: %w", err)
+	}
+	// Beside a running daemon the catalogue is its alone: a verb from another build could
+	// otherwise recreate it under the daemon.
+	catalogue := store.CataloguePath(cfg.Data.Root)
+	if running {
+		catalogue = ""
+	}
+	db, err := store.Open(ctx, cfg.DB.Driver, cfg.DB.DSN, catalogue)
+	if err != nil {
+		return nil, nil, fmt.Errorf("database %s: %w", cfg.DB.DSN, err)
 	}
 	if running {
 		if err := db.MigrationsApplied(ctx); err != nil {

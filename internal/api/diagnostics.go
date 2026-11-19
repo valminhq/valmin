@@ -148,8 +148,8 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 	free, freeErr := instance.FreeSpace(h.Cfg.Data.Root)
 	recorded := d.recordedChecks(ctx)
 
-	read := func(key string, out any) bool {
-		found, err := h.DB.KVGet(ctx, key, out)
+	read := func(get func(context.Context, string, any) (bool, error), key string, out any) bool {
+		found, err := get(ctx, key, out)
 		if err != nil {
 			slog.WarnContext(ctx, "diagnostics: read a recorded fact",
 				slog.String("key", key), slog.Any("error", err))
@@ -160,16 +160,16 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 		build  instance.PublicBuild
 		fsType string
 	)
-	read(instance.PublicBuildKey, &build)
-	read(instance.DataFSTypeKey, &fsType)
+	read(h.DB.KVGet, instance.PublicBuildKey, &build)
+	read(h.DB.KVGet, instance.DataFSTypeKey, &fsType)
 
 	registries := make([]diag.Registry, 0, len(source.All()))
 	for _, src := range source.All() {
 		reg := diag.Registry{Name: src.String(), Client: d.Clients[src]}
-		read(manager.ETagKey(src), &reg.ETag)
-		read(manager.SyncedAtKey(src), &reg.SyncedAt)
+		read(h.DB.CatalogueStateGet, manager.ETagKey(src), &reg.ETag)
+		read(h.DB.CatalogueStateGet, manager.SyncedAtKey(src), &reg.SyncedAt)
 		var result diag.RegistrySync
-		if read(manager.SyncResultKey(src), &result) {
+		if read(h.DB.CatalogueStateGet, manager.SyncResultKey(src), &result) {
 			reg.LastSync = &result
 		}
 		registries = append(registries, reg)

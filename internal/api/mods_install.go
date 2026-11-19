@@ -211,7 +211,7 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	starts, err := manager.ListingStarts(r.Context(), m.DB)
+	completed, err := manager.CompletedListings(r.Context(), m.DB)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
@@ -252,7 +252,7 @@ func (m *Mods) listInstalledMods(w http.ResponseWriter, r *http.Request) {
 		if _, enabled := m.Clients[mods[i].Source]; !enabled {
 			view.UpdateVersion = ""
 		}
-		if manager.Unlisted(&mods[i], starts) {
+		if manager.Unlisted(&mods[i], completed) {
 			// The row's latest version is what the registry offered before it pulled the
 			// package, so it is not an update anyone can install.
 			view.NotIndexed, view.UpdateVersion = true, ""

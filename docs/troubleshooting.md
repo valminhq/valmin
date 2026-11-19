@@ -217,6 +217,11 @@ interval set by `VALMIN_THUNDERSTORE_SYNC_INTERVAL`, six hours by default. A fre
 install has no catalogue until that first refresh finishes, and the **Mods** screen
 says which registry it is still waiting for.
 
+The catalogue is the file `cache/catalogue.db` under the data root. It holds nothing the
+registries cannot send again, so deleting it, with its `-wal` and `-shm` files, while the
+panel is stopped is safe: the panel creates it empty and the startup refresh fills it. With
+`VALMIN_THUNDERSTORE_SYNC_INTERVAL=0` there is no startup refresh, so an admin starts one.
+
 Diagnostics shows the latest refresh result for each registry separately. A run that
 fails for one registry still records the other, and the panel keeps serving the last
 index it stored. A catalogue older than two refresh intervals is marked out of date.
