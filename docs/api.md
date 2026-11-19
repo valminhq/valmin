@@ -1623,8 +1623,9 @@ and past that its oldest closes the same way.
 
 ### Stats samples
 
-`GET /instances/{id}/stats` and the `instance.{id}.stats` topic carry the same sample,
-taken every two seconds while the server runs:
+`GET /instances/{id}/stats` and the `instance.{id}.stats` topic carry the same sample. While
+the server runs, a sample is taken every two seconds while anyone is subscribed to the topic
+and every 30 seconds otherwise, so the HTTP read can be up to 30 seconds old:
 
 | Field | Meaning |
 | --- | --- |
