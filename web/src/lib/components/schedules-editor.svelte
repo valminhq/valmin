@@ -320,12 +320,18 @@
 			if (m.type === 'maintenance') void load();
 		});
 		const unhook = socket.onConnected(() => void load());
-		// A run that fires or is skipped sends no message, so upcoming times are re-read each minute.
-		const tick = setInterval(() => void load(), 60_000);
+		// A run that fires or is skipped sends no message, so upcoming times are re-read each
+		// minute while the tab is visible, and when it becomes visible again.
+		const visible = () => {
+			if (!document.hidden) void load();
+		};
+		const tick = setInterval(visible, 60_000);
+		document.addEventListener('visibilitychange', visible);
 		return () => {
 			off();
 			unhook();
 			clearInterval(tick);
+			document.removeEventListener('visibilitychange', visible);
 		};
 	});
 

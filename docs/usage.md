@@ -982,9 +982,10 @@ panel could measure. Gaps marked **not observed** are excluded from the summarie
 they do not mean that the server was empty. The panel retains 30 days of observations,
 so a period without a retained starting count begins with unknown coverage.
 
-The live period refreshes while the page is visible. **Now** comes from the live stats
-feed and shows **unknown** when its reading is missing or stale. The count history
-does not identify individual players or prove how long any one person played.
+While the page is visible, the live period refreshes when the player count changes
+and every five minutes. **Now** comes from the live stats feed and shows **unknown**
+when its reading is missing or stale. The count history does not identify individual
+players or prove how long any one person played.
 
 ### Seen on this server
 
