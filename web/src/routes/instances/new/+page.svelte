@@ -18,6 +18,7 @@
 	import { unsaved } from '#lib/state/dirty.svelte.js';
 	import { tick, untrack } from 'svelte';
 	import Field, { focusFirstInvalid } from '#lib/components/field.svelte';
+	import { passwordInName } from '#lib/launch-rules.js';
 	import Problem from '#lib/components/problem.svelte';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import ModPicker from '#lib/components/mod-picker.svelte';
@@ -121,12 +122,14 @@
 	const pickedWorld = $derived([...Array.from(pickedFolder ?? []), ...Array.from(picked ?? [])]);
 	const worldFiles = $derived(canImport ? pickedWorld : []);
 
-	// The daemon's own rules on names and passwords come back beside each field; only the
-	// minimum length it serves is checked here.
+	// The daemon checks every rule again and its answers come back beside each field; the ones
+	// it serves or that are cheap to copy are checked here first.
 	const localProblems = $derived.by(() => {
 		const problems: Record<string, string> = {};
 		if (password && password.length < minPassword) {
 			problems.password = `At least ${minPassword} characters.`;
+		} else if (passwordInName(password, serverName.trim(), worldName.trim())) {
+			problems.password = 'Must not appear inside the server name or the world name.';
 		}
 		if (options && memLimitMB < options.min_memory_limit_mb) {
 			problems.mem_limit_mb = `Use at least ${options.min_memory_limit_mb} MB.`;

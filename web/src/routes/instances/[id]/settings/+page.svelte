@@ -6,6 +6,7 @@
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { ApiError } from '#lib/api/errors.js';
+	import { passwordInName, validJoinHost } from '#lib/launch-rules.js';
 	import {
 		actions,
 		GAME_BACKUPS_MAX,
@@ -269,12 +270,18 @@
 
 	unsaved(() => changed.length > 0);
 
-	// The daemon's own rules on names and passwords come back beside each field; only the
-	// minimum length it serves is checked here.
+	// The daemon checks every rule again and its answers come back beside each field; the ones
+	// it serves or that are cheap to copy are checked here first.
 	const localProblems = $derived.by(() => {
 		const problems: Record<string, string> = {};
 		if (password && password.length < minPassword) {
 			problems.password = `At least ${minPassword} characters.`;
+		} else if (passwordInName(password, serverName.trim(), instance?.world_name ?? '')) {
+			problems.password = 'Must not appear inside the server name or the world name.';
+		}
+		if (joinHost.trim() !== '' && !validJoinHost(joinHost.trim())) {
+			problems.join_host =
+				'Enter a host name or IP address without a port or http://, such as play.example.com.';
 		}
 		if (serverName.trim() === '') problems.server_name = 'Players need a name to find.';
 		if (panelName.trim() === '') problems.name = 'Give this server a name.';
