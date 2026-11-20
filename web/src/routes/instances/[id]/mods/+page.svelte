@@ -1271,6 +1271,8 @@
 					<CircleCheck class="size-3" />
 					loaded
 				</span>
+			{:else if mod.load_status === 'pending'}
+				<span class="text-xs text-muted-foreground">loads on next start</span>
 			{/if}
 		</div>
 		{#if mod.load_status === 'failed' && mod.load_error}

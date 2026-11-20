@@ -90,8 +90,9 @@ export interface ModSearchPage {
  * panel has nothing to compare against — no load report yet, or a package that places
  * nothing loadable — which is not the same claim as `not_seen`. `failed` is a plugin the
  * loader said it could not load, with its own line in `load_error` (Q38); `not_seen` is one
- * it said nothing about. */
-export type LoadStatus = 'loaded' | 'not_seen' | 'failed';
+ * it said nothing about. `pending` is a plugin installed after the last load report, which
+ * could not have loaded it. */
+export type LoadStatus = 'loaded' | 'not_seen' | 'failed' | 'pending';
 
 /** The curator-supplied compatibility labels accepted by the daemon. */
 export type ModSide = 'server_only' | 'client_required' | 'client_optional' | 'unknown';
