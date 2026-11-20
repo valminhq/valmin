@@ -287,9 +287,14 @@ func (m *Mods) loadExport(w http.ResponseWriter, r *http.Request, id string) (*s
 }
 
 // exportArchive renders the preview as a profile archive, naming every mod's registry when
-// everySource is set. A conflicting closure would be a client that cannot start, so it is
-// refused while the preview still reports why.
+// everySource is set. A conflicting closure would be a client that cannot start, and an empty
+// one gives players nothing, so both are refused while the preview still reports why.
 func exportArchive(w http.ResponseWriter, r *http.Request, p *exportPreview, everySource bool) ([]byte, bool) {
+	if len(p.Mods) == 0 {
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).Msg(
+			"No mod is marked as needed by players, so the modpack would be empty."))
+		return nil, false
+	}
 	if len(p.Conflicts) > 0 {
 		apierr.Write(w, r, apierr.New(errcode.ModConflict).
 			With("conflicts", fmt.Sprintf("%d", len(p.Conflicts))))

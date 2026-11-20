@@ -825,7 +825,7 @@ func TestLoadVerificationReportsWhatBootedAndWhatDidNot(t *testing.T) {
 	}
 
 	// One plugin, singular in the count line (E9): Jotunn loaded, OdinArchitect did not.
-	writeServerFile(t, dataDir, "BepInEx/LogOutput.log",
+	writeBootLog(t, dataDir,
 		"[Message:   BepInEx] Chainloader started\n"+
 			"[Info   :   BepInEx] 1 plugin to load\n"+
 			"[Info   :   BepInEx] Loading [Jotunn 2.29.2]\n"+
@@ -873,7 +873,7 @@ func TestLoadVerificationSurfacesADiscrepancy(t *testing.T) {
 	t.Parallel()
 	rt, _, admin, _, dataDir := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
-	writeServerFile(t, dataDir, "BepInEx/LogOutput.log",
+	writeBootLog(t, dataDir,
 		"[Info   :   BepInEx] 2 plugins to load\n"+
 			"[Info   :   BepInEx] Loading [Jotunn 2.29.2]\n")
 
@@ -893,7 +893,7 @@ func TestLoadVerificationNamesTheModThatFailed(t *testing.T) {
 	t.Parallel()
 	rt, _, admin, _, dataDir := installWorld(t, threeDeep()...)
 	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
-	writeServerFile(t, dataDir, "BepInEx/LogOutput.log",
+	writeBootLog(t, dataDir,
 		"[Info   :   BepInEx] 2 plugins to load\n"+
 			"[Info   :   BepInEx] Loading [Jotunn 2.29.2]\n"+
 			"[Info   :   BepInEx] Loading [OdinArchitect 1.7.0]\n"+

@@ -856,7 +856,8 @@ If the loader says it could not load a mod, that mod's row turns red and shows t
 loader's message, such as a missing dependency or an error from the mod's own
 code. The alert at the top of the page names every mod that failed. **Not loading**
 means the loader did not mention the mod at all. Check the loader log for that
-mod's name.
+mod's name. A mod installed after the server's last start is not judged by that start's
+report; its row says **loads on next start** until the server starts again.
 
 ### Tell players which mods they need
 
@@ -868,7 +869,8 @@ The **Player modpack** tab then lists every mod labelled for clients, with the
 dependencies they need, pinned to the versions the server runs. Unlabelled mods are
 left out and named, so nothing is guessed. If a client mod needs one labelled
 **Server only**, or one that is no longer in the catalogue, the tab names the conflict
-and the list cannot be exported until it is fixed.
+and the list cannot be exported until it is fixed. A list with no mods labelled for clients
+cannot be exported or uploaded either.
 
 **Download client list** saves a profile file that r2modman, Gale and Thunderstore
 Mod Manager can import. It carries package names and versions only. Those managers
@@ -950,8 +952,10 @@ which some mods accept, has to lose its comments to be saved from the panel. Man
 running server often takes effect at once.
 
 The **Raw text** tab edits the whole file as text, for changes the form cannot show,
-such as comments or settings the mod does not describe. It has no validation. It
-compares line by line against the chosen version. Save or discard form changes before
+such as comments or settings the mod does not describe. Saving refuses a line that is not
+a `Key = value` setting, a `[Section]` header or a `#` comment, and names the line. A file
+that already held such lines is a mod's own format and is saved unchecked. A file with
+Windows line endings keeps them. It compares line by line against the chosen version. Save or discard form changes before
 switching to it. Raw editing needs its own permission, `config.raw`.
 
 If the file changed after you opened it, for example because the mod rewrote it,

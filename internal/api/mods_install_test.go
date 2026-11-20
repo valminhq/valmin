@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
@@ -227,6 +228,17 @@ func writeServerFile(t *testing.T, dataDir, rel, body string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeBootLog writes the BepInEx log of a boot a second from now, so a mod installed just
+// before it counts as installed before the boot whatever the file clock's resolution.
+func writeBootLog(t *testing.T, dataDir, body string) {
+	t.Helper()
+	writeServerFile(t, dataDir, "BepInEx/LogOutput.log", body)
+	at := time.Now().Add(time.Second)
+	if err := os.Chtimes(serverPath(dataDir, "BepInEx/LogOutput.log"), at, at); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -937,6 +949,37 @@ func TestInstalledModViewConfigFiles(t *testing.T) {
 			row := &store.InstanceMod{FullName: "Author-Sailing", FileManifest: string(manifest)}
 			if got := toInstalledModView(row, nil, nil).ConfigFiles; !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("config_files = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadStatusWaitsForTheRunAfterAnInstall(t *testing.T) {
+	run := time.Date(2026, 11, 20, 2, 48, 0, 0, time.UTC)
+	load := &instance.PluginLoad{Declared: 0, ObservedAt: run}
+	manifest, err := json.Marshal([]installer.ManifestEntry{
+		{Path: "BepInEx/plugins/Advize-PlantEverything/PlantEverything.dll", SHA256: "0"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name        string
+		installedAt time.Time
+		want        *string
+	}{
+		{"installed before the run it was not seen in", run.Add(-time.Hour), new(string(instance.ModNotSeen))},
+		{"installed after the run", run.Add(time.Minute), new(loadPending)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			row := &store.InstanceMod{
+				FullName: "Advize-PlantEverything", FileManifest: string(manifest), Enabled: true,
+				InstalledAt: store.FormatTime(tc.installedAt),
+			}
+			got := toInstalledModView(row, nil, load).LoadStatus
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("load_status = %q, want %q", deref(got), deref(tc.want))
 			}
 		})
 	}

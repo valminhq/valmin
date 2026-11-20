@@ -651,8 +651,13 @@ func (h *Instances) writeConfigRaw(w http.ResponseWriter, r *http.Request) {
 	if !h.matchesCurrent(w, r, current) {
 		return
 	}
-	if err := checkTextFormat(name, next); err != nil {
+	if err := checkTextFormat(name, current, next); err != nil {
 		apierr.Write(w, r, err)
+		return
+	}
+	next = matchLineEndings(current, next)
+	if len(next) > control.MaxConfigSize {
+		apierr.Write(w, r, apierr.New(errcode.PayloadTooLarge).With("limit_bytes", control.MaxConfigSize))
 		return
 	}
 

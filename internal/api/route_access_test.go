@@ -282,7 +282,9 @@ func TestEveryInstanceRouteAuthorizesItsInstance(t *testing.T) {
 			viewer := as(rt, member, routeAccessRequest(method, target("inst-a")))
 			switch access {
 			case accessView:
-				if viewer.Code == http.StatusForbidden || (plain && viewer.Code >= 300) {
+				// A refusal over the server's state is an answer past the permission check.
+				stateRefusal := viewer.Code == http.StatusConflict && errCode(t, viewer) == "invalid_state"
+				if viewer.Code == http.StatusForbidden || (plain && viewer.Code >= 300 && !stateRefusal) {
 					t.Errorf("viewer = %d %s, want it let through", viewer.Code, viewer.Body)
 				}
 			case accessHidden:

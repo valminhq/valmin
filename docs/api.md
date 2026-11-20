@@ -466,7 +466,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/mods/updates`            | Back up the world, then apply those updates; returns a job.           |
 | `GET`    | `/instances/{id}/mods/export`             | Client manifest preview, or the archive with `format=r2z`.            |
 | `GET`    | `/instances/{id}/mods/export/code`        | The stored profile code while the mods still match it.                |
-| `POST`   | `/instances/{id}/mods/export/code`        | Upload the client manifest; returns a profile code.                   |
+| `POST`   | `/instances/{id}/mods/export/code`        | Upload the client manifest; returns a profile code. `409` if empty.   |
 | `GET`    | `/instances/{id}/mods/queue`              | Installs waiting for the server to stop.                              |
 | `POST`   | `/instances/{id}/mods/queue`              | Queue an install for the next stop or restart.                        |
 | `POST`   | `/instances/{id}/mods/updates/queue`      | Queue confirmed updates together, all or none; returns the queue.     |
@@ -761,7 +761,8 @@ from the pin on purpose.
 `update_version`, which is empty unless a strictly newer version exists **in the
 registry the mod was installed from**. Installing the same mod from a second registry
 into one server is not possible; uninstall it first. Each row also has `enabled`, and a
-`load_status` of `loaded`, `not_seen`, `failed`, or `null`. When the status is `failed`,
+`load_status` of `loaded`, `not_seen`, `failed`, `pending`, or `null`. `pending` is a plugin
+installed after the server's last mod loader run, which could not have loaded it. When the status is `failed`,
 `load_error` carries the mod loader's own message. `not_indexed` is `true` for a mod its
 registry no longer lists: the last complete refresh of that registry's catalogue did not
 include it. Such a row has an empty `update_version` and is left out of **Update all**.
@@ -873,7 +874,8 @@ are named after the profile, with the world `Dedicated`. Profile codes use the r
 and takes no body. It uploads the same client mod list as the file export to a registry, stores
 the result as the server's current profile code, and returns `{"code", "registry", "created_at"}`. The registry is `thunderstore` unless a mod in the list exists only
 in Hexium and Hexium is enabled, in which case it is `hexium`, every mod in it names its registry,
-and Gale reads the code but r2modman does not. A list with a conflict answers `409 mod_conflict` and uploads nothing, a list
+and Gale reads the code but r2modman does not. A list with no mods answers `409 invalid_state`, and
+this file export with `format=r2z` does the same. A list with a conflict answers `409 mod_conflict` and uploads nothing, a list
 the registry refuses as too large answers `413`, and a registry that is down answers `503`. A user
 may upload five codes a minute (`429` with `Retry-After` beyond that), counted only when the upload
 is attempted. Each entry in the export preview also has `source`, the registry the installed package
@@ -1063,7 +1065,10 @@ A replacement that breaks a `.json` file's syntax (a leading UTF-8 byte-order ma
 or any document of a `.yaml`/`.yml` file returns `422 validation_failed` with the parser's
 message on the field `content`. The check applies to every write, also when the file on disk
 does not parse, so a file the mod reads leniently (JSON with comments) must be saved as strict
-JSON.
+JSON. A `.cfg` replacement is held to BepInEx's line grammar (blank, `# comment`, `[Section]`,
+`Key = value`) and a broken line returns the same `422` naming it, unless the file on disk
+already broke that grammar. When the file on disk uses CRLF line endings, the replacement is
+stored with CRLF too; if that takes it over 1 MiB it answers `413 payload_too_large`.
 
 `{file}` is a path relative to `BepInEx/config`, with each `/` sent as `%2F`, for example
 `/configs/expand_world%2Fexpand_biomes.yaml/raw`. It may sit up to 8 folders deep and must end
