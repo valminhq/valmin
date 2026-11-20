@@ -1,5 +1,6 @@
-// Package discord is the panel's Discord bot: one Gateway connection that answers /status and
-// /start in the Discord channels an administrator linked to chosen servers.
+// Package discord is the panel's Discord bot: one Gateway connection that answers /status, /join
+// and /start in the Discord channels an administrator linked to chosen servers, and the bot
+// admins' /restart, /stop, /backup, /update and /shutdown.
 package discord
 
 import (
@@ -28,7 +29,10 @@ const (
 	defaultGatewayURL = "wss://gateway.discord.gg/?v=10&encoding=json"
 	defaultAPIBase    = "https://discord.com/api/v10"
 	minBackoff        = time.Second
-	maxBackoff        = 2 * time.Minute
+	// followLimit is how long a reply keeps following its job: inside the 15 minutes an
+	// interaction token can edit its reply.
+	followLimit = 14 * time.Minute
+	maxBackoff  = 2 * time.Minute
 )
 
 // Status is what the bot is doing now.
@@ -44,6 +48,37 @@ type starter interface {
 	Submit(ctx context.Context, input *control.StartSubmission) (*store.Job, error)
 }
 
+// chainer submits a chain of steps, or one lifecycle step as its own job.
+type chainer interface {
+	Submit(ctx context.Context, in *control.ChainSubmission) (*store.Job, error)
+	SubmitStep(
+		ctx context.Context, inst *store.Instance, step *control.ChainStep, origin control.StepOrigin,
+	) (*store.Job, error)
+}
+
+// updateTester tests updates on a copy of a server, applies them, and reads what the copy runs
+// and how its mods loaded.
+type updateTester interface {
+	Submit(ctx context.Context, sub *control.UpdateTestSubmission) (*store.Job, error)
+	SubmitApply(ctx context.Context, sub *control.UpdateApplySubmission) (*store.Job, error)
+	Changes(ctx context.Context, src, testCopy *store.Instance) (control.TestChanges, error)
+	Verify(ctx context.Context, testCopy *store.Instance) (*control.TestVerdict, error)
+}
+
+// deleter submits the delete of a server.
+type deleter interface {
+	Submit(ctx context.Context, input *control.DeleteSubmission) (*store.Job, error)
+}
+
+// JoinInfo is how players join a server, as /join shows it. An empty field is unknown or unset.
+type JoinInfo struct {
+	// Address and SteamURL are set for a server joined by address, Code for a crossplay server
+	// that has logged its join code.
+	Address, SteamURL, Code string
+	// ProfileCode and ProfileRegistry are the stored profile code while it matches the mods.
+	ProfileCode, ProfileRegistry string
+}
+
 // Bot runs the Discord bot for the life of the process.
 type Bot struct {
 	DB      *store.DB
@@ -51,6 +86,14 @@ type Bot struct {
 	Starter starter
 	// Players is an instance's live player count, nil when the panel cannot say.
 	Players func(instanceID string) *int
+	// JoinCode is a crossplay instance's join code for this boot, "" until it is logged.
+	JoinCode func(instanceID string) string
+	// Join reads how players join inst.
+	Join func(ctx context.Context, inst *store.Instance) JoinInfo
+	// Chainer, Updates and Deleter carry out the admin commands.
+	Chainer chainer
+	Updates updateTester
+	Deleter deleter
 	// StopLead is how long before a planned power cut the servers stop.
 	StopLead time.Duration
 
@@ -75,7 +118,7 @@ func New(db *store.DB, keeper *crypto.Keeper, s starter, players func(string) *i
 		DB: db, Keeper: keeper, Starter: s, Players: players,
 		gatewayURL: defaultGatewayURL, apiBase: defaultAPIBase,
 		client:    &http.Client{Timeout: 15 * time.Second},
-		followFor: 10 * time.Minute, followTick: 5 * time.Second,
+		followFor: followLimit, followTick: 5 * time.Second,
 		status: Status{State: StateDisabled},
 		wake:   make(chan struct{}, 1),
 	}
