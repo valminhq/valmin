@@ -58,6 +58,36 @@ type ChainPayload struct {
 	Steps []ChainStep `json:"steps"`
 }
 
+// PlayerWarning is the line said to players when steps wait up to left for them to leave.
+func PlayerWarning(steps []ChainStep, left time.Duration) string {
+	action := "goes down for maintenance"
+	if len(steps) == 1 {
+		switch steps[0].Type {
+		case StepRestart:
+			action = "restarts"
+		case StepBackup:
+			action = "restarts for a backup"
+		case StepStop:
+			action = "stops"
+		}
+	}
+	return fmt.Sprintf("The server %s when all players have left, or in %s at the latest.",
+		action, SpokenDuration(left))
+}
+
+// SpokenDuration is d rounded up to whole minutes, or whole hours when it is a multiple of one,
+// as players read it.
+func SpokenDuration(d time.Duration) string {
+	n, unit := int((d+time.Minute-1)/time.Minute), "minute"
+	if n%60 == 0 {
+		n, unit = n/60, "hour"
+	}
+	if n != 1 {
+		unit += "s"
+	}
+	return fmt.Sprintf("%d %s", n, unit)
+}
+
 // ParseChainPayload reads the steps out of a chain schedule's stored payload.
 func ParseChainPayload(raw string) ([]ChainStep, error) {
 	var p ChainPayload

@@ -16,39 +16,143 @@ import (
 // restAttempts bounds how often one call is retried after Discord rate-limits it.
 const restAttempts = 3
 
-// appCommand is a slash command or one of its options. Type 1 is a chat command, or a
-// subcommand among options; 3 is a string option.
+// Option types a command uses.
+const (
+	optionSubcommand = 1
+	optionString     = 3
+	optionInteger    = 4
+	optionBoolean    = 5
+)
+
+// appCommand is a slash command (type 1), or one of its options: a subcommand or a value.
 type appCommand struct {
 	Type         int          `json:"type"`
 	Name         string       `json:"name"`
 	Description  string       `json:"description"`
 	Required     bool         `json:"required,omitempty"`
 	Autocomplete bool         `json:"autocomplete,omitempty"`
+	Choices      []choice     `json:"choices,omitempty"`
+	MinValue     *int         `json:"min_value,omitempty"`
+	MaxValue     *int         `json:"max_value,omitempty"`
 	Options      []appCommand `json:"options,omitempty"`
+}
+
+// choice is one fixed value a string option offers.
+type choice struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// serverOption is the option naming the linked server a command acts on.
+func serverOption(description string) appCommand {
+	return appCommand{Type: optionString, Name: "server", Description: description, Autocomplete: true}
+}
+
+// waitOption is the option of /restart, /stop and /backup saying how long to wait for players
+// to leave a running server.
+func waitOption() appCommand {
+	low, high := 0, maxWaitMinutes
+	return appCommand{
+		Type: optionInteger,
+		Name: "wait",
+		Description: fmt.Sprintf(
+			"Minutes to wait for players to leave after warning them (default %d)",
+			defaultWaitMinutes,
+		),
+		MinValue: &low,
+		MaxValue: &high,
+	}
 }
 
 // commands are the slash commands registered in every linked Discord server.
 var commands = []appCommand{
 	{Type: 1, Name: "status", Description: "Show the game servers linked to this channel"},
 	{
-		Type: 1, Name: "start", Description: "Start a game server linked to this channel",
-		Options: []appCommand{{Type: 3, Name: "server", Description: "The server to start", Autocomplete: true}},
+		Type: 1, Name: "join", Description: "Show how to join the game servers linked to this channel",
+		Options: []appCommand{serverOption("The server to join")},
+	},
+	{
+		Type: 1, Name: cmdStart, Description: "Start a game server linked to this channel",
+		Options: []appCommand{serverOption("The server to start")},
+	},
+	{
+		Type: 1, Name: cmdRestart, Description: "Restart a game server once players have left (bot admins)",
+		Options: []appCommand{serverOption("The server to restart"), waitOption()},
+	},
+	{
+		Type: 1, Name: cmdStop, Description: "Stop a game server once players have left (bot admins)",
+		Options: []appCommand{serverOption("The server to stop"), waitOption()},
+	},
+	{
+		Type:        1,
+		Name:        cmdBackup,
+		Description: "Back up a game server's world; a running server restarts for it (bot admins)",
+		Options:     []appCommand{serverOption("The server to back up"), waitOption()},
+	},
+	{
+		Type:        1,
+		Name:        cmdUpdate,
+		Description: "Test updates on a copy of a game server, then apply or discard them (bot admins)",
+		Options: []appCommand{
+			{
+				Type:        optionSubcommand,
+				Name:        "test",
+				Description: "Try the game or mod updates on a copy",
+				Options: []appCommand{
+					serverOption("The server to test updates on"),
+					{
+						Type:        optionString,
+						Name:        "what",
+						Description: "What to update (default: game and mods)",
+						Choices: []choice{
+							{
+								Name:  "Game and mods",
+								Value: "both",
+							},
+							{Name: "Game", Value: "game"},
+							{Name: "Mods", Value: "mods"},
+						},
+					},
+					{
+						Type: optionBoolean, Name: "apply",
+						Description: "Apply the updates if every mod loaded and nobody is on",
+					},
+				},
+			},
+			{
+				Type:        optionSubcommand,
+				Name:        "apply",
+				Description: "Install the tested updates on the server",
+				Options: []appCommand{
+					serverOption("The server to update"),
+				},
+			},
+			{Type: optionSubcommand, Name: "discard", Description: "Delete the update test copy", Options: []appCommand{
+				serverOption("The server whose test copy to delete"),
+			}},
+		},
 	},
 	{
 		Type: 1, Name: "shutdown", Description: "Plan a power cut: every game server stops before it (bot admins)",
 		Options: []appCommand{
-			{Type: 1, Name: "add", Description: "Plan a power cut", Options: []appCommand{
+			{Type: optionSubcommand, Name: "add", Description: "Plan a power cut", Options: []appCommand{
 				{
-					Type:        3,
+					Type:        optionString,
 					Name:        "time",
 					Description: "When the power goes off: 14:00 or 2026-10-09 14:00",
 					Required:    true,
 				},
 			}},
-			{Type: 1, Name: "list", Description: "List the planned power cuts"},
-			{Type: 1, Name: "cancel", Description: "Cancel a planned power cut", Options: []appCommand{{
-				Type: 3, Name: "time", Description: "The power cut to cancel", Required: true, Autocomplete: true,
-			}}},
+			{Type: optionSubcommand, Name: "list", Description: "List the planned power cuts"},
+			{Type: optionSubcommand, Name: "cancel", Description: "Cancel a planned power cut", Options: []appCommand{
+				{
+					Type:         optionString,
+					Name:         "time",
+					Description:  "The power cut to cancel",
+					Required:     true,
+					Autocomplete: true,
+				},
+			}},
 		},
 	},
 }

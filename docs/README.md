@@ -66,6 +66,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | Get alerts in Discord or elsewhere              | [Get notified](usage.md#get-notified)                                                      |
 | Know when mods fail to load or updates appear   | [Add a rule](usage.md#add-a-rule)                                                          |
 | Let friends start servers from Discord          | [Use the Discord bot](usage.md#use-the-discord-bot)                                        |
+| Restart, back up or update servers from Discord | [Bot admins](usage.md#bot-admins)                                                          |
 | See who changed what                            | [Read the audit log](usage.md#read-the-audit-log)                                          |
 | Check the panel's health or report a bug        | [Check the diagnostics page](troubleshooting.md#check-the-diagnostics-page)                |
 | Back up the whole panel or upgrade it           | [Back up the whole installation](operations.md#back-up-the-whole-installation)             |
