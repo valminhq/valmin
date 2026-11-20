@@ -1559,9 +1559,10 @@ in a reconnect loop does not flood the channel.
 
 ## Use the Discord bot
 
-The Discord bot lets people check and start servers from Discord with `/status`
-and `/start`. Everyone in a linked channel can use both commands, so link only
-the servers you are happy for them to start. Bot admins can also plan
+The Discord bot lets people check, join and start servers from Discord with `/status`,
+`/join` and `/start`. Everyone in a linked channel can use these commands, so link only
+the servers you are happy for them to see and start. Bot admins can also restart, stop,
+back up and update the linked servers, and plan
 [power cuts](operations.md#stop-every-server-before-a-power-cut) with `/shutdown`.
 
 1. In the Discord Developer Portal, create an application, add a bot, and copy
@@ -1581,8 +1582,16 @@ last link to a Discord server is removed, the bot takes its commands out of that
 server the next time it connects.
 
 `/status` lists each linked server as online with its player count, starting,
-stopping or offline. A list too long for one Discord message ends with how many
-servers it left out. `/start` starts a stopped server; with several linked
+stopping or offline. A running crossplay server's line adds its join code. A list too
+long for one Discord message ends with how many servers it left out.
+
+`/join` says how to join each linked server, or the one you pick: a crossplay server's
+join code once the server has logged it, otherwise the [join address](#connections) with its
+Steam link, and the profile code while the server's player mods still match it. It is
+what the overview's join card shows, without the password. A server with no join address
+says so.
+
+`/start` starts a stopped server; with several linked
 servers, pick one from the suggestions. The reply changes to say when the server
 is online, or that it failed; the reason stays in the panel's job history. Together with
 [auto-stop](operations.md#stop-a-server-when-nobody-plays), players can start
@@ -1593,16 +1602,48 @@ to be opened.
 
 ### Bot admins
 
-Under **Bot admins**, list the Discord users or roles who may use `/shutdown`, one
+Under **Bot admins**, list the Discord users or roles who may use the admin commands, one
 ID per line: right-click a member or a role and copy its ID. Choose the time zone the
 times they type are read in, then save.
+
+The server commands act on the servers linked to the channel, whether or not the link
+allows `/start`. With several linked servers, pick one from the suggestions.
+
+- `/restart` restarts a running server and `/stop` stops it. Players are first told in game
+  that the server restarts or stops when all of them have left, or in 5 minutes at the
+  latest, and the command waits for that; `wait` sets the minutes, from 0 to 60. The warning
+  needs an RCON mod on the server; without one the wait still applies. With `wait:0` the
+  server restarts or stops at once. The wait shows in the panel's job history, where you can
+  cancel it.
+- `/backup` backs up the server's world. A stopped server is backed up at once. A running
+  server stops for the backup and starts again, so players are warned and waited for first,
+  as with `/restart`, and `wait` works the same way.
+- `/update test` tries updates on a copy of the server, as
+  [Test an update on a copy](#test-an-update-on-a-copy) does. `what` chooses the game, the
+  mods or both (the default). With `apply:True`, the updates are applied when every mod
+  loaded and nobody is on the server. Once the test ends, the reply says what the copy runs
+  that is newer (the game build and how many mods), whether every mod loaded or which did
+  not, and when nothing is newer, that the copy can be discarded.
+- `/update apply` installs what the copy runs on the server, the same as **Apply to the
+  server**.
+- `/update discard` deletes the copy with its world and backups, stopping it first if it
+  runs.
+
+A reply follows its job for 14 minutes, the longest Discord lets it be edited. A job that runs
+longer finishes in the panel, where its job history and
+[notifications](#get-notified) report it. To keep admins informed in Discord, send
+notifications to a private admin channel: add its webhook as a shared channel under
+**Notifications** and a rule for the events you want, such as failed jobs, alerts or
+**Update test finished**.
 
 - `/shutdown add time:14:00` plans a power cut at the next 14:00, or give a date as
   `2026-10-09 14:00`. Every server on the panel stops before it, not only the linked ones.
 - `/shutdown list` lists the planned power cuts in each reader's own time zone.
 - `/shutdown cancel` cancels one; pick it from the suggestions.
 
-Anyone else who tries `/shutdown` is refused. A role ID lets every member of that role
-plan a power cut for every server, so whoever can assign roles in the Discord server
-decides who that is. List user IDs instead when that is too broad. The audit log records the power cut as
-`shutdowns.create` or `shutdowns.delete` by `Discord: <name> (<user id>)`.
+Anyone else who tries an admin command is refused. A role ID lets every member of that role
+update and stop the linked servers and plan a power cut for every server, so whoever can
+assign roles in the Discord server decides who that is. List user IDs instead when that is
+too broad. The audit log records what an admin does by `Discord: <name> (<user id>)`: a power
+cut as `shutdowns.create` or `shutdowns.delete`, and a server command under the same action as
+in the panel, such as `instances.restart` or `instances.update_test.apply`.

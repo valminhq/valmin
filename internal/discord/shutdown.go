@@ -108,7 +108,7 @@ func (b *Bot) cancelShutdown(ctx context.Context, in *interaction, zone, chosen 
 		return p.ID == chosen || p.PowerOffAt.Equal(typed)
 	})
 	if i < 0 {
-		return reply{"No planned power cut matches that. /shutdown list shows them.", true}
+		return reply{"No planned power cut matches that. `/shutdown list` shows them.", true}
 	}
 	p := planned[i]
 	audit := discordAudit(in, "shutdowns.delete", "", map[string]string{"id": p.ID})

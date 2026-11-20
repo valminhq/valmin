@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -29,7 +30,7 @@ type PublicStatus struct {
 
 // modpackReader is the stored profile code lookup the status route needs.
 type modpackReader interface {
-	currentModpackCode(r *http.Request, instanceID string) (*store.ModpackCode, error)
+	currentModpackCode(ctx context.Context, instanceID string) (*store.ModpackCode, error)
 }
 
 // publicStatusRoutes registers the route on mux behind its own thin chain, outside the API chain and
@@ -124,7 +125,7 @@ func (h *PublicStatus) status(w http.ResponseWriter, r *http.Request) {
 		h.addJoin(&view, id, st)
 	}
 	if st.Show.Modpack {
-		code, err := h.Modpacks.currentModpackCode(r, id)
+		code, err := h.Modpacks.currentModpackCode(r.Context(), id)
 		if err != nil {
 			slog.WarnContext(r.Context(), "could not read the profile code for the status page",
 				slog.String("instance_id", id), slog.Any("error", err))

@@ -220,7 +220,7 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	diagnostics := w.diagnostics(instances, mods)
 	sched := w.schedules(instances, hub)
 	shutdowns := w.shutdowns(instances, notifier)
-	bot := w.discord(ctl.Starter, streams)
+	bot := w.discord(ctl, streams, mods)
 	bot.StopLead = shutdowns.StopLead()
 
 	srv := &Server{
@@ -313,15 +313,50 @@ func (w *wiring) notifications(sender *notify.Sender) (*Webhooks, *delivery.Noti
 }
 
 // discord builds the Discord bot and its admin endpoints.
-func (w *wiring) discord(starter *control.Starter, streams *instance.Streams) *discord.Bot {
-	bot := discord.New(w.db, w.keeper, starter, func(id string) *int {
+func (w *wiring) discord(ctl *control.Components, streams *instance.Streams, mods *Mods) *discord.Bot {
+	bot := discord.New(w.db, w.keeper, ctl.Starter, func(id string) *int {
 		if r := streams.Reader(id); r != nil {
 			return r.Players()
 		}
 		return nil
 	})
+	bot.JoinCode = func(id string) string {
+		if r := streams.Reader(id); r != nil {
+			return r.JoinCode()
+		}
+		return ""
+	}
+	bot.Join = func(ctx context.Context, inst *store.Instance) discord.JoinInfo {
+		return discordJoin(ctx, inst, bot.JoinCode, mods)
+	}
+	bot.Chainer, bot.Updates, bot.Deleter = ctl.Chainer, ctl.UpdateTester, ctl.Deleter
 	discordRoutes(w.routes, &Discord{DB: w.db, Authz: w.az, Keeper: w.keeper, Bot: bot})
 	return bot
+}
+
+// discordJoin is how players join inst, as the bot's /join shows it: the crossplay join code, or
+// the join address and its Steam link, and the profile code while it matches the server's mods.
+func discordJoin(
+	ctx context.Context, inst *store.Instance, joinCode func(string) string, mods modpackReader,
+) discord.JoinInfo {
+	var info discord.JoinInfo
+	if inst.Crossplay {
+		info.Code = joinCode(inst.ID)
+	} else if addr := joinAddress(inst.JoinHost, inst.BasePort); addr != nil {
+		info.Address = *addr
+		if link := steamJoinURL(addr, false); link != nil {
+			info.SteamURL = *link
+		}
+	}
+	code, err := mods.currentModpackCode(ctx, inst.ID)
+	if err != nil {
+		slog.WarnContext(ctx, "could not read the profile code for discord",
+			slog.String("instance_id", inst.ID), slog.Any("error", err))
+	}
+	if code != nil {
+		info.ProfileCode, info.ProfileRegistry = code.Code, code.Registry
+	}
+	return info
 }
 
 // remoteBackups builds the off-host copy endpoints and their copy worker.

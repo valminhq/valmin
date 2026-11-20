@@ -1884,7 +1884,7 @@ Bot administration requires `panel.settings`; everyone else gets `404`.
 - `PUT /api/v1/admin/discord`: the whole document — optional write-only `token`,
   `enabled`, `links`, each with `guild_id`, `channel_id` (empty for every
   channel), `allow_start` and `instance_ids`, `admin_ids` (Discord user or role IDs
-  that may use `/shutdown`) and `timezone` (the IANA zone typed times are read in,
+  that may use `/restart`, `/stop`, `/backup`, `/update` and `/shutdown`) and `timezone` (the IANA zone typed times are read in,
   UTC when empty). An absent or empty token keeps the
   stored one. IDs are 17 to 20 digits, a Discord server and channel may appear in
   one link only, and enabling the bot needs a token. The links sent replace every
@@ -1892,8 +1892,12 @@ Bot administration requires `panel.settings`; everyone else gets `404`.
 - `DELETE /api/v1/admin/discord`: removes the token and every link. Returns 204.
 
 Each save and delete writes an audit entry with action `panel.settings` and
-operation `discord_update` or `discord_delete`. A start from Discord appears in
-the audit log as `instances.start` by `Discord: <name> (<user id>)`.
+operation `discord_update` or `discord_delete`. A command from Discord appears in
+the audit log by `Discord: <name> (<user id>)`, under the action the panel records for the
+same change: `instances.start`, `instances.restart`, `instances.stop`,
+`instances.backups.create`, `instances.update_test.start`, `instances.update_test.apply`, or
+`instances.delete` for a discarded update test copy. A restart, stop or backup that
+waits for players is a `chain` job.
 
 ## Planned power cuts
 
