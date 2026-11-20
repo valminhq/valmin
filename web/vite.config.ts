@@ -30,8 +30,8 @@ export default defineConfig({
 			})
 		})
 	],
-	// `make dev` runs this alongside the daemon, so the dev server has to hand /api and the
-	// socket to it — same-origin, because the panel sends no CORS headers under any
+	// `make dev` runs this alongside the daemon, so the dev server has to hand /api, the public
+	// status endpoint and the socket to it — same-origin, because the panel sends no CORS headers under any
 	// configuration (D3, ADR-036) and the WebSocket upgrade requires a matching Origin
 	// (`11 §6.3`). VALMIN_SERVER_LISTEN's default is :8080.
 	server: {
@@ -39,6 +39,10 @@ export default defineConfig({
 			'/api': {
 				target: process.env.VALMIN_DEV_PANEL ?? 'http://localhost:8080',
 				ws: true,
+				changeOrigin: false
+			},
+			'/public': {
+				target: process.env.VALMIN_DEV_PANEL ?? 'http://localhost:8080',
 				changeOrigin: false
 			}
 		}

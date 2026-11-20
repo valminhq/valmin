@@ -73,8 +73,9 @@
 			page.url.pathname.startsWith('/redeem/')
 	);
 
+	// The public status page is for anonymous visitors and never asks who is signed in.
 	$effect(() => {
-		void session.load();
+		if (!isStatus) void session.load();
 	});
 
 	// The socket exists exactly while somebody is signed in. Opening one before that would
