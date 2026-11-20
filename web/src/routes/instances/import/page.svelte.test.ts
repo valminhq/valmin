@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { actions } from '#lib/api/instances.js';
 import type { ManifestPreview, TemplateCatalogue } from '#lib/api/manifest.js';
 import { session } from '#lib/state/session.svelte.js';
-import { FakeDaemon, gameOptions, job, permissions } from '#lib/testing/daemon.js';
+import { instanceList } from '#lib/state/instances.svelte.js';
+import { FakeDaemon, gameOptions, instance, job, permissions } from '#lib/testing/daemon.js';
 import { socket } from '#lib/testing/socket.js';
 import Page from './+page.svelte';
 
@@ -76,6 +77,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	session.permissions = null;
+	instanceList.release();
 	socket.reset();
 	vi.unstubAllGlobals();
 });
@@ -108,6 +110,45 @@ describe('Import from a template code', () => {
 			password: 'hunter2',
 			start_after_provision: false
 		});
+	});
+});
+
+describe('the new server name', () => {
+	// A template usually carries the name of a server that still exists, and a taken name is
+	// refused at the bottom of a long page.
+	it('starts unused and shows a refusal under the field', async () => {
+		daemon.on('GET', '/instances', () =>
+			Response.json({ items: [instance({ name: 'Vanilla QoL' })], next_cursor: null })
+		);
+		daemon.on('POST', '/instances/import', () =>
+			Response.json(
+				{
+					error: {
+						code: 'name_taken',
+						message: 'That name is already in use.',
+						request_id: 'req-test',
+						details: { field: 'name' }
+					}
+				},
+				{ status: 409 }
+			)
+		);
+		render(Page);
+		await fireEvent.input(screen.getByLabelText('Template code'), {
+			target: { value: 'valmin1:abc' }
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Check code' }));
+		await screen.findByText('Smoothbrain-Sailing');
+		const name = screen.getByLabelText('Name') as HTMLInputElement;
+		expect(name.value).toBe('Vanilla QoL 2');
+
+		await fireEvent.input(name, { target: { value: 'Vanilla QoL' } });
+		await fireEvent.input(screen.getByLabelText('Server password'), {
+			target: { value: 'hunter2' }
+		});
+		await fireEvent.click(screen.getByRole('button', { name: 'Create server' }));
+		await vi.waitFor(() => expect(name.getAttribute('aria-invalid')).toBe('true'));
+		expect(screen.getAllByText('That name is already in use.').length).toBeGreaterThan(0);
 	});
 });
 
