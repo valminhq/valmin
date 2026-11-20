@@ -4,6 +4,7 @@
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { pageNarrow } from '#lib/layout.js';
 	import { goto } from '$app/navigation';
+	import { tick } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { actions, type GameOptions, instances } from '#lib/api/instances.js';
 	import {
@@ -25,6 +26,8 @@
 	import { Label } from '#lib/components/ui/label/index.js';
 	import { Switch } from '#lib/components/ui/switch/index.js';
 	import Problem from '#lib/components/problem.svelte';
+	import { ApiError } from '#lib/api/errors.js';
+	import Field, { focusFirstInvalid } from '#lib/components/field.svelte';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
@@ -138,10 +141,23 @@
 		reset();
 		from = next;
 		try {
-			preview = await manifest.preview(next);
-			if (!name) name = preview.name ?? '';
+			const [read] = await Promise.all([manifest.preview(next), instanceList.load()]);
+			preview = read;
+			if (!name) name = unusedName(read.name ?? '');
 		} catch (err) {
 			failure = err;
+		}
+	}
+
+	const apiError = $derived(failure instanceof ApiError ? failure : null);
+
+	/** base, or base with the first number after it that no listed server is called, since a
+	 * template usually carries the name of a server that still exists. */
+	function unusedName(base: string): string {
+		const taken = new Set(instanceList.items.map((row) => row.name.toLowerCase()));
+		if (!base || !taken.has(base.toLowerCase())) return base;
+		for (let n = 2; ; n++) {
+			if (!taken.has(`${base} ${n}`.toLowerCase())) return `${base} ${n}`;
 		}
 	}
 
@@ -153,6 +169,7 @@
 			job = await manifest.import(from, name.trim(), password, startAfter);
 		} catch (err) {
 			failure = err;
+			void tick().then(() => focusFirstInvalid());
 		} finally {
 			busy = false;
 		}
@@ -432,10 +449,11 @@
 					</Card.Description>
 				</Card.Header>
 				<Card.Content class="grid gap-4">
-					<div class="grid gap-2">
-						<Label for="name">Name</Label>
-						<Input id="name" bind:value={name} autocomplete="off" />
-					</div>
+					<Field id="name" label="Name" error={apiError?.field('name')}>
+						{#snippet children(field)}
+							<Input id="name" bind:value={name} autocomplete="off" {...field} />
+						{/snippet}
+					</Field>
 					<div class="grid gap-2">
 						<Label for="password">Server password</Label>
 						<Input

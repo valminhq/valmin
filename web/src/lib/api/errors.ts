@@ -43,10 +43,13 @@ export class ApiError extends Error {
 		this.retryAfterSeconds = retryAfterSeconds;
 	}
 
-	/** The per-field problems of a 422, or an empty array for any other failure. */
+	/** The per-field problems of a 422, or the one field another refusal names in
+	 * `details.field` (a 409 `name_taken`), or an empty array. */
 	get fields(): FieldError[] {
 		const fields = this.details.fields;
-		return Array.isArray(fields) ? (fields as FieldError[]) : [];
+		if (Array.isArray(fields)) return fields as FieldError[];
+		const field = this.details.field;
+		return typeof field === 'string' ? [{ field, code: this.code, message: this.message }] : [];
 	}
 
 	/** The message for one field, if this failure named it. */

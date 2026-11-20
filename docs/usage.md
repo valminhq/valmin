@@ -1191,7 +1191,7 @@ are installed on the server too, so check the list in the preview.
 The preview lists the server settings, the pinned mods and the config files. For a code,
 each config file is shown with the settings it changes, and a setting that looks like a
 token or a webhook is marked **looks secret**. A mod no longer in the catalogue is marked,
-and problems that block the template are listed at the top. Choose a panel name and password, then choose **Create server**. When setup finishes, the panel opens the new server.
+and problems that block the template are listed at the top. Choose a panel name and password, then choose **Create server**. The name starts as the template's, with a number added when a server already has it. When setup finishes, the panel opens the new server.
 
 Valmin downloads the game, installs each pinned mod in turn, then writes the
 configuration. A code's settings are applied over the config files the mods create; a
