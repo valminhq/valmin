@@ -56,6 +56,8 @@
 				variant="destructive"
 				disabled={!matches}
 				onclick={() => {
+					// A second click before the dialog unmounts must not confirm twice.
+					if (!open) return;
 					open = false;
 					onconfirm();
 				}}

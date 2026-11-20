@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { socket } from '#lib/socket/index.svelte.js';
 	import { Textarea } from '#lib/components/ui/textarea/index.js';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { goto } from '$app/navigation';
@@ -104,6 +105,8 @@
 	$effect(() => {
 		void load();
 	});
+	// A first read that failed while the panel was unreachable is tried again when it comes back.
+	$effect(() => socket.onConnected(() => void (!instance && load())));
 
 	/** Built in the browser rather than served as a file: the endpoint answers JSON, and a
 	 * blob keeps the one download from needing a second representation on the daemon. */
@@ -373,7 +376,10 @@
 	{#if loading}
 		<p class="text-sm text-muted-foreground">Loading…</p>
 	{:else if !instance}
-		<p class="text-sm text-muted-foreground">This server is not here.</p>
+		<!-- A failed read is explained by the problem above. -->
+		{#if !failure}
+			<p class="text-sm text-muted-foreground">This server is not here.</p>
+		{/if}
 	{:else}
 		<RestartNotice {instance} />
 

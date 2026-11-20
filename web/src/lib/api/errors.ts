@@ -30,14 +30,17 @@ export class ApiError extends Error {
 	readonly code: string;
 	readonly details: Record<string, unknown>;
 	readonly requestId: string;
+	/** Seconds the panel asked the client to wait before trying again, or 0 when it named none. */
+	readonly retryAfterSeconds: number;
 
-	constructor(status: number, envelope: ErrorEnvelope['error']) {
+	constructor(status: number, envelope: ErrorEnvelope['error'], retryAfterSeconds = 0) {
 		super(envelope.message);
 		this.name = 'ApiError';
 		this.status = status;
 		this.code = envelope.code;
 		this.details = envelope.details ?? {};
 		this.requestId = envelope.request_id;
+		this.retryAfterSeconds = retryAfterSeconds;
 	}
 
 	/** The per-field problems of a 422, or an empty array for any other failure. */

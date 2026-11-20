@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { socket } from '#lib/socket/index.svelte.js';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
@@ -54,6 +55,8 @@
 		void id;
 		untrack(() => void load());
 	});
+	// A first read that failed while the panel was unreachable is tried again when it comes back.
+	$effect(() => socket.onConnected(() => void (!instance && load())));
 
 	async function load() {
 		try {
@@ -110,7 +113,10 @@
 	{#if loading}
 		<p class="text-sm text-muted-foreground">Loading…</p>
 	{:else if !instance}
-		<p class="text-sm text-muted-foreground">This server is not here.</p>
+		<!-- A failed read is explained by the problem above. -->
+		{#if !failure}
+			<p class="text-sm text-muted-foreground">This server is not here.</p>
+		{/if}
 	{:else if !canManage}
 		<p class="text-sm text-muted-foreground">
 			You cannot read or change this server’s player lists.

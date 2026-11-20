@@ -19,6 +19,9 @@
 {#if error}
 	<Alert.Root variant="destructive">
 		<Alert.Title>{message}</Alert.Title>
+		{#if api?.retryAfterSeconds}
+			<Alert.Description>You can try again in {api.retryAfterSeconds} s.</Alert.Description>
+		{/if}
 		{#if api?.fields.length}
 			<Alert.Description>
 				<ul class="list-disc space-y-1 pl-4">
