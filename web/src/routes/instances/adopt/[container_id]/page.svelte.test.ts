@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { goto } from '$app/navigation';
 import { actions, type AdoptionPreview } from '#lib/api/instances.js';
@@ -149,5 +149,35 @@ describe('the orphan adoption screen', () => {
 		expect(
 			(screen.getByRole('button', { name: 'Recover server' }) as HTMLButtonElement).disabled
 		).toBe(true);
+	});
+
+	it('offers to remove a container that cannot be recovered', async () => {
+		const gone = 'The image this container was created from has been removed.';
+		daemon.on('GET', '/orphans/c0ffee', () =>
+			Response.json(
+				{
+					error: {
+						code: 'container_mismatch',
+						message: gone,
+						request_id: 'req-test',
+						details: { reason: 'image_missing' }
+					}
+				},
+				{ status: 409 }
+			)
+		);
+		daemon.on('GET', '/game/options', () => Response.json(gameOptions()));
+		daemon.on('DELETE', '/orphans/c0ffee', () => new Response(null, { status: 204 }));
+		session.permissions = permissions('', [], [actions.adopt]);
+		render(Page);
+
+		expect(await screen.findByText(gone)).toBeTruthy();
+		expect(screen.queryByText(/Checking the container/), 'the check is over').toBeNull();
+		await click(screen.getByRole('button', { name: 'Remove container' }));
+		const dialog = await screen.findByRole('dialog');
+		await click(within(dialog).getByRole('button', { name: 'Remove container' }));
+
+		await vi.waitFor(() => expect(goto).toHaveBeenCalledWith('/'));
+		expect(daemon.requests('DELETE', '/orphans/c0ffee')).toHaveLength(1);
 	});
 });

@@ -490,6 +490,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `GET`    | `/instances/orphans`                      | Containers Valmin created that no server claims.                      |
 | `GET`    | `/orphans/{container_id}`                 | What the panel can prove about one unclaimed container.               |
 | `POST`   | `/orphans/{container_id}`                 | Recover the container as a server; returns a job.                     |
+| `DELETE` | `/orphans/{container_id}`                 | Remove an unclaimed container; its files stay on disk.                |
 | `GET`    | `/jobs/{id}`                              | Job status and result.                                                |
 | `POST`   | `/jobs/{id}/cancel`                       | Request cancellation.                                                 |
 
@@ -620,7 +621,13 @@ recovery request must send. `POST /api/v1/orphans/{container_id}` takes `name`,
 `extra_args`, `mem_limit_mb` and `cpu_limit`. They must describe the container exactly:
 a mismatch answers `409 container_mismatch`, a taken name `409 name_taken`, and a
 container already claimed `409 invalid_state`. Recovery never stops, recreates or
-changes the container. These three routes answer `403` without the permission.
+changes the container. A container whose image was removed, or whose data directory is gone,
+cannot be recovered: the preview and the recovery answer `409 container_mismatch` with
+`details.reason` `image_missing` or `data_missing`. `DELETE /api/v1/orphans/{container_id}`
+removes a stopped unclaimed container and answers `204`; it leaves the data directory alone, is
+audited as `orphans.remove`, answers `409 invalid_state` while the container runs, and `404` for a
+container that is not an unclaimed Valmin container.
+These four routes answer `403` without the permission.
 
 ### Interrupted operations
 

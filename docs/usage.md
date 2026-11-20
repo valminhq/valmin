@@ -199,6 +199,12 @@ server name, world name, password and other launch settings exactly as the conta
 was created. Valmin checks them against the container and refuses values that do not
 match. Recovery never stops, recreates, copies or changes the container or its files.
 
+A container can't be recovered when the image it was created from has been removed, or when
+its server's files are gone from the data directory. The page then says which, and offers
+**Remove container**. Removing it deletes the container and frees its ports; any files left
+in the data directory stay where they are. A running container is refused, since removing it
+would skip the world save: stop it on the host first with `docker stop --time 120 <name>`.
+
 ## Run a server
 
 ### Start, stop and restart

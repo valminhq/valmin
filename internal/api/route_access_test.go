@@ -193,6 +193,7 @@ var globalRouteAccess = map[string]string{
 	"GET /api/v1/mods/search":                             accessMember,
 	"POST /api/v1/mods/sync":                              accessHidden,
 	"GET /api/v1/mods/{namespace}/{name}":                 accessMember,
+	"DELETE /api/v1/orphans/{container_id}":               accessAdmin,
 	"GET /api/v1/orphans/{container_id}":                  accessAdmin,
 	"POST /api/v1/orphans/{container_id}":                 accessAdmin,
 	"GET /api/v1/players":                                 accessHidden,

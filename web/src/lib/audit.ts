@@ -48,7 +48,8 @@ const LABELS: Record<string, string> = {
 	'schedules.update': 'Schedule changed',
 	'schedules.delete': 'Schedule deleted',
 	'schedules.run': 'Schedule run now',
-	'users.password.change': 'Users password changed'
+	'users.password.change': 'Users password changed',
+	'orphans.remove': 'Orphan container removed'
 };
 
 const OUTCOMES: Record<AuditOutcome, { label: string; variant: BadgeVariant }> = {
@@ -176,6 +177,8 @@ const clip = (raw: string, max = 120) => (raw.length > max ? `${raw.slice(0, max
 type Phrase = (d: Detail, server: string, on: string) => string;
 
 const PHRASES: Record<string, Phrase> = {
+	'orphans.remove': (d) =>
+		`removed the unrecoverable container ${text(d.container_name) || ''}`.trim(),
 	'instances.create': (d) => {
 		const name = text(d.name) || 'a server';
 		return d.source === 'manifest' ? `created ${name} from a template` : `created ${name}`;

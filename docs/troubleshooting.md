@@ -424,6 +424,15 @@ server's console and look at the log around the time of the backup:
 If every new backup is flagged, the world on disk is still damaged: restore before the next
 backup runs.
 
+## A container is not claimed by any server
+
+The server list names a container Valmin created but has no record of, for example after
+restoring an older `panel.db`. Choose **Review and recover**. If its image was removed (for
+example by `docker rmi -f`) or its files are gone from the data directory, the page says so and
+offers **Remove container** instead; see
+[Recover an unclaimed server](usage.md#recover-an-unclaimed-server). Until it is recovered or
+removed, it keeps its UDP ports.
+
 ## A game server does not start or mods do not load
 
 When a start fails, or a running server's mods did not load, the server's **Console** card
