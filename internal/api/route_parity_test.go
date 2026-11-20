@@ -174,6 +174,7 @@ B- GET /api/v1/me/permissions
 B- GET /api/v1/mods/search
 B- POST /api/v1/mods/sync
 B- GET /api/v1/mods/{namespace}/{name}
+B- DELETE /api/v1/orphans/{container_id}
 B- GET /api/v1/orphans/{container_id}
 B- POST /api/v1/orphans/{container_id}
 B- GET /api/v1/players

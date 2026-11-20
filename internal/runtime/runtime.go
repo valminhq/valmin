@@ -49,6 +49,9 @@ type Runtime interface {
 // container as a fact about the world, not as an error (08 §6.1).
 var ErrNotFound = errors.New("container not found")
 
+// ErrImageNotFound reports that a container exists but the image it was created from does not.
+var ErrImageNotFound = errors.New("container image not found")
+
 // ContainerSpec is everything the panel sets when creating a container. It carries no
 // defaults of its own; the fields the engine must never vary are applied by the
 // implementation and are deliberately absent here:
