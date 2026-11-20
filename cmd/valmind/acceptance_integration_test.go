@@ -152,8 +152,44 @@ func newPanel(t *testing.T, env map[string]string) *panel {
 		client: &http.Client{Timeout: 30 * time.Second},
 	}
 	p.origin = "http://" + p.addr
+	d := docker(t)
+	t.Cleanup(func() { removeLeftovers(t, d, p.root) })
 	t.Cleanup(p.stop)
 	return p
+}
+
+// removeLeftovers force-removes what a panel under test left on the shared Docker daemon:
+// helpers labelled with its data root and game containers bind-mounting from it. The panel is
+// SIGKILLed at cleanup, so it removes neither, and a dev panel on the same host would report
+// every game container as its own orphan.
+func removeLeftovers(t *testing.T, d *runtime.Docker, root string) {
+	ctx := context.WithoutCancel(t.Context())
+	if _, err := runtime.RemovePanelThrowaways(ctx, d, root); err != nil {
+		t.Logf("remove leftover helpers: %v", err)
+	}
+	managed, err := d.List(ctx, map[string]string{instance.LabelManaged: "true"})
+	if err != nil {
+		t.Logf("list leftover game containers: %v", err)
+		return
+	}
+	for i := range managed {
+		if !bindsUnder(&managed[i], root) {
+			continue
+		}
+		if err := d.ForceRemove(ctx, managed[i].ID); err != nil {
+			t.Logf("remove leftover game container %s: %v", managed[i].ID, err)
+		}
+	}
+}
+
+// bindsUnder reports whether c mounts any host path inside root.
+func bindsUnder(c *runtime.Container, root string) bool {
+	for _, b := range c.Spec.Binds {
+		if strings.HasPrefix(b.HostPath, root+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // nextPort is the last port freePort considered. It starts at a random point so concurrent

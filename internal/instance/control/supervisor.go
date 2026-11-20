@@ -56,6 +56,9 @@ type Supervisor struct {
 	hang      hangWatch
 	crash     *instance.CrashLoop
 	owedStops map[string]string
+	// orphans holds the container ids the last pass reported as orphaned, so each is logged
+	// once rather than on every pass.
+	orphans map[string]bool
 
 	// stops runs protective stops off the observer's goroutine; stopping holds the containers
 	// with one in flight, so a slow stop is not started twice.
@@ -327,19 +330,34 @@ func (s *Supervisor) Reconcile(ctx context.Context) error {
 		}
 	}
 
-	for instanceID := range byInstanceID {
-		if seen[instanceID] {
+	s.reportOrphans(ctx, byInstanceID, seen)
+	return nil
+}
+
+// reportOrphans logs each managed container no instance row claims, once per container
+// rather than on every pass; one that leaves and returns is logged again.
+func (s *Supervisor) reportOrphans(
+	ctx context.Context,
+	byInstanceID map[string]*runtime.Container,
+	claimed map[string]bool,
+) {
+	orphans := make(map[string]bool)
+	for instanceID, c := range byInstanceID {
+		if claimed[instanceID] {
+			continue
+		}
+		orphans[c.ID] = true
+		if s.orphans[c.ID] {
 			continue
 		}
 		// Do not delete. A container the panel made whose row is gone is what
 		// io.valmin.managed is for: it is surfaced for adoption, and removing it would
 		// destroy a running server to tidy a table.
-		c := byInstanceID[instanceID]
 		slog.WarnContext(ctx, "orphaned container: managed by this panel, no instance row",
 			slog.String("container_id", c.ID), slog.String("instance_id", instanceID),
 			slog.Bool("running", c.Running))
 	}
-	return nil
+	s.orphans = orphans
 }
 
 // stream ties a log reader and a stats sampler to the lifetime of a running container. The ring
