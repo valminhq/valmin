@@ -122,6 +122,7 @@ func instanceRoutes(rt *routeTable, h *Instances) {
 	rt.Handle("GET /api/v1/instances/inbox", http.HandlerFunc(h.inbox))
 	rt.Handle("GET /api/v1/orphans/{container_id}", http.HandlerFunc(h.previewAdoption))
 	rt.Handle("POST /api/v1/orphans/{container_id}", http.HandlerFunc(h.adopt))
+	rt.Handle("DELETE /api/v1/orphans/{container_id}", http.HandlerFunc(h.removeOrphan))
 	rt.Handle("GET /api/v1/game/options", http.HandlerFunc(h.options))
 	rt.Handle("GET /api/v1/game/patch-notes", http.HandlerFunc(h.patchNotes))
 	rt.Handle("GET /api/v1/instances/{id}", http.HandlerFunc(h.get))

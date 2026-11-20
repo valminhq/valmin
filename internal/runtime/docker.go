@@ -355,13 +355,16 @@ func (d *Docker) Inspect(ctx context.Context, id string) (Container, error) {
 }
 
 // InspectWithImageDefaults is Inspect plus the environment and labels of the image the
-// container was created from.
+// container was created from. A removed image is ErrImageNotFound, not ErrNotFound.
 func (d *Docker) InspectWithImageDefaults(ctx context.Context, id string) (Container, error) {
 	c, err := d.Inspect(ctx, id)
 	if err != nil {
 		return Container{}, err
 	}
 	image, err := d.cli.ImageInspect(ctx, c.ImageID)
+	if cerrdefs.IsNotFound(err) {
+		return Container{}, fmt.Errorf("inspect image %s of container %s: %w", c.ImageID, id, ErrImageNotFound)
+	}
 	if err != nil {
 		return Container{}, wrap(err, "inspect image %s of container %s", c.ImageID, id)
 	}

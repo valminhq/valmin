@@ -425,7 +425,9 @@ export const adoption = {
 	preview: (containerID: string) =>
 		api.get<AdoptionPreview>(`/orphans/${encodeURIComponent(containerID)}`),
 	adopt: (containerID: string, body: AdoptInstance) =>
-		api.post<Job>(`/orphans/${encodeURIComponent(containerID)}`, body)
+		api.post<Job>(`/orphans/${encodeURIComponent(containerID)}`, body),
+	/** Removes an orphan container that cannot be recovered; its files stay on disk. */
+	remove: (containerID: string) => api.del<void>(`/orphans/${encodeURIComponent(containerID)}`)
 };
 
 interface Page<T> {
