@@ -145,7 +145,12 @@
 		onchange?.();
 	}
 
+	// True from a job's click until its submission answers; a second click in that window is dropped.
+	let sending = $state(false);
+
 	async function run(call: () => Promise<{ job_id: string }>) {
+		if (sending) return;
+		sending = true;
 		failure = null;
 		try {
 			const job = await call();
@@ -153,6 +158,8 @@
 			jobRunning = true;
 		} catch (err) {
 			failure = err;
+		} finally {
+			sending = false;
 		}
 	}
 
@@ -260,7 +267,7 @@
 	/** Why a quiesced backup or a restore cannot start right now, or null. The daemon refuses
 	 * a restore into a server that is not stopped; a quiesced backup stops one itself. */
 	const busy = $derived.by(() => {
-		if (jobRunning) return 'A job is running on this server. Wait for it to finish.';
+		if (jobRunning || sending) return 'A job is running on this server. Wait for it to finish.';
 		if (instance.state !== 'running' && instance.state !== 'stopped') {
 			return stateSentence(instance.state);
 		}

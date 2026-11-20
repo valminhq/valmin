@@ -245,3 +245,46 @@ describe('unauthenticated', () => {
 		onUnauthenticated(() => {});
 	});
 });
+
+describe('rate limiting', () => {
+	function limited(retryAfter: string) {
+		return new Response(
+			JSON.stringify({
+				error: { code: 'rate_limited', message: 'Too many requests.', request_id: 'r' }
+			}),
+			{ status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': retryAfter } }
+		);
+	}
+
+	it('resends a read once after the wait the panel asked for', async () => {
+		vi.useFakeTimers();
+		const fetchMock = vi.spyOn(globalThis, 'fetch');
+		fetchMock.mockResolvedValueOnce(limited('2'));
+		fetchMock.mockResolvedValueOnce(json({ ok: true }));
+
+		const pending = api.get<{ ok: boolean }>('/instances');
+		await vi.advanceTimersByTimeAsync(1999);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		await vi.advanceTimersByTimeAsync(1);
+		await expect(pending).resolves.toEqual({ ok: true });
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		vi.useRealTimers();
+	});
+
+	it('gives a write, or a second refusal, to the caller with the wait', async () => {
+		vi.useFakeTimers();
+		const fetchMock = vi.spyOn(globalThis, 'fetch');
+		fetchMock.mockResolvedValueOnce(limited('3'));
+		const write = await api.post('/instances/a/start').catch((e: unknown) => e);
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect((write as ApiError).retryAfterSeconds).toBe(3);
+
+		fetchMock.mockResolvedValueOnce(limited('1'));
+		fetchMock.mockResolvedValueOnce(limited('1'));
+		const read = api.get('/instances').catch((e: unknown) => e);
+		await vi.advanceTimersByTimeAsync(1000);
+		expect((await read) as ApiError).toBeInstanceOf(ApiError);
+		expect(fetchMock).toHaveBeenCalledTimes(3);
+		vi.useRealTimers();
+	});
+});

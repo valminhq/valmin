@@ -31,13 +31,16 @@
 	// The socket cannot say what changed while it was gone, so a reconnect re-reads the list.
 	$effect(() => socket.onConnected(() => void instanceList.load()));
 
-	// The job running on this server and the setup steps it still owes, re-read on each state
-	// message, on the subscription's ack, on reconnect and on a slow timer. Only the newest
-	// reply is shown.
+	// Whether this caller's list holds the server. One it cannot see is never read here, so a
+	// stranger's link stops at the section's own 404.
+	const listed = $derived(instanceList.items.some((row) => row.id === id));
+
+	// The job running on this server and the setup steps it still owes, read once, then on each
+	// state message, on reconnect and on a slow timer. Only the newest reply is shown.
 	let working = $state<Job | null>(null);
 	let owed = $state<Operation | null>(null);
 	$effect(() => {
-		if (!session.user || !id) return;
+		if (!session.user || !id || !listed) return;
 		let current = true;
 		let latest = 0;
 		async function read() {
@@ -52,10 +55,10 @@
 				// Each section reports its own failed reads; the header only goes quiet.
 			}
 		}
-		void read();
 		const off = socket.subscribe(topics.state(id), (m: ServerMessage) => {
-			if (m.type === 'state' || m.type === 'subscribed') void read();
+			if (m.type === 'state') void read();
 		});
+		void read();
 		const unhook = socket.onConnected(() => void read());
 		const timer = setInterval(read, 60_000);
 		document.addEventListener('visibilitychange', read);
