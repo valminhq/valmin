@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -16,14 +17,15 @@ import (
 // utf8BOM is the byte-order mark C# mods often write at the start of a text file.
 var utf8BOM = []byte("\xef\xbb\xbf")
 
-// checkTextFormat refuses a raw write whose content is not valid JSON or YAML for name's
-// extension, as a 422 on the field "content".
-func checkTextFormat(name string, next []byte) error {
-	parse := textParser(name)
-	if parse == nil {
-		return nil
+// checkTextFormat refuses a raw write whose content is not valid JSON, YAML or `.cfg` for
+// name's extension, as a 422 on the field "content".
+func checkTextFormat(name string, current, next []byte) error {
+	var err error
+	if path.Ext(name) == ".cfg" {
+		err = checkCfgLines(current, next)
+	} else if parse := textParser(name); parse != nil {
+		err = parse(next)
 	}
-	err := parse(next)
 	if err == nil {
 		return nil
 	}
@@ -70,4 +72,43 @@ func parseYAML(raw []byte) error {
 			return fmt.Errorf("document %d: %w", n, err)
 		}
 	}
+}
+
+// checkCfgLines names the first line of next that is neither blank, a `# comment`, a closed
+// `[section]` nor a `key = value` setting. A current file that already breaks those rules is in
+// a mod's own dialect, and its edits are not checked.
+func checkCfgLines(current, next []byte) error {
+	if cfgSyntaxError(current) == nil {
+		return cfgSyntaxError(next)
+	}
+	return nil
+}
+
+// cfgSyntaxError reports the first line of raw outside BepInEx's `.cfg` grammar, or nil.
+func cfgSyntaxError(raw []byte) error {
+	n := 0
+	for line := range strings.Lines(string(bytes.TrimPrefix(raw, utf8BOM))) {
+		n++
+		body := strings.TrimSpace(line)
+		switch {
+		case body == "", strings.HasPrefix(body, "#"):
+		case strings.HasPrefix(body, "["):
+			if !strings.HasSuffix(body, "]") {
+				return fmt.Errorf("line %d: the section header has no closing ]", n)
+			}
+		case !strings.Contains(body, "="):
+			return fmt.Errorf("line %d: expected a setting (Key = value), a [Section] or a # comment", n)
+		}
+	}
+	return nil
+}
+
+// matchLineEndings rewrites next with CRLF line endings when current used them, since a browser
+// text box sends LF whatever the file held.
+func matchLineEndings(current, next []byte) []byte {
+	if !bytes.Contains(current, []byte("\r\n")) {
+		return next
+	}
+	lf := bytes.ReplaceAll(next, []byte("\r\n"), []byte("\n"))
+	return bytes.ReplaceAll(lf, []byte("\n"), []byte("\r\n"))
 }
