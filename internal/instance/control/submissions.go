@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/valminhq/valmin/internal/authz"
@@ -363,31 +362,22 @@ func (c *Cloner) Submit(ctx context.Context, run *CloneRun) (*store.Job, error) 
 	return job, nil
 }
 
-// maxPortAttempts bounds how often a clone's port is re-allocated after losing a race for it.
-const maxPortAttempts = 3
-
-// SubmitOnFreePort queues run on a base port from ports, allocating another when it loses the
-// race for one. A job conflict or a taken name reaches the caller unchanged.
+// SubmitOnFreePort queues run on a base port reserved from ports. A job conflict or a taken name
+// reaches the caller unchanged.
 func (c *Cloner) SubmitOnFreePort(
 	ctx context.Context, ports *instance.Allocator, run *CloneRun,
 ) (*store.Job, error) {
-	var lastErr error
-	for range maxPortAttempts {
-		port, err := ports.Allocate(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("allocate clone destination port: %w", err)
-		}
+	var job *store.Job
+	_, err := ports.Reserve(ctx, func(port int) error {
 		run.Destination.BasePort = port
-		job, err := c.Submit(ctx, run)
-		if err == nil {
-			return job, nil
-		}
-		if !errors.Is(err, store.ErrBasePortTaken) {
-			return nil, err
-		}
-		lastErr = err
+		var err error
+		job, err = c.Submit(ctx, run)
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
-	return nil, lastErr
+	return job, nil
 }
 
 // transitionClaim is an OnClaim that moves the instance from one state to another, refusing

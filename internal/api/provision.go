@@ -50,8 +50,6 @@ type createInstanceRequest struct {
 	GameBranchPassword string `json:"game_branch_password,omitempty"`
 }
 
-const maxPortAllocationAttempts = 3
-
 // create is POST /instances (04 §3): admin-only, returns 202 and a provision job, never the
 // instance itself (11 §3) — the row exists in `created` the moment this returns, but
 // nothing about it is real on disk or in Docker until the job's Finish phase says so.
@@ -287,38 +285,29 @@ func (h *Instances) submitProvision(
 	return h.ctl.Provisioner.Submit(ctx, run, from)
 }
 
-// createInstanceRow allocates a port and inserts the row, retrying a few times on
-// store.ErrBasePortTaken. The base port is the panel's own choice, so a collision is a race to
-// retry rather than a validation failure to report.
+// createInstanceRow reserves a base port and inserts the row on it. The port is the panel's own
+// choice, so a collision is retried by the allocator rather than reported.
 func (h *Instances) createInstanceRow(
 	ctx context.Context, id, dataDir, envelope, modifiers string, memLimitMB int, body *createInstanceRequest,
-) (basePort int, err error) {
+) (int, error) {
 	branchEnvelope, err := h.sealBranchPassword(id, body.GameBranchPassword)
 	if err != nil {
 		return 0, err
 	}
-	allocator := instance.NewAllocator(h.DB, h.Runtime, h.Cfg.Ports.Base, h.Cfg.Ports.Stride)
-	for attempt := 0; attempt < maxPortAllocationAttempts; attempt++ {
-		basePort, err = allocator.Allocate(ctx)
-		if err != nil {
-			return 0, fmt.Errorf("allocate port: %w", err)
-		}
-		err = h.DB.CreateInstance(ctx, &store.NewInstance{
-			ID: id, Name: body.Name, DataDir: dataDir, BasePort: basePort,
+	basePort, err := h.ctl.Ports.Reserve(ctx, func(port int) error {
+		return h.DB.CreateInstance(ctx, &store.NewInstance{
+			ID: id, Name: body.Name, DataDir: dataDir, BasePort: port,
 			ServerName: body.ServerName, WorldName: body.WorldName, Password: envelope,
 			Public: body.Public, Crossplay: body.Crossplay, CrossplayInstanceID: id,
 			Preset: body.Preset, Modifiers: modifiers, ExtraArgs: body.ExtraArgs,
 			MemLimitMB: memLimitMB, CPULimit: body.CPULimit,
 			GameBranch: body.GameBranch, GameBranchPassword: branchEnvelope,
 		})
-		if err == nil {
-			return basePort, nil
-		}
-		if !errors.Is(err, store.ErrBasePortTaken) {
-			return 0, fmt.Errorf("create instance row: %w", err)
-		}
+	})
+	if err != nil {
+		return 0, fmt.Errorf("reserve port: %w", err)
 	}
-	return 0, fmt.Errorf("create instance row: %w", err)
+	return basePort, nil
 }
 
 func writeCreateInstanceError(w http.ResponseWriter, r *http.Request, err error) {

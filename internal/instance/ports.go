@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/valminhq/valmin/internal/runtime"
+	"github.com/valminhq/valmin/internal/store"
 )
 
 // maxPortScan bounds the search. This is a friend-group panel, not a hosting business
@@ -35,10 +36,44 @@ type Allocator struct {
 	db           UsedPorts
 	rt           ContainerLister
 	base, stride int
+
+	// slot is held by the one Reserve call in progress.
+	slot chan struct{}
 }
 
 func NewAllocator(db UsedPorts, rt ContainerLister, base, stride int) *Allocator {
-	return &Allocator{db: db, rt: rt, base: base, stride: stride}
+	return &Allocator{db: db, rt: rt, base: base, stride: stride, slot: make(chan struct{}, 1)}
+}
+
+// maxReserveAttempts bounds how often Reserve rescans after a port is taken from under it.
+const maxReserveAttempts = 5
+
+// Reserve finds a free base port and passes it to insert, which records the reservation, one
+// caller at a time, so concurrent creates never choose the same port. It rescans when insert
+// reports store.ErrBasePortTaken, a row added outside this allocator, and returns any other
+// insert failure unchanged. A caller whose ctx ends while it waits its turn gives up. Share one
+// Allocator among every caller.
+func (a *Allocator) Reserve(ctx context.Context, insert func(port int) error) (int, error) {
+	select {
+	case a.slot <- struct{}{}:
+		defer func() { <-a.slot }()
+	case <-ctx.Done():
+		return 0, fmt.Errorf("wait to reserve a port: %w", ctx.Err())
+	}
+	var err error
+	for range maxReserveAttempts {
+		var port int
+		if port, err = a.Allocate(ctx); err != nil {
+			return 0, err
+		}
+		if err = insert(port); err == nil {
+			return port, nil
+		}
+		if !errors.Is(err, store.ErrBasePortTaken) {
+			return 0, err
+		}
+	}
+	return 0, err
 }
 
 // Allocate returns the next free base port: not reserved by another instance row, not published
