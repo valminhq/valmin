@@ -395,6 +395,8 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/auth/logout`                            | Revoke the session and clear its cookies; `204`, or `200` with `redirect_url` when a proxy logout URL is set. |
 | `GET`    | `/me/permissions`                         | Current account's permissions.                                        |
 | `POST`   | `/me/password`                            | Change your own password; returns `204`.                              |
+| `GET`    | `/me/sessions`                            | Your signed-in devices; see below.                                    |
+| `DELETE` | `/me/sessions/{id}`                       | Sign one of your own devices out; returns `204`.                      |
 | `PATCH`  | `/me`                                     | Change your own preferences; returns the account.                     |
 | `GET`    | `/game/options`                           | Launch options and validation limits; any signed-in account.          |
 | `GET`    | `/game/patch-notes`                       | The game's recent patch posts from Steam; any signed-in account.      |
@@ -1795,6 +1797,20 @@ does not.
 A successful change writes an audit log entry with action `users.password.change`, the
 detail `{"target_user_id": "USER_ID"}` for the caller's own id, and outcome `succeeded`.
 Neither password is stored in the entry, and a refused request writes none.
+
+## See and end your sessions
+
+`GET /api/v1/me/sessions` lists the signed-in account's own sessions that have not expired,
+most recently used first. Each item has `id`, `created_at`, `last_seen_at`, `ip`,
+`user_agent` and `current`, which is `true` for the session making the request. The
+list has no further pages, so `next_cursor` is `null`.
+
+`DELETE /api/v1/me/sessions/{id}` ends one of them: the session's cookie stops working, its
+WebSockets close, and the call returns `204`. A session that does not exist, or that belongs to
+another account, answers `404 not_found`. Ending the current session signs the caller out
+without clearing their cookies; `POST /auth/logout` is the way to sign out here. Both calls
+need the session cookie, and the `DELETE` needs the CSRF header. A revoke writes an audit
+entry with action `users.session.revoke` and the caller's id as `target_user_id`.
 
 ## Set your time zone and time format
 

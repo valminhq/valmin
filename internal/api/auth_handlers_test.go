@@ -670,3 +670,94 @@ func TestFailedLoginsForANameAreBoundedAcrossAddresses(t *testing.T) {
 		t.Errorf("login with a trusted token after its own budget = %d, want 429", rec.Code)
 	}
 }
+
+// sessionList reads GET /me/sessions as the session that produced from.
+func sessionList(t *testing.T, rt *Server, from *httptest.ResponseRecorder) []struct {
+	ID      string `json:"id"`
+	Current bool   `json:"current"`
+	IP      string `json:"ip"`
+} {
+	t.Helper()
+	rec := send(rt, authenticated(httptest.NewRequest(http.MethodGet, "/api/v1/me/sessions", http.NoBody), from))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list sessions = %d (%s), want 200", rec.Code, rec.Body)
+	}
+	var page struct {
+		Items []struct {
+			ID      string `json:"id"`
+			Current bool   `json:"current"`
+			IP      string `json:"ip"`
+		} `json:"items"`
+	}
+	decodeInto(t, rec, &page)
+	return page.Items
+}
+
+// Asserts the list holds the caller's own sessions and marks the one making the request.
+func TestListSessionsMarksTheCurrentOne(t *testing.T) {
+	t.Parallel()
+	rt, _, admin := bootstrappedRouter(t)
+	loginAs(t, rt, "ada", "a-fine-password")
+
+	items := sessionList(t, rt, admin)
+	if len(items) != 2 {
+		t.Fatalf("sessions = %+v, want the two this account has", items)
+	}
+	current := 0
+	for _, s := range items {
+		if s.Current {
+			current++
+		}
+	}
+	if current != 1 {
+		t.Errorf("%d sessions marked current, want exactly one", current)
+	}
+}
+
+// Asserts ending another of one's own sessions closes it, audits it, and leaves the caller in,
+// and that a session of someone else answers 404 as one that does not exist.
+func TestRevokeSessionEndsOnlyTheNamedOwnSession(t *testing.T) {
+	t.Parallel()
+	rt, db, admin := bootstrappedRouter(t)
+	other := loginAs(t, rt, "ada", "a-fine-password")
+	var otherID string
+	for _, s := range sessionList(t, rt, admin) {
+		if !s.Current {
+			otherID = s.ID
+		}
+	}
+	del := func(id string) *httptest.ResponseRecorder {
+		return send(rt, authenticated(httptest.NewRequest(http.MethodDelete,
+			"/api/v1/me/sessions/"+id, http.NoBody), admin))
+	}
+
+	if rec := del("no-such-session"); rec.Code != http.StatusNotFound {
+		t.Errorf("an unknown session = %d, want 404", rec.Code)
+	}
+	if rec := del(otherID); rec.Code != http.StatusNoContent {
+		t.Fatalf("revoke = %d (%s), want 204", rec.Code, rec.Body)
+	}
+	if sessionWorks(rt, other) {
+		t.Error("the revoked session still authenticates")
+	}
+	if !sessionWorks(rt, admin) {
+		t.Error("the caller's own session was ended")
+	}
+	rows, err := db.ListAuditLog(t.Context(), &store.AuditFilter{Action: "users.session.revoke"}, "", "", 10)
+	if err != nil || len(rows) != 1 {
+		t.Errorf("audit rows = %d, err %v, want 1", len(rows), err)
+	}
+}
+
+func TestSessionsNeedASession(t *testing.T) {
+	t.Parallel()
+	rt, _, _ := bootstrappedRouter(t)
+	for _, req := range []*http.Request{
+		httptest.NewRequest(http.MethodGet, "/api/v1/me/sessions", http.NoBody),
+		httptest.NewRequest(http.MethodDelete, "/api/v1/me/sessions/x", http.NoBody),
+	} {
+		if rec := send(rt, req); rec.Code != http.StatusUnauthorized && rec.Code != http.StatusForbidden {
+			t.Errorf("%s %s without a session = %d, want 401 or 403", req.Method, req.URL.Path, rec.Code)
+		}
+	}
+}

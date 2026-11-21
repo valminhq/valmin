@@ -189,6 +189,8 @@ var globalRouteAccess = map[string]string{
 	"POST /api/v1/jobs/{id}/cancel":                       accessMember,
 	"PATCH /api/v1/me":                                    accessMember,
 	"POST /api/v1/me/password":                            accessMember,
+	"GET /api/v1/me/sessions":                             accessMember,
+	"DELETE /api/v1/me/sessions/{id}":                     accessMember,
 	"GET /api/v1/me/permissions":                          accessMember,
 	"GET /api/v1/mods/search":                             accessMember,
 	"POST /api/v1/mods/sync":                              accessHidden,

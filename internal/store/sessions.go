@@ -108,6 +108,64 @@ func (db *DB) DeleteSession(ctx context.Context, id string) error {
 	return nil
 }
 
+// ErrSessionNotFound reports that a user has no live session with the id asked for.
+var ErrSessionNotFound = errors.New("session not found")
+
+// ListSessionsForUser returns userID's sessions that have not expired, most recently used first.
+func (db *DB) ListSessionsForUser(ctx context.Context, userID string) ([]Session, error) {
+	rows, err := db.Reader.QueryContext(ctx, `
+		SELECT id, user_id, created_at, last_seen_at, idle_expires_at, absolute_expires_at, ip, user_agent
+		FROM sessions
+		WHERE user_id = ? AND revoked_at IS NULL AND idle_expires_at > ? AND absolute_expires_at > ?
+		ORDER BY last_seen_at DESC, id`, userID, Now(), Now())
+	if err != nil {
+		return nil, fmt.Errorf("list sessions for user %s: %w", userID, err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []Session
+	for rows.Next() {
+		var s Session
+		var times [4]string
+		if err := rows.Scan(&s.ID, &s.UserID, &times[0], &times[1], &times[2], &times[3],
+			&s.IP, &s.UserAgent); err != nil {
+			return nil, fmt.Errorf("list sessions for user %s: %w", userID, err)
+		}
+		for i, dst := range []*time.Time{&s.CreatedAt, &s.LastSeenAt, &s.IdleExpiresAt, &s.AbsoluteExpiresAt} {
+			if *dst, err = ParseTime(times[i]); err != nil {
+				return nil, fmt.Errorf("list sessions for user %s: %w", userID, err)
+			}
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list sessions for user %s: %w", userID, err)
+	}
+	return out, nil
+}
+
+// DeleteUserSession removes the session sessionID when it belongs to userID, and writes audit in
+// the same transaction when it is not nil. It returns ErrSessionNotFound for any other id, so a
+// session cannot be probed or ended by someone it does not belong to.
+func (db *DB) DeleteUserSession(
+	ctx context.Context, userID, sessionID string, audit *AuditEntry,
+) error {
+	return db.inTx(ctx, "delete user session", func(tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx,
+			`DELETE FROM sessions WHERE id = ? AND user_id = ?`, sessionID, userID)
+		if err != nil {
+			return fmt.Errorf("delete session %s: %w", sessionID, err)
+		}
+		if n, err := res.RowsAffected(); err != nil || n == 0 {
+			return ErrSessionNotFound
+		}
+		if audit == nil {
+			return nil
+		}
+		return writeAuditLog(ctx, tx, audit, time.Now().UTC())
+	})
+}
+
 // DeleteSessionsForUser removes every session belonging to userID: a password change, role
 // change or disable reaches live connections this way (10 §4.1). Deleting the row makes the
 // next request unauthenticated; dropping the socket itself is the hub's half.

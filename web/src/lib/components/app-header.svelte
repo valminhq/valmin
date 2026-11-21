@@ -21,6 +21,7 @@
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import PackageOpen from '@lucide/svelte/icons/package-open';
 	import LockKeyhole from '@lucide/svelte/icons/lock-keyhole';
+	import MonitorSmartphone from '@lucide/svelte/icons/monitor-smartphone';
 	import Clock from '@lucide/svelte/icons/clock';
 	import Monitor from '@lucide/svelte/icons/monitor';
 	import Sun from '@lucide/svelte/icons/sun';
@@ -252,6 +253,11 @@
 					<a class={item} href={resolve('account/password')}>
 						<LockKeyhole class="size-4" aria-hidden="true" />
 						Change password
+					</a>
+
+					<a class={item} href={resolve('account/sessions')}>
+						<MonitorSmartphone class="size-4" aria-hidden="true" />
+						Signed-in devices
 					</a>
 
 					<a class={item} href={resolve('account/date-time')}>

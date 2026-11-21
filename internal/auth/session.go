@@ -179,6 +179,25 @@ func (s *Sessions) Logout(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// List returns userID's live sessions, most recently used first.
+func (s *Sessions) List(ctx context.Context, userID string) ([]store.Session, error) {
+	sessions, err := s.db.ListSessionsForUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+	return sessions, nil
+}
+
+// Revoke ends userID's session sessionID, records audit with it, and closes the sockets it held.
+// It returns store.ErrSessionNotFound when the user has no such session.
+func (s *Sessions) Revoke(ctx context.Context, userID, sessionID string, audit *store.AuditEntry) error {
+	if err := s.db.DeleteUserSession(ctx, userID, sessionID, audit); err != nil {
+		return fmt.Errorf("revoke session: %w", err)
+	}
+	s.notifyRevoked(sessionID, "")
+	return nil
+}
+
 // AnnounceUserRevoked closes the user's live sockets, after the transaction that deleted
 // their session rows has committed (10 §4.1, 14 §6). Role change, disabling and deletion
 // all reach open connections this way.

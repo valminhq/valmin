@@ -58,6 +58,7 @@
 		'/admin/rclone-callback': 'Remote backups',
 		'/admin/diagnostics': 'Diagnostics',
 		'/account/password': 'Change password',
+		'/account/sessions': 'Signed-in devices',
 		'/account/date-time': 'Date and time'
 	};
 
