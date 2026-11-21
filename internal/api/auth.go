@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -34,7 +35,10 @@ type Auth struct {
 	// LogoutURL is where the browser goes after sign-out when a reverse proxy owns the
 	// sign-in. Empty sends it to the panel's own sign-in page.
 	LogoutURL string
+	// Alerts is told when an account's sign-ins are blocked. Nil sends nothing.
+	Alerts signInAlerter
 
+	blockedAlert     *ratelimit.Limiter
 	setupByIP        *ratelimit.Limiter
 	loginByIP        *ratelimit.Limiter
 	loginByUsername  *ratelimit.Limiter
@@ -54,6 +58,7 @@ func NewAuth(
 ) *Auth {
 	return &Auth{
 		Bootstrap: bootstrap, Sessions: sessions, Gate: gate, Keeper: keeper, Devices: devices,
+		blockedAlert:     ratelimit.New(1, time.Hour, 1),
 		setupByIP:        perMinute(setupPerMinute, setupBurst),
 		loginByIP:        perMinute(loginPerMinute, loginBurst),
 		loginByUsername:  perMinute(loginNamePerMinute, loginNameBurst),
@@ -221,6 +226,9 @@ func (a *Auth) login(w http.ResponseWriter, r *http.Request) {
 		limiter, key = a.failedByDevice, device
 	}
 	if ok, retry := limiter.Allow(key); !ok {
+		if limiter == a.failedByUsername {
+			a.reportBlocked(r, body.Username)
+		}
 		middleware.RefuseRateLimited(w, r, retry)
 		return
 	}
@@ -229,6 +237,39 @@ func (a *Auth) login(w http.ResponseWriter, r *http.Request) {
 		limiter.Refund(key)
 	}
 }
+
+// signInAlerter is told that an account's sign-ins are being refused.
+type signInAlerter interface {
+	NotifySignInsBlocked(ctx context.Context, username, address string)
+}
+
+// reportBlocked records that sign-ins to an account are refused after repeated failures from
+// anywhere, and alerts about it. It does so once an hour per name, and only for a name an account
+// has, so a guesser cannot raise alerts by inventing names. The work runs after the request, on a
+// context its client cannot cancel, so neither an abandoned request nor the time it takes shows in
+// the refusal.
+func (a *Auth) reportBlocked(r *http.Request, username string) {
+	if ok, _ := a.blockedAlert.Allow(username); !ok {
+		return
+	}
+	address := middleware.ClientIPFrom(r.Context()).String()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), blockedReportTimeout)
+	go func() {
+		defer cancel()
+		known, err := a.Sessions.RecordBlockedSignIns(ctx, username, address)
+		if err != nil {
+			a.blockedAlert.Refund(username)
+			slog.ErrorContext(ctx, "record blocked sign-ins", slog.Any("error", err))
+			return
+		}
+		if known && a.Alerts != nil {
+			a.Alerts.NotifySignInsBlocked(ctx, username, address)
+		}
+	}()
+}
+
+// blockedReportTimeout bounds the audit write and the alert for one blocked account.
+const blockedReportTimeout = 10 * time.Second
 
 // trustedDevice is the request's trusted-browser token for username, or "" when it carries
 // none that is current.

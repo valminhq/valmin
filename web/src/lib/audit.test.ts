@@ -76,6 +76,12 @@ describe('summaries of recorded actions', () => {
 			'Alex reset the password of bjorn'
 		],
 		['device signed out', 'users.session.revoke', {}, 'Alex signed one of their devices out'],
+		[
+			'blocked sign-ins',
+			'auth.login.blocked',
+			{ username: 'bea' },
+			'Alex blocked sign-ins to bea after repeated failures'
+		],
 		['deep checks', 'panel.settings', { operation: 'deep_checks' }, 'Alex ran the deep checks'],
 		[
 			'create from scratch',
@@ -578,6 +584,7 @@ describe('action labels', () => {
 		['users.password.reset', 'Password reset'],
 		['users.password.change', 'Password changed'],
 		['users.session.revoke', 'Device signed out'],
+		['auth.login.blocked', 'Sign-ins blocked'],
 		['instance.adopt', 'Instance adopt'],
 		['instances.players.banned_players.write', 'Instances players banned players write'],
 		['', '']

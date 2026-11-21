@@ -152,9 +152,10 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	rt := &Router{mux: http.NewServeMux(), api: http.NewServeMux(), within: w.cfg.Server.RequestTimeout.Std()}
 	healthRoutes(rt.mux, health)
 	gate := middleware.NewBootstrapGate(d.BootstrapPending)
-	grants := w.accountRoutes(gate)
+	grants, signIn := w.accountRoutes(gate)
 
 	webhooks, notifier := w.notifications(d.Options.WebhookSender)
+	signIn.Alerts = notifier
 	remoteBackups := w.remoteBackups()
 	alertRuleRoutes(w.routes, &AlertRules{
 		DB: w.db, Authz: w.az, Dispatcher: webhooks.dispatcher, TestSends: webhooks.testSends,
@@ -264,8 +265,9 @@ func (s *Server) onJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.Finish
 }
 
 // accountRoutes registers the user, session, permission, audit, job, key and export endpoints and
-// returns the grants handler, whose changes the hub announces.
-func (w *wiring) accountRoutes(gate *middleware.BootstrapGate) *Grants {
+// returns the grants handler, whose changes the hub announces, and the sign-in handler, which is
+// given the notifier once it exists.
+func (w *wiring) accountRoutes(gate *middleware.BootstrapGate) (*Grants, *Auth) {
 	permissionRoutes(w.routes, &Permissions{Authz: w.az, DB: w.db, Commands: w.commands})
 	a := NewAuth(auth.NewBootstrap(w.db), w.sessions, gate, w.keeper,
 		auth.NewDeviceTrust(w.db, func(msg []byte) ([]byte, error) {
@@ -289,7 +291,7 @@ func (w *wiring) accountRoutes(gate *middleware.BootstrapGate) *Grants {
 		FreeSpace:      func() (uint64, error) { return instance.FreeSpace(w.cfg.Data.Root) },
 		FreeSpaceFloor: uint64(max(w.cfg.Data.FreeSpaceFloorBytes, 0)),
 	}})
-	return grants
+	return grants, a
 }
 
 // notifications builds the webhook endpoints and the notifier every domain event goes through.

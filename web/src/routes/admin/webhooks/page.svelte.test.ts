@@ -394,6 +394,7 @@ describe('the deliveries', () => {
 		['alert_opened', 'Alert raised'],
 		['alert_resolved', 'Alert cleared'],
 		['power_cut_soon', 'Power cut soon'],
+		['sign_ins_blocked', 'Sign-ins blocked'],
 		['server_started', 'Server started'],
 		['player_joined', 'Player joined'],
 		['some_new_kind', 'some new kind']
