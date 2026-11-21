@@ -213,9 +213,14 @@ SteamCMD and checks the mod registries from the panel's own container.
 ## The mod catalogue is empty or out of date
 
 The panel searches its own copy of each registry's index and refreshes it on the
-interval set by `VALMIN_THUNDERSTORE_SYNC_INTERVAL`, one hour by default. A fresh
+interval set by `VALMIN_THUNDERSTORE_SYNC_INTERVAL`, six hours by default. A fresh
 install has no catalogue until that first refresh finishes, and the **Mods** screen
 says which registry it is still waiting for.
+
+The catalogue is the file `cache/catalogue.db` under the data root. It holds nothing the
+registries cannot send again, so deleting it, with its `-wal` and `-shm` files, while the
+panel is stopped is safe: the panel creates it empty and the startup refresh fills it. With
+`VALMIN_THUNDERSTORE_SYNC_INTERVAL=0` there is no startup refresh, so an admin starts one.
 
 Diagnostics shows the latest refresh result for each registry separately. A run that
 fails for one registry still records the other, and the panel keeps serving the last
@@ -229,6 +234,12 @@ or upstream problem rather than a typo.
 Hexium serves no cache validators, so it re-downloads its whole index on every
 refresh by design. That is expected traffic of a few megabytes per interval and not
 a fault; set `VALMIN_HEXIUM_ENABLED=false` if it is unwanted.
+
+A mod download that fails with "download exceeds size limit: … downloaded N bytes,
+mod_versions declared M" is not a size cap: the registry now serves different bytes under
+that version than the catalogue recorded, because Hexium republishes versions in place. An
+admin can refresh the catalogue with the button beside **Catalogue updated** on **Browse
+mods**; otherwise the next scheduled refresh fixes it. Then try again.
 
 ## A profile code is not found
 
@@ -332,6 +343,17 @@ docker compose logs --tail=80 valmind
 
 Use the newest token. Once setup is complete, restarting does not reopen it.
 
+## Sign-ins are blocked for an account
+
+The panel refuses an account's sign-ins for a short while after too many failed attempts for
+it from any address: 30 in a minute. The sign-in page then says to try again shortly, and
+anyone who signed in to the account from the same browser before can still sign in there. The
+audit log records **Sign-ins blocked** with the address of the first refused attempt, and an
+administrator can have the **Sign-ins blocked** event sent to a destination from the
+administration page. If the attempts are not yours, change the account's password; if they are
+a person who forgot it, wait a minute and use the right one, or
+[reset the password](#reset-an-account-password).
+
 ## Reset an account password
 
 While you are signed in, change your own password from the account menu instead; see
@@ -412,6 +434,15 @@ server's console and look at the log around the time of the backup:
 
 If every new backup is flagged, the world on disk is still damaged: restore before the next
 backup runs.
+
+## A container is not claimed by any server
+
+The server list names a container Valmin created but has no record of, for example after
+restoring an older `panel.db`. Choose **Review and recover**. If its image was removed (for
+example by `docker rmi -f`) or its files are gone from the data directory, the page says so and
+offers **Remove container** instead; see
+[Recover an unclaimed server](usage.md#recover-an-unclaimed-server). Until it is recovered or
+removed, it keeps its UDP ports.
 
 ## A game server does not start or mods do not load
 

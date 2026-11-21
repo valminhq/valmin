@@ -42,8 +42,7 @@ async function open(global: string[], row = settings()) {
 	daemon.on('PUT', '/admin/discord', () => Response.json(row));
 	session.permissions = permissions('', [], global);
 	render(Page);
-	if (global.includes(actions.panelSettings))
-		await screen.findByRole('button', { name: 'Save Discord settings' });
+	if (global.includes(actions.panelSettings)) await screen.findByLabelText('Bot token');
 }
 
 function save() {
@@ -71,6 +70,19 @@ describe('the Discord bot screen', () => {
 		expect(hasUnsaved()).toBe(false);
 		session.user = null;
 		discardUnsaved();
+	});
+
+	it('offers saving, and discarding, only once something differs', async () => {
+		await open([actions.panelSettings]);
+		expect(screen.queryByRole('button', { name: 'Save Discord settings' })).toBeNull();
+
+		await fireEvent.input(screen.getByLabelText('User or role IDs, one per line'), {
+			target: { value: '111111111111111111' }
+		});
+		expect(screen.getByRole('button', { name: 'Save Discord settings' })).toBeTruthy();
+
+		await click(screen.getByRole('button', { name: 'Discard changes' }));
+		expect(screen.queryByRole('button', { name: 'Save Discord settings' })).toBeNull();
 	});
 
 	it('is closed without panel.settings', async () => {

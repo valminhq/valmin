@@ -117,12 +117,13 @@ after 180 days, and changing or resetting the password withdraws every such cook
 
 Schedules run jobs on a cron timetable. Paths are relative to `/api/v1`.
 
-| Method   | Path              | Purpose                                                |
-| -------- | ----------------- | ------------------------------------------------------ |
-| `GET`    | `/schedules`      | Schedules you can see, with their next runs.           |
-| `POST`   | `/schedules`      | Create a schedule; returns `201` and the schedule.     |
-| `PATCH`  | `/schedules/{id}` | Change `cron`, `timezone`, `enabled` or player policy. |
-| `DELETE` | `/schedules/{id}` | Delete a schedule; returns `204`.                      |
+| Method   | Path                  | Purpose                                                         |
+| -------- | --------------------- | --------------------------------------------------------------- |
+| `GET`    | `/schedules`          | Schedules you can see, with their next runs.                    |
+| `POST`   | `/schedules`          | Create a schedule; returns `201` and the schedule.              |
+| `PATCH`  | `/schedules/{id}`     | Change `cron`, `timezone`, `enabled`, `steps`, `apply` or player policy. |
+| `DELETE` | `/schedules/{id}`     | Delete a schedule; returns `204`.                               |
+| `POST`   | `/schedules/{id}/run` | Run a server schedule now; returns `202` and the job.           |
 
 A create body has `kind`, `cron` (five fields), and `instance_id` for a kind that runs
 against one server. `timezone` and `enabled` are optional; `enabled` defaults to `true`.
@@ -134,6 +135,7 @@ permission its kind needs:
 | `backup`       | One server   | `backups.create`   |
 | `restart`      | One server   | `instance.restart` |
 | `game_update`  | One server   | `instance.update`  |
+| `update_test`  | One server   | `instance.update`  |
 | `chain`        | One server   | `instance.stop`, and each step's own |
 | `update_check` | The panel    | `schedules.global` |
 | `prune`        | The panel    | `schedules.global` |
@@ -143,7 +145,23 @@ An unknown kind is `422` on `kind`, and a server kind without `instance_id` is `
 too. An `instance_id` that names no server you can see, or no server at all, is `404`. The list shows panel schedules to accounts with `schedules.global`, and a server's
 schedules to anyone who can see that server. Each schedule also returns `last_run_at`,
 `next_run_at` and `created_by_username`. A scheduled `game_update` on a modded server is
-always skipped, because the update needs a person to confirm it.
+always skipped, because the update needs a person to confirm it; `update_test` is the way to
+update one unattended.
+
+### Test updates on a schedule
+
+An `update_test` schedule runs the [update test](#test-updates-on-a-copy) on its server. Each
+run tries the game when the last update check did not find the server current, and the mods
+when any update is pending; with neither, the run is skipped. A run on a server that still
+has a copy is skipped too. `apply` (boolean, default `false`) applies the tested updates once
+the test ends, as `POST /instances/{id}/update-test/apply` would, but only when the copy's
+mod loader finished, named every enabled plugin package without a failure and kept its count,
+and the server is stopped or running with a player count of zero, read again when the test
+ends. Otherwise the copy is kept. The `update_apply` job carries the schedule's id and the
+test's `requested_by`.
+Each schedule returns `apply`, `null` unless its kind is `update_test`; `apply` on any other
+kind is `422` on `apply`. Like a `game_update`, an `update_test` schedule may run at most once
+an hour.
 
 ### Run a chain of steps
 
@@ -182,6 +200,26 @@ chain if the server stops while it waits. A `game_update` step on a modded
 server is refused when the run is submitted, so the run is recorded as skipped. A chain
 is not resumed after the panel restarts, and one that fires while another chain on the
 server is running is skipped. Cancelling the `chain` job stops it after the step in flight.
+
+### Run a schedule now
+
+`POST /api/v1/schedules/{id}/run` submits what a server schedule runs, at once, as its clock
+would, and returns `202` with the job and its `Location`. The job carries the schedule, so
+`scheduled` is `true`, and also names the caller in `requested_by_name`. Its steps behave as
+on a scheduled run: a `stop` makes a backup when the server backs up on restarts and
+automatic stops, and a backup is recorded as scheduled. The run ignores the waiting rules and
+a planned power cut, and leaves `next_run_at`, `last_run_at` and a paused schedule as they
+are. It needs what editing the schedule needs, and is entered in the audit log as
+`schedules.run`.
+
+A schedule holding a run for players, a panel schedule (`update_check`, `prune`,
+`alert_scan`), a server in a state the kind cannot run from, and a `game_update` (or a chain
+with one) on a modded server are `409 invalid_state`. So is an `update_test` with nothing
+pending, or on a server that already has a copy, answered as `POST /instances/{id}/update-test`
+answers it. A `backup`, `restart` or `game_update`
+schedule on a server busy with another job, and a chain while another chain runs on the
+server, are `409 job_in_progress`. Otherwise a chain is accepted and, as on its time, fails at
+the first step the server cannot take.
 
 ### Read the scheduler timezone
 
@@ -284,11 +322,11 @@ A job also carries three fields that say who started it and what it changed. The
 appear on `GET /api/v1/jobs/{id}`, on each item of `GET /api/v1/instances/{id}/jobs`,
 and in the body of a `202` response:
 
-| Field               | Meaning                                                                                                                     |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `requested_by_name` | Username of the person who started the job. Omitted for system work, scheduled runs, and users since deleted.               |
-| `scheduled`         | `true` when a schedule started the job. Always present, and still `true` after the schedule is deleted.                     |
-| `changes`           | Mod jobs only, omitted for every other kind. The packages the job was asked to change, as `action` and `full_name` entries. |
+| Field               | Meaning                                                                                                                                                   |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `requested_by_name` | Username of the person who started the job, or who ran a schedule now. Omitted for system work, runs the schedule clock started, and users since deleted. |
+| `scheduled`         | `true` when a schedule started the job, run now included. Always present, and still `true` after the schedule is deleted.                                 |
+| `changes`           | Mod jobs only, omitted for every other kind. The packages the job was asked to change, as `action` and `full_name` entries.                               |
 
 `requested_by_name` is filled in when a job is read, so the `202` response leaves it
 out. Anyone who can view the server can read the names of the people who started its
@@ -357,6 +395,8 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/auth/logout`                            | Revoke the session and clear its cookies; `204`, or `200` with `redirect_url` when a proxy logout URL is set. |
 | `GET`    | `/me/permissions`                         | Current account's permissions.                                        |
 | `POST`   | `/me/password`                            | Change your own password; returns `204`.                              |
+| `GET`    | `/me/sessions`                            | Your signed-in devices; see below.                                    |
+| `DELETE` | `/me/sessions/{id}`                       | Sign one of your own devices out; returns `204`.                      |
 | `PATCH`  | `/me`                                     | Change your own preferences; returns the account.                     |
 | `GET`    | `/game/options`                           | Launch options and validation limits; any signed-in account.          |
 | `GET`    | `/game/patch-notes`                       | The game's recent patch posts from Steam; any signed-in account.      |
@@ -389,10 +429,11 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/operation/resume`        | Continue an interrupted operation; returns a job.                     |
 | `POST`   | `/instances/{id}/operation/abandon`       | Drop the steps that never ran; returns the operation.                 |
 | `GET`    | `/instances/{id}/jobs`                    | Server job history; `scheduled=true` lists scheduled runs only, `since`/`until` bound it. |
-| `GET`    | `/instances/{id}/backups`                 | World backup catalog, with each archive's `world_bytes` and `world_attention`. |
+| `GET`    | `/instances/{id}/backups`                 | World backup catalog, with each archive's `world_bytes` and `world_attention`, and `removed_by_next_consistent` and `removed_by_next_best_effort`: the `{id, created_at}` of the archives retention deletes once the next backup of that kind is taken. |
 | `POST`   | `/instances/{id}/backups?mode=quiesced`   | Stop, back up, and resume a previously running server; returns a job. |
 | `POST`   | `/instances/{id}/backups?mode=hot`        | Best-effort backup without stopping; returns a job.                   |
 | `GET`    | `/instances/{id}/backups/{bid}/download`  | Download an archive.                                                  |
+| `GET`    | `/backups/orphaned`                       | World archives left by deleted servers; administrators only.          |
 | `DELETE` | `/instances/{id}/backups/{bid}`           | Delete an unlinked archive.                                           |
 | `POST`   | `/instances/{id}/backups/{bid}/restore`   | Restore into a stopped server; returns a job.                         |
 | `POST`   | `/instances/{id}/backups/{bid}/acknowledge` | Clear the archive's world check findings; needs `backups.restore`.  |
@@ -404,6 +445,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `DELETE` | `/instances/{id}/setups/{sid}`            | Delete a setup and release its links; returns a job.                  |
 | `GET`    | `/instances/{id}/worlds`                  | Worlds in the server's save directory.                                |
 | `POST`   | `/instances/{id}/worlds/import`           | Upload a world into a stopped server; returns a job.                  |
+| `POST`   | `/instances/{id}/worlds/import-backup`    | Import a world from another server's backup or a deleted server's archive; returns a job. |
 | `POST`   | `/instances/{id}/worlds/{name}/restore`   | Load another world already on disk; returns a job.                    |
 | `DELETE` | `/instances/{id}/worlds/{name}`           | Delete a world from a stopped server; returns a job.                  |
 | `GET`    | `/instances/{id}/players/history`         | Player count history; see above.                                      |
@@ -426,7 +468,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/mods/updates`            | Back up the world, then apply those updates; returns a job.           |
 | `GET`    | `/instances/{id}/mods/export`             | Client manifest preview, or the archive with `format=r2z`.            |
 | `GET`    | `/instances/{id}/mods/export/code`        | The stored profile code while the mods still match it.                |
-| `POST`   | `/instances/{id}/mods/export/code`        | Upload the client manifest; returns a profile code.                   |
+| `POST`   | `/instances/{id}/mods/export/code`        | Upload the client manifest; returns a profile code. `409` if empty.   |
 | `GET`    | `/instances/{id}/mods/queue`              | Installs waiting for the server to stop.                              |
 | `POST`   | `/instances/{id}/mods/queue`              | Queue an install for the next stop or restart.                        |
 | `POST`   | `/instances/{id}/mods/updates/queue`      | Queue confirmed updates together, all or none; returns the queue.     |
@@ -450,6 +492,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `GET`    | `/instances/orphans`                      | Containers Valmin created that no server claims.                      |
 | `GET`    | `/orphans/{container_id}`                 | What the panel can prove about one unclaimed container.               |
 | `POST`   | `/orphans/{container_id}`                 | Recover the container as a server; returns a job.                     |
+| `DELETE` | `/orphans/{container_id}`                 | Remove an unclaimed container; its files stay on disk.                |
 | `GET`    | `/jobs/{id}`                              | Job status and result.                                                |
 | `POST`   | `/jobs/{id}/cancel`                       | Request cancellation.                                                 |
 
@@ -520,8 +563,10 @@ in the `stopped` or `running` state.
 
 `POST /api/v1/instances/{id}/update-test` with `{"game": true, "mods": true}` returns a
 `202` `update_test` job. At least one of the two must be true, or the request answers
-`422`. The job copies the server, puts the new game build (`game`) and the pending mod
-updates (`mods`) on the copy, starts it and logs what the mod loader said about each plugin.
+`422`. When neither chosen part has anything to try (the last check found the game current,
+and no mod update is pending), it answers `409 invalid_state`. The job copies the server, puts the new game build (`game`) and the pending mod
+updates (`mods`) on the copy, starts it, waits for its world to load and logs what the mod
+loader said about each plugin.
 A running source is copied live, so the copy's world is as of the game's last save and its
 seed backup is not marked consistent. The copy is a server whose `test_of` is the source's
 id. It is not public, has crossplay off, runs with the source's `mem_limit_mb` and half its
@@ -542,8 +587,9 @@ stopped or running and its test ran to the end), `apply_blocker` (why it is not 
 a sentence, or null), the
 `mod_changes` (`full_name`, `from`, `to`, `source`) where the copy runs a newer version,
 `failed` (`full_name`, `load_error`) and `not_seen` for the copy's load verification, and
-`plugin_load`, which is null until the copy's loader has written a log. While the copy is
-being created the build ids are empty and the lists are empty. The copy has no grants of
+`plugin_load`, which is null until the copy's loader has written a log. Its `complete` is
+false while the loader has not logged that it finished, and the counts are then partial.
+While the copy is being created the build ids are empty and the lists are empty. The copy has no grants of
 its own, so an account that cannot see the copy, which is anyone but an administrator, gets
 `{"test": null}` even when the server has one.
 
@@ -578,7 +624,13 @@ recovery request must send. `POST /api/v1/orphans/{container_id}` takes `name`,
 `extra_args`, `mem_limit_mb` and `cpu_limit`. They must describe the container exactly:
 a mismatch answers `409 container_mismatch`, a taken name `409 name_taken`, and a
 container already claimed `409 invalid_state`. Recovery never stops, recreates or
-changes the container. These three routes answer `403` without the permission.
+changes the container. A container whose image was removed, or whose data directory is gone,
+cannot be recovered: the preview and the recovery answer `409 container_mismatch` with
+`details.reason` `image_missing` or `data_missing`. `DELETE /api/v1/orphans/{container_id}`
+removes a stopped unclaimed container and answers `204`; it leaves the data directory alone, is
+audited as `orphans.remove`, answers `409 invalid_state` while the container runs, and `404` for a
+container that is not an unclaimed Valmin container.
+These four routes answer `403` without the permission.
 
 ### Interrupted operations
 
@@ -719,7 +771,8 @@ from the pin on purpose.
 `update_version`, which is empty unless a strictly newer version exists **in the
 registry the mod was installed from**. Installing the same mod from a second registry
 into one server is not possible; uninstall it first. Each row also has `enabled`, and a
-`load_status` of `loaded`, `not_seen`, `failed`, or `null`. When the status is `failed`,
+`load_status` of `loaded`, `not_seen`, `failed`, `pending`, or `null`. `pending` is a plugin
+installed after the server's last mod loader run, which could not have loaded it. When the status is `failed`,
 `load_error` carries the mod loader's own message. `not_indexed` is `true` for a mod its
 registry no longer lists: the last complete refresh of that registry's catalogue did not
 include it. Such a row has an empty `update_version` and is left out of **Update all**.
@@ -831,7 +884,8 @@ are named after the profile, with the world `Dedicated`. Profile codes use the r
 and takes no body. It uploads the same client mod list as the file export to a registry, stores
 the result as the server's current profile code, and returns `{"code", "registry", "created_at"}`. The registry is `thunderstore` unless a mod in the list exists only
 in Hexium and Hexium is enabled, in which case it is `hexium`, every mod in it names its registry,
-and Gale reads the code but r2modman does not. A list with a conflict answers `409 mod_conflict` and uploads nothing, a list
+and Gale reads the code but r2modman does not. A list with no mods answers `409 invalid_state`, and
+this file export with `format=r2z` does the same. A list with a conflict answers `409 mod_conflict` and uploads nothing, a list
 the registry refuses as too large answers `413`, and a registry that is down answers `503`. A user
 may upload five codes a minute (`429` with `Retry-After` beyond that), counted only when the upload
 is attempted. Each entry in the export preview also has `source`, the registry the installed package
@@ -1021,7 +1075,10 @@ A replacement that breaks a `.json` file's syntax (a leading UTF-8 byte-order ma
 or any document of a `.yaml`/`.yml` file returns `422 validation_failed` with the parser's
 message on the field `content`. The check applies to every write, also when the file on disk
 does not parse, so a file the mod reads leniently (JSON with comments) must be saved as strict
-JSON.
+JSON. A `.cfg` replacement is held to BepInEx's line grammar (blank, `# comment`, `[Section]`,
+`Key = value`) and a broken line returns the same `422` naming it, unless the file on disk
+already broke that grammar. When the file on disk uses CRLF line endings, the replacement is
+stored with CRLF too; if that takes it over 1 MiB it answers `413 payload_too_large`.
 
 `{file}` is a path relative to `BepInEx/config`, with each `/` sent as `%2F`, for example
 `/configs/expand_world%2Fexpand_biomes.yaml/raw`. It may sit up to 8 folders deep and must end
@@ -1144,8 +1201,12 @@ some plugins save their loaded settings over the file at shutdown.
 
 `POST /api/v1/instances/{id}/worlds/import` needs `world.import` and a stopped server. Send
 the world as `multipart/form-data`, one `file` part per file, with each part's filename
-set to its path inside the world folder. A ZIP of the folder, or the `.db` and `.fwl`
-pair of an older save, works too. The files are renamed to the server's world name, and
+set to its path inside the world folder. A ZIP of the folder, a `.tar.gz` or `.tgz` such
+as a world backup the panel wrote, or the `.db` and `.fwl` pair of an older save, works
+too. A `.tar.gz` that is truncated or corrupt answers `400 invalid_parameter` rather than
+importing part of its world, as does one that expands to more than the 4 GiB upload limit.
+The game's rolling saves inside it are ignored, and an archive holding more than one world
+is refused like any other upload of several. The files are renamed to the server's world name, and
 the current world is archived first. The game's own older saves, such as `.old` files,
 are refused unless the request adds `allow_backup_variant=true`. A server takes one upload at
 a time: a second upload while one is still being received answers `409 job_in_progress`. An
@@ -1156,6 +1217,33 @@ upload whose size would leave the data directory below its free-space floor answ
 `"game_backup": true`. `POST /api/v1/instances/{id}/worlds/{name}/restore` loads one of them,
 or any other complete world in the list, in place of the current world, which is archived
 first. It needs `world.import` and a stopped server.
+
+`POST /api/v1/instances/{id}/worlds/import-backup` takes a world out of a backup archive
+that is already on the host and installs it as this server's world, as an upload would. It
+needs `world.import` on the target and a stopped server, and the body is JSON:
+`source_instance_id` and exactly one of `backup_id` or `filename`, plus an optional `world`.
+
+- With `backup_id`, the archive is that backup of `source_instance_id`. The caller needs
+  `backups.download` on the source, because the world leaves it; a source the caller
+  cannot see answers `404`.
+- With `filename`, the archive is a leftover of a server that no longer exists, named as
+  `GET /api/v1/backups/orphaned` lists it. Only administrators may use it; anyone else, and
+  any name the listing does not hold, gets `404`. The name is matched against the listing
+  and never used as a path.
+
+A backup holds every world its server kept, and one is imported. `world` names it. Without
+it the world the backup's own row names is taken if the archive holds it, and otherwise the
+only world there is. An archive with several worlds and no way to choose answers
+`422 validation_failed` with the candidates in `details.worlds`; send the request again with
+`world`. The current world is archived first, the source archive is left as it was, and the
+rest of the response is the same as for an upload. The archive is expanded inside the
+request, which is why a large one takes a while to answer `202`. A source archive that is
+missing answers `404`, and one that cannot be read `422`.
+
+`GET /api/v1/backups/orphaned` needs the administrator's adopt action (`403` otherwise) and
+lists the finished `.tar.gz` archives under `backups/<id>/` for which no server `<id>`
+exists, newest first, as `instance_id`, `filename`, `size_bytes` and `modified_at`. An
+archive still being written is not listed.
 
 The three player lists are `admins`, `bans` and `permitted` under
 `/api/v1/instances/{id}/`. Each needs `players.manage`. `GET` returns `{"ids": [...]}`
@@ -1216,7 +1304,8 @@ name_taken`. The URL is write-only: no response contains it, because it is the w
 that channel. A URL the panel refuses, such as a private address, is `422` on `url`.
 Deliveries can be narrowed with `webhook_id`, `rule_id` and `status` (`pending`,
 `delivered` or `failed`). Each record has the event kind, the server, the number of
-attempts and the last error, which never contains the URL.
+attempts and the last error, which never contains the URL. A delivered or failed record is
+kept for 30 days; the records of an alert are kept until 30 days after it resolves.
 
 A rule has `condition_kind`, `instance_id` (`null` for every server), `webhook_ids`,
 `enabled`, `params` and the quiet hours fields described below. Every webhook a rule names
@@ -1225,7 +1314,13 @@ ones; any other is `422` on `webhook_ids`, worded as if it did not exist. The co
 `job_failed`, `job_stuck`, `crash_loop`, `unclean_stop`, `instance_error`,
 `restart_required`, `update_available`, `stale_backup`, `backup_attention`, `mods_failed`,
 `mod_updates` and `low_disk`, plus the one-off events `server_started`, `server_stopped`,
-`instance_down`, `game_updated` and `power_cut`, and the game events below.
+`instance_down`, `game_updated`, `update_test_finished`, `power_cut` and `sign_ins_blocked`, and the game
+events below.
+
+`sign_ins_blocked` is sent when an account's failed sign-ins from any address reach the
+limit and the panel starts refusing it. It is sent at most once an hour for each username, and
+only for a username an account has, with the `username` and the `address` of the first refused
+attempt. It is host-wide, like `low_disk` and `power_cut`.
 
 Three events are sent without any rule to every enabled destination with `catch_all` on that
 serves the event's server, which is every shared destination and the server's own:
@@ -1235,7 +1330,7 @@ build; servers on another branch are left out; it concerns no one server, so it 
 shared destinations only), and `backup_failed`. Alert rules (`/api/v1/admin/alert-rules`) route a condition kind
 to chosen destinations and send `alert_opened` and `alert_resolved`.
 
-Five `condition_kind` values are one-off events rather than conditions, sent only to the
+Six `condition_kind` values are one-off events rather than conditions, sent only to the
 destinations of an enabled rule for them. `server_started` sends `server_started` when a
 start or restart leaves a server running, once its log says the world loaded and, on
 crossplay, once it has a join code; it is sent without them after 15 minutes.
@@ -1246,7 +1341,12 @@ on its own, as the built-in event below does; a destination the rule names gets 
 message instead of the built-in one. `game_updated` sends `game_updated` when a game update
 installs a build other than the one the server ran, with `build`, never for a copy made to test
 updates, and when applying tested updates updates mods, with
-`mods`; an apply that also installs a build sends the build in a message of its own. `power_cut` (host-wide, so its rule names no server) sends `power_cut_soon` once per planned power cut, when players are warned (`warn_at`), with
+`mods`; an apply that also installs a build sends the build in a message of its own.
+`update_test_finished` sends `update_test_finished` when an update test ends, by hand or on a
+schedule, unless it was cancelled: `status` says whether it failed, whether every mod loaded,
+and whether the updates are being applied or why an apply the schedule asked for is not;
+`build` is the game build the copy moved to, `mods` the mod updates on it and `failed_mods`
+the packages that failed to load. `power_cut` (host-wide, so its rule names no server) sends `power_cut_soon` once per planned power cut, when players are warned (`warn_at`), with
 the cut time, the stop time and the running servers. Inside a rule's quiet hours they are
 not sent at all. Alerts held during a
 rule's quiet hours are sent when the window ends. A rule sends `alert_resolved` only for an
@@ -1298,7 +1398,9 @@ kept. The names each kind fills:
 | `server_stopped`   | `reason`, `server_name`, `world`, `time`                      |
 | `instance_down`    | `status`, `reason`, `what_to_do`, `time`                      |
 | `game_updated`     | `build`, `mods`, `time`                                       |
+| `update_test_finished` | `status`, `build`, `mods`, `failed_mods`, `time`          |
 | `power_cut`        | `power_off`, `stop_at`, `servers`                             |
+| `sign_ins_blocked` | `username`, `address`                                         |
 | Game events        | The event's own fields, as listed for ValminEye above         |
 
 `what_to_do` is empty on `alert_resolved`. A field named in `hidden_fields` is empty too.
@@ -1377,7 +1479,7 @@ is ignored. Creating, changing and deleting a rule writes an audit log entry wit
 operation `alert_rule_create`, `alert_rule_update` or `alert_rule_delete`, and a rule test
 `alert_rule_test`. Under `/admin` its action is `panel.settings`; under a server's prefix it
 is `notifications.manage`, with the server. Destination changes are audited the same way.
-Deleting a rule that does not exist returns `404`. A `low_disk` or `power_cut` rule is
+Deleting a rule that does not exist returns `404`. A `low_disk`, `power_cut` or `sign_ins_blocked` rule is
 host-wide: naming an `instance_id` on one, or creating one under a server's prefix, returns
 `422`.
 
@@ -1423,7 +1525,7 @@ administrator-only, and everyone else gets `404`. Paths are relative to `/api/v1
 | `POST`   | `/invites/{token}/redeem`    | Create an account from an invite. Needs no session.      |
 
 An account has `id`, `username`, `role` (`admin` or `member`), `disabled`, `owner`,
-`created_at` and `last_login_at`. `POST /users` takes `username`, `password` (at least
+`created_at`, `last_login_at` and `password_change_required`. `POST /users` takes `username`, `password` (at least
 eight characters) and `role`; a taken username is `409 name_taken`. The owner, the
 account created at first-run setup, cannot be demoted, disabled or deleted, and only the
 owner can reset its password: those requests answer `403`. Usernames are case-sensitive. A password reset returns `{"password": "..."}` and ends every
@@ -1479,8 +1581,9 @@ Actions written from a request include `instances.start`, `instances.stop`, `ins
 `instances.mods.disable`, `instances.mods.lock`, `instances.mods.unlock`,
 `instances.settings.update`, `instances.configs.write`, `instances.configs.delete`,
 `instances.commands.send`, `instances.world_tools.run`,
-`schedules.create`, `schedules.update`, `schedules.delete` and `jobs.cancel`. Scheduled runs
-and jobs the panel resumes after a restart are not entered, because nobody requested them.
+`schedules.create`, `schedules.update`, `schedules.delete`, `schedules.run` and `jobs.cancel`.
+Runs the schedule clock starts and jobs the panel resumes after a restart are not entered,
+because nobody requested them.
 
 ## Errors and collection responses
 
@@ -1497,7 +1600,9 @@ API errors use this envelope:
 ```
 
 Some errors also include `error.details`. Use `code` for branching and `message`
-for display. Include `request_id` when investigating the matching daemon log.
+for display. Include `request_id` when investigating the matching daemon log. A request body
+with a field the endpoint does not accept answers `400 malformed_json` with the field in
+`details.field`, as does a refusal that concerns one field, such as `409 name_taken`.
 
 | HTTP status | Common meaning                                                     |
 | ----------- | ------------------------------------------------------------------ |
@@ -1542,6 +1647,10 @@ Available topics:
 
 The server checks permission per topic and replies with `subscribed` or `error`.
 
+A `state` message is also sent, with the state unchanged, when a job on the server starts or
+finishes and when its setup operation is abandoned. Read `GET /instances/{id}/jobs` and
+`GET /instances/{id}/operation` again on each one.
+
 `{"type":"mods","instance":"ID"}` means the mod install queue submitted an install, or one
 finished with nothing queued after it. Read `GET /instances/{id}/mods` and
 `GET /instances/{id}/mods/queue` again.
@@ -1565,8 +1674,9 @@ and past that its oldest closes the same way.
 
 ### Stats samples
 
-`GET /instances/{id}/stats` and the `instance.{id}.stats` topic carry the same sample,
-taken every two seconds while the server runs:
+`GET /instances/{id}/stats` and the `instance.{id}.stats` topic carry the same sample. While
+the server runs, a sample is taken every two seconds while anyone is subscribed to the topic
+and every 30 seconds otherwise, so the HTTP read can be up to 30 seconds old:
 
 | Field | Meaning |
 | --- | --- |
@@ -1694,6 +1804,20 @@ A successful change writes an audit log entry with action `users.password.change
 detail `{"target_user_id": "USER_ID"}` for the caller's own id, and outcome `succeeded`.
 Neither password is stored in the entry, and a refused request writes none.
 
+## See and end your sessions
+
+`GET /api/v1/me/sessions` lists the signed-in account's own sessions that have not expired,
+most recently used first. Each item has `id`, `created_at`, `last_seen_at`, `ip`,
+`user_agent` and `current`, which is `true` for the session making the request. The
+list has no further pages, so `next_cursor` is `null`.
+
+`DELETE /api/v1/me/sessions/{id}` ends one of them: the session's cookie stops working, its
+WebSockets close, and the call returns `204`. A session that does not exist, or that belongs to
+another account, answers `404 not_found`. Ending the current session signs the caller out
+without clearing their cookies; `POST /auth/logout` is the way to sign out here. Both calls
+need the session cookie, and the `DELETE` needs the CSRF header. A revoke writes an audit
+entry with action `users.session.revoke` and the caller's id as `target_user_id`.
+
 ## Set your time zone and time format
 
 `PATCH /api/v1/me` changes the signed-in account's own preferences and returns the account,
@@ -1721,6 +1845,16 @@ either follows the browser's language settings.
 | `401`  | `unauthenticated`   | There is no valid session.                                                |
 | `422`  | `validation_failed` | `timezone` is `invalid`: not a zone the panel knows, or `Local`.          |
 | `422`  | `validation_failed` | `hour_cycle` or `date_order` is `not_an_option`: not one of those values. |
+
+## Passwords an administrator issued
+
+Every account object, from `GET /auth/me`, the login response, `GET /users`, `POST /users`,
+`PATCH /users/{id}` and `PATCH /me`, carries `password_change_required`. It is `true` for an
+account an administrator created, and after an administrator resets its password, and `false`
+otherwise: for the first administrator, for an account created from an invite, after the
+account's own `POST /me/password`, after `valmind admin reset`, and for a member signed in by a
+trusted proxy. The flag is advisory. The panel's own pages send a signed-in account that has it
+to the change password page, but the API does not refuse any other request because of it.
 
 ## End the session
 
@@ -1797,7 +1931,7 @@ Bot administration requires `panel.settings`; everyone else gets `404`.
 - `PUT /api/v1/admin/discord`: the whole document — optional write-only `token`,
   `enabled`, `links`, each with `guild_id`, `channel_id` (empty for every
   channel), `allow_start` and `instance_ids`, `admin_ids` (Discord user or role IDs
-  that may use `/shutdown`) and `timezone` (the IANA zone typed times are read in,
+  that may use `/restart`, `/stop`, `/backup`, `/update` and `/shutdown`) and `timezone` (the IANA zone typed times are read in,
   UTC when empty). An absent or empty token keeps the
   stored one. IDs are 17 to 20 digits, a Discord server and channel may appear in
   one link only, and enabling the bot needs a token. The links sent replace every
@@ -1805,8 +1939,12 @@ Bot administration requires `panel.settings`; everyone else gets `404`.
 - `DELETE /api/v1/admin/discord`: removes the token and every link. Returns 204.
 
 Each save and delete writes an audit entry with action `panel.settings` and
-operation `discord_update` or `discord_delete`. A start from Discord appears in
-the audit log as `instances.start` by `Discord: <name> (<user id>)`.
+operation `discord_update` or `discord_delete`. A command from Discord appears in
+the audit log by `Discord: <name> (<user id>)`, under the action the panel records for the
+same change: `instances.start`, `instances.restart`, `instances.stop`,
+`instances.backups.create`, `instances.update_test.start`, `instances.update_test.apply`, or
+`instances.delete` for a discarded update test copy. A restart, stop or backup that
+waits for players is a `chain` job.
 
 ## Planned power cuts
 

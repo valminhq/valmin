@@ -17,6 +17,8 @@
 	let password = $state('');
 	let busy = $state(false);
 	let failure = $state<unknown>(null);
+	// True while a rate-limited sign-in waits out the panel's Retry-After.
+	let throttled = $state(false);
 
 	// Arriving here after a session ended in this tab, ask once more: a reverse proxy that signs
 	// people in opens a new session on that read, and the layout then leaves this page.
@@ -43,6 +45,13 @@
 			failure = err;
 			// A wrong password should not sit in the box waiting to be submitted again.
 			if (err instanceof ApiError && err.code === 'invalid_credentials') password = '';
+			if (err instanceof ApiError && err.retryAfterSeconds > 0) {
+				throttled = true;
+				setTimeout(() => {
+					throttled = false;
+					failure = null;
+				}, err.retryAfterSeconds * 1000);
+			}
 		} finally {
 			busy = false;
 		}
@@ -74,7 +83,7 @@
 				</div>
 			</Card.Content>
 			<Card.Footer class="mt-4">
-				<Button type="submit" class="w-full" disabled={busy}>
+				<Button type="submit" class="w-full" disabled={busy || throttled}>
 					{busy ? 'Signing in…' : 'Sign in'}
 				</Button>
 			</Card.Footer>

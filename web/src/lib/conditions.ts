@@ -121,9 +121,17 @@ export function conditionAge(item: InboxItem, now: number = Date.now()): string 
 	return hours < 48 ? `${hours}h` : `${Math.round(hours / 24)}d`;
 }
 
+/** How long the condition has been open, in words, such as "for 28 hours". */
+export function conditionAgeWords(item: InboxItem, now: number = Date.now()): string {
+	const age = conditionAge(item, now);
+	const n = Number.parseInt(age, 10);
+	const unit = { m: 'minute', h: 'hour', d: 'day' }[age.slice(-1)] ?? '';
+	return `for ${n} ${unit}${n === 1 ? '' : 's'}`;
+}
+
 /** The full text a chip carries as its tooltip: what it means, its numbers, and its age. */
 export function conditionTitle(item: InboxItem): string {
-	return [CONDITION_SENTENCE[item.kind], conditionDetail(item), `open ${conditionAge(item)}`]
+	return [CONDITION_SENTENCE[item.kind], conditionDetail(item), `open ${conditionAgeWords(item)}`]
 		.filter(Boolean)
 		.join(' · ');
 }

@@ -11,7 +11,7 @@ import (
 func migrateTo(t *testing.T, v int) *DB {
 	t.Helper()
 	dsn := "file:" + filepath.Join(t.TempDir(), "panel.db")
-	db, err := Open(t.Context(), "sqlite", dsn)
+	db, err := Open(t.Context(), "sqlite", dsn, CataloguePath(t.TempDir()))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -81,9 +81,11 @@ func TestModSourceBackfill(t *testing.T) {
 
 	applyVersion(t, db, 12)
 
+	// Qualified: a reader opened before these tables existed in the panel file resolves the
+	// bare names to the attached catalogue's tables.
 	queries := map[string]string{
-		"mod_packages":  `SELECT source FROM mod_packages`,
-		"mod_versions":  `SELECT source FROM mod_versions`,
+		"mod_packages":  `SELECT source FROM main.mod_packages`,
+		"mod_versions":  `SELECT source FROM main.mod_versions`,
 		"instance_mods": `SELECT source FROM instance_mods`,
 	}
 	for table, query := range queries {
@@ -109,9 +111,9 @@ func TestModSourceCompositeKeys(t *testing.T) {
 		_, err := db.Writer.ExecContext(t.Context(), `
 			INSERT INTO mod_packages (
 				full_name, source, namespace, name, description, latest_version,
-				downloads, rating, is_deprecated, categories, icon_url, synced_at
-			) VALUES (?, ?, 'denikson', 'x', '', '1.0.0', 0, 0, FALSE, '[]', '', ?)`,
-			fullName, src, Now())
+				downloads, rating, is_deprecated, categories, icon_url
+			) VALUES (?, ?, 'denikson', 'x', '', '1.0.0', 0, 0, FALSE, '[]', '')`,
+			fullName, src)
 		return err
 	}
 	if err := insertPackage("a-b", "thunderstore"); err != nil {

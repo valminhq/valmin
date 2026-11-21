@@ -1,4 +1,4 @@
-import { api } from './client';
+import { api, type TextResource } from './client';
 
 /** What a setting can hold once the daemon has typed it (`11 §1.1`). */
 export type ConfigValue = string | number | boolean;
@@ -109,6 +109,12 @@ export const widgets = {
 	text: 'text'
 } as const;
 
+/** The text with LF line endings, as a text box holds it; the daemon keeps a CRLF file's own
+ * endings on save, and the ETag still names the bytes on disk. */
+function lf(resource: TextResource): TextResource {
+	return { ...resource, text: resource.text.replaceAll('\r\n', '\n') };
+}
+
 export const configs = {
 	list: (id: string) => api.get<ConfigList>(`/instances/${id}/configs`),
 	read: (id: string, file: string) =>
@@ -129,16 +135,18 @@ export const configs = {
 		),
 	/** The file's own text, with the ETag a save has to hand back (`11 §1.1`). */
 	readRaw: (id: string, file: string) =>
-		api.getText(`/instances/${id}/configs/${encodeURIComponent(file)}/raw`),
+		api.getText(`/instances/${id}/configs/${encodeURIComponent(file)}/raw`).then(lf),
 	/** A kept version's own text, gated on `config.raw` like every other route serving bytes. */
 	readRawRevision: (id: string, file: string, rev: string) =>
-		api.getText(
-			`/instances/${id}/configs/${encodeURIComponent(file)}/history/${encodeURIComponent(rev)}/raw`
-		),
+		api
+			.getText(
+				`/instances/${id}/configs/${encodeURIComponent(file)}/history/${encodeURIComponent(rev)}/raw`
+			)
+			.then(lf),
 	/** A full replacement, so a stale `etag` is refused as `stale_write` rather than overwriting
 	 * another writer's save. */
 	writeRaw: (id: string, file: string, text: string, etag: string) =>
-		api.putText(`/instances/${id}/configs/${encodeURIComponent(file)}/raw`, text, etag),
+		api.putText(`/instances/${id}/configs/${encodeURIComponent(file)}/raw`, text, etag).then(lf),
 	/** Deletes the file. Its history is kept and shows again if the file comes back. A file an installed mod uses is refused with
 	 * `409 mod_conflict` unless `allowInstalled` is set. */
 	remove: (id: string, file: string, allowInstalled: boolean) =>

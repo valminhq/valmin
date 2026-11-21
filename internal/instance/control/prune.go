@@ -106,10 +106,51 @@ const pruneScanLimit = 500
 func (h *Pruner) Select(
 	ctx context.Context, inst *store.Instance, fresh *store.Backup,
 ) ([]backup.Entry, error) {
-	entries := make([]backup.Entry, 0, pruneScanLimit+1)
-	if fresh != nil {
-		entries = append(entries, pruneEntry(fresh))
+	catalogue, err := h.catalogue(ctx, inst)
+	if err != nil {
+		return nil, err
 	}
+	if fresh != nil {
+		catalogue = append([]backup.Entry{pruneEntry(fresh)}, catalogue...)
+	}
+	return backup.Prune(catalogue, policyOf(inst)), nil
+}
+
+// Retention is what retention removes from an instance's catalogue: on its next run, and once
+// one more consistent or best-effort backup has been added.
+type Retention struct {
+	Now             []backup.Entry
+	AfterConsistent []backup.Entry
+	AfterBestEffort []backup.Entry
+}
+
+// Preview reads the catalogue once and applies retention to it as it stands and with each kind
+// of new backup in front. It removes nothing.
+func (h *Pruner) Preview(ctx context.Context, inst *store.Instance) (*Retention, error) {
+	catalogue, err := h.catalogue(ctx, inst)
+	if err != nil {
+		return nil, err
+	}
+	policy := policyOf(inst)
+	with := func(fresh backup.Entry) []backup.Entry {
+		return backup.Prune(append([]backup.Entry{fresh}, catalogue...), policy)
+	}
+	return &Retention{
+		Now:             backup.Prune(catalogue, policy),
+		AfterConsistent: with(backup.Entry{Consistent: true}),
+		AfterBestEffort: with(backup.Entry{}),
+	}, nil
+}
+
+// policyOf is the retention policy stored on inst.
+func policyOf(inst *store.Instance) backup.Policy {
+	return backup.Policy{KeepCold: inst.BackupKeepCold, KeepHot: inst.BackupKeepHot}
+}
+
+// catalogue is every archive of inst as retention judges it, newest first, with those linked
+// to a saved setup or protected by a remote copy marked pinned.
+func (h *Pruner) catalogue(ctx context.Context, inst *store.Instance) ([]backup.Entry, error) {
+	entries := make([]backup.Entry, 0, pruneScanLimit)
 	var beforeCreatedAt, beforeID string
 	for {
 		rows, err := h.DB.ListBackups(ctx, inst.ID, beforeCreatedAt, beforeID, pruneScanLimit)
@@ -135,9 +176,7 @@ func (h *Pruner) Select(
 		last := rows[len(rows)-1]
 		beforeCreatedAt, beforeID = store.FormatTime(last.CreatedAt), last.ID
 	}
-	return backup.Prune(entries, backup.Policy{
-		KeepCold: inst.BackupKeepCold, KeepHot: inst.BackupKeepHot,
-	}), nil
+	return entries, nil
 }
 
 func pruneEntry(b *store.Backup) backup.Entry {

@@ -19,8 +19,8 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// Run blocks until ctx is done, every few seconds reconciling copies, submitting the next due
-// cleanup or upload, and once a day marking what retention drops.
+// Run blocks until ctx is done, every few seconds reconciling copies and submitting the next due
+// cleanup or upload while any copy needs work, and once a day marking what retention drops.
 func (w *Worker) Run(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -29,22 +29,36 @@ func (w *Worker) Run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if err := w.DB.ReconcileRemoteCopies(ctx); err != nil {
-			slog.ErrorContext(ctx, "reconcile remote copies", slog.Any("error", err))
-		}
+		w.pass(ctx)
 		if time.Now().After(nextRetention) {
 			if err := w.MarkRetention(ctx); err != nil {
 				slog.ErrorContext(ctx, "select remote retention", slog.Any("error", err))
 			}
 			nextRetention = time.Now().Add(24 * time.Hour)
 		}
-		w.DispatchRemote(ctx)
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
 	}
+}
+
+// pass reconciles copies and submits the next due job, stopping after one read when no copy
+// needs work.
+func (w *Worker) pass(ctx context.Context) {
+	pending, err := w.DB.RemoteWorkPending(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "check remote work", slog.Any("error", err))
+		return
+	}
+	if !pending {
+		return
+	}
+	if err := w.DB.ReconcileRemoteCopies(ctx); err != nil {
+		slog.ErrorContext(ctx, "reconcile remote copies", slog.Any("error", err))
+	}
+	w.DispatchRemote(ctx)
 }
 
 // DispatchRemote submits one job: a due cleanup if there is one, otherwise the first due
@@ -108,6 +122,8 @@ func (w *Worker) runCopy(c *store.RemoteCopy) jobs.Runner {
 	}
 }
 
+// watchCopy cancels an upload once its job is cancelled, or once a periodic read finds its copy
+// gone or asked to stop. It closes done when it returns.
 func (w *Worker) watchCopy(
 	ctx context.Context,
 	cancel context.CancelFunc,
@@ -116,15 +132,18 @@ func (w *Worker) watchCopy(
 	done chan<- struct{},
 ) {
 	defer close(done)
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-jh.Cancelled():
+			cancel()
+			return
 		case <-ticker.C:
 			current, err := w.DB.RemoteCopyByID(ctx, c.InstanceID, c.ID)
-			if err != nil || current == nil || current.CancelRequested || jh.CancelRequested(ctx) {
+			if err != nil || current == nil || current.CancelRequested {
 				cancel()
 				return
 			}

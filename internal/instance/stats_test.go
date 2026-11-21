@@ -213,6 +213,88 @@ func TestSamplerPublishesToSubscribers(t *testing.T) {
 	}
 }
 
+// TestSamplerIdlesWithoutSubscribers asserts that the short interval lasts only while
+// someone is subscribed.
+func TestSamplerIdlesWithoutSubscribers(t *testing.T) {
+	s := newSampler()
+	if got := s.interval(); got != idleSampleInterval {
+		t.Fatalf("interval() with no subscriber = %v, want %v", got, idleSampleInterval)
+	}
+	cancel := s.Subscribe(func(Sample) {})
+	if got := s.interval(); got != SampleInterval {
+		t.Errorf("interval() with a subscriber = %v, want %v", got, SampleInterval)
+	}
+	cancel()
+	if got := s.interval(); got != idleSampleInterval {
+		t.Errorf("interval() after cancel = %v, want %v", got, idleSampleInterval)
+	}
+}
+
+// TestASubscriberWakesAnIdleSampler asserts that a new subscriber gets a sample
+// SampleInterval after the last one rather than after the idle interval.
+func TestASubscriberWakesAnIdleSampler(t *testing.T) {
+	fake := runtime.NewFake()
+	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{User: containerUser})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.Start(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	fake.Get(id).Stats = runtime.Stats{MemBytes: 1 << 20, MemLimit: 1 << 30}
+	streams := NewStreams(fake, DefaultPatterns, StreamHooks{})
+	defer streams.Shutdown()
+	streams.Open("inst-a", id)
+	sampler := streams.Sampler("inst-a")
+	waitFor(t, func() bool { _, ok := sampler.Latest(); return ok })
+
+	samples := make(chan Sample, 1)
+	cancel := sampler.Subscribe(func(s Sample) {
+		select {
+		case samples <- s:
+		default:
+		}
+	})
+	defer cancel()
+
+	select {
+	case <-samples:
+	case <-time.After(2 * SampleInterval):
+		t.Fatalf("no sample within %v of subscribing to an idle sampler", 2*SampleInterval)
+	}
+}
+
+// TestASubscriberBeforeStartGetsOneFirstSample asserts that a subscriber's wake never brings
+// a sample closer than SampleInterval to the one before it.
+func TestASubscriberBeforeStartGetsOneFirstSample(t *testing.T) {
+	fake := runtime.NewFake()
+	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{User: containerUser})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.Start(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	streams := NewStreams(fake, DefaultPatterns, StreamHooks{})
+	defer streams.Shutdown()
+	_, sampler := streams.Attach("inst-a")
+	samples := make(chan Sample, 4)
+	cancel := sampler.Subscribe(func(s Sample) { samples <- s })
+	defer cancel()
+
+	streams.Open("inst-a", id)
+	select {
+	case <-samples:
+	case <-time.After(SampleInterval):
+		t.Fatal("no first sample")
+	}
+	select {
+	case <-samples:
+		t.Fatal("a second sample followed the first at once")
+	case <-time.After(SampleInterval / 2):
+	}
+}
+
 // TestSamplerStopsWithTheContainer is 14 §8: a stopped server has no resource usage worth
 // graphing. The ring buffer, by contrast, stays — see
 // TestLogsOpenReadsAndCloseKeepsTheBuffer.

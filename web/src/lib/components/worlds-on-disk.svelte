@@ -205,7 +205,8 @@
 			/>
 		{/if}
 
-		{#if !loadFailure && !configured}
+		<!-- An empty save directory is a server that has not started yet, said above. -->
+		{#if !loadFailure && worlds.length > 0 && !configured}
 			<Alert.Root variant="destructive">
 				<TriangleAlert />
 				<Alert.Title>This server’s world is not here</Alert.Title>

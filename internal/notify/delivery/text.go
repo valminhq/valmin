@@ -9,9 +9,12 @@ import (
 	"unicode/utf8"
 )
 
-// jobLabel names a job kind the way the panel's job history does: mod_install reads
-// "Mod install".
+// jobLabel names a job kind the way the panel's Operations list does: mod_install reads
+// "Mod install", and a chain is a sequence.
 func jobLabel(kind string) string {
+	if kind == "chain" {
+		return "Sequence"
+	}
 	words := strings.TrimSpace(strings.ReplaceAll(kind, "_", " "))
 	if words == "" {
 		return "A job"

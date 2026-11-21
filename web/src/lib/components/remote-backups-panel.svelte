@@ -5,12 +5,15 @@
 	import { actions, instances, type Instance } from '#lib/api/instances.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { unsaved } from '#lib/state/dirty.svelte.js';
+	import { socket } from '#lib/socket/index.svelte.js';
+	import { topics, type ServerMessage } from '#lib/socket/messages.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import { Switch } from '#lib/components/ui/switch/index.js';
 	import Problem from '#lib/components/problem.svelte';
+	import SaveFooter from '#lib/components/save-footer.svelte';
 	import JobProgress from '#lib/components/job-progress.svelte';
 
 	let {
@@ -31,6 +34,7 @@
 	const canSetPolicy = $derived(allowed.includes(actions.backupsRestore));
 	const canUpload = $derived(allowed.includes(actions.backupsCreate));
 	const canAdmin = $derived(session.allowedGlobally().includes(actions.panelSettings));
+	const inFlight = new Set<RemoteCopy['status']>(['pending', 'retry_wait', 'uploading']);
 	let copies = $state<RemoteCopy[]>([]);
 	const configured = $derived(Boolean(summary?.destination_id));
 	let cursor = $state<string | null>(null);
@@ -48,27 +52,31 @@
 		[cold, hot, snapshots].every((n) => n !== undefined && Number.isInteger(n) && n >= 0)
 	);
 	unsaved(() => canSetPolicy && fields !== baseline);
-	$effect(() => {
-		enabled = instance.remote_backup_enabled ?? false;
-		cold = instance.remote_keep_cold ?? 10;
-		hot = instance.remote_keep_hot ?? 5;
-		snapshots = instance.remote_keep_snapshots ?? 10;
-		baseline = JSON.stringify([
+	/** Puts the policy form, and its baseline, on the daemon's row. */
+	function resetPolicy() {
+		const row = [
 			instance.remote_backup_enabled ?? false,
 			instance.remote_keep_cold ?? 10,
 			instance.remote_keep_hot ?? 5,
 			instance.remote_keep_snapshots ?? 10
-		]);
-	});
+		] as const;
+		[enabled, cold, hot, snapshots] = row;
+		baseline = JSON.stringify(row);
+	}
+	$effect(resetPolicy);
+	// Re-read on each state message of the server and on a timer: every 5 s while a copy is
+	// waiting or uploading, otherwise every minute.
 	$effect(() => {
 		const id = instance.id;
 		void refreshKey;
 		if (!canList) return;
 		let disposed = false;
 		let fetching = false;
+		let readAt = 0;
 		async function refresh() {
 			if (fetching) return;
 			fetching = true;
+			readAt = Date.now();
 			try {
 				const page = await remoteBackups.list(id);
 				if (disposed) return;
@@ -86,11 +94,20 @@
 			}
 		}
 		void refresh();
+		const off = socket.subscribe(topics.state(id), (m: ServerMessage) => {
+			if (m.type === 'state') void refresh();
+		});
+		const unhook = socket.onConnected(() => void refresh());
 		const timer = setInterval(() => {
-			if (!document.hidden) void refresh();
+			if (document.hidden) return;
+			if (copies.some((copy) => inFlight.has(copy.status)) || Date.now() - readAt >= 60_000) {
+				void refresh();
+			}
 		}, 5000);
 		return () => {
 			disposed = true;
+			off();
+			unhook();
 			clearInterval(timer);
 		};
 	});
@@ -242,12 +259,13 @@
 						0 keeps every copy in that class. Existing local backups are uploaded only when
 						requested. Pending archives stay protected locally for up to 24 hours.
 					</p>
-					<Button
-						type="submit"
-						class="justify-self-start"
-						disabled={!configured || saving || !valid || fields === baseline}
-						>{saving ? 'Saving…' : 'Save remote policy'}</Button
-					>
+					<SaveFooter
+						saveLabel="Save remote policy"
+						changed={configured && fields !== baseline}
+						busy={saving}
+						invalid={!valid}
+						ondiscard={resetPolicy}
+					/>
 				</form>
 			{/if}
 			{#if configured && copies.length === 0}<p class="text-sm text-muted-foreground">

@@ -565,3 +565,68 @@ func TestRecoveryLeavesAnInterruptedAdoptionContainerIntact(t *testing.T) {
 		t.Errorf("locks after recovery = %d, want 0", locks)
 	}
 }
+
+func TestAnOrphanThatCannotBeRecoveredSaysWhy(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		breakIt func(t *testing.T, fake *runtime.Fake, dataDir string)
+		want    string
+	}{
+		{"its image was removed", func(_ *testing.T, fake *runtime.Fake, _ string) {
+			fake.Images = map[string]bool{}
+		}, "image this container was created from has been removed"},
+		{"its files were removed", func(t *testing.T, _ *runtime.Fake, dataDir string) {
+			if err := os.RemoveAll(dataDir); err != nil {
+				t.Fatal(err)
+			}
+		}, "files are gone from the data directory"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rt, _, fake, admin, _ := lifecycleWorld(t)
+			containerID, dataDir, _ := createAdoptableOrphan(t, rt, fake, false)
+			tc.breakIt(t, fake, dataDir)
+
+			rec := as(rt, admin, httptest.NewRequest(http.MethodGet, adoptionPath(containerID), http.NoBody))
+			if rec.Code != http.StatusConflict || errCode(t, rec) != "container_mismatch" {
+				t.Fatalf("preview = %d %s, want 409 container_mismatch", rec.Code, rec.Body)
+			}
+			if !strings.Contains(rec.Body.String(), tc.want) {
+				t.Errorf("message = %s, want it to say %q", rec.Body, tc.want)
+			}
+		})
+	}
+}
+
+func TestRemovingAnOrphanLeavesItsFiles(t *testing.T) {
+	t.Parallel()
+	rt, _, fake, admin, member := lifecycleWorld(t)
+	containerID, _, marker := createAdoptableOrphan(t, rt, fake, true)
+	remove := func() *http.Request {
+		return httptest.NewRequest(http.MethodDelete, adoptionPath(containerID), http.NoBody)
+	}
+
+	if rec := as(rt, admin, remove()); rec.Code != http.StatusConflict || errCode(t, rec) != "invalid_state" {
+		t.Fatalf("running = %d %s, want 409 invalid_state: a forced remove would skip the save", rec.Code, rec.Body)
+	}
+	if err := fake.Stop(t.Context(), containerID, "SIGINT", time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if rec := as(rt, member, remove()); rec.Code != http.StatusForbidden {
+		t.Fatalf("member = %d, want 403 (%s)", rec.Code, rec.Body)
+	}
+	if rec := as(rt, admin, remove()); rec.Code != http.StatusNoContent {
+		t.Fatalf("admin = %d, want 204 (%s)", rec.Code, rec.Body)
+	}
+	if fake.Get(containerID) != nil {
+		t.Error("the container is still there")
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("the world went with the container: %v", err)
+	}
+	if rec := as(rt, admin, remove()); rec.Code != http.StatusNotFound {
+		t.Errorf("second removal = %d, want 404 (%s)", rec.Code, rec.Body)
+	}
+}

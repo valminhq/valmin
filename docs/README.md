@@ -28,6 +28,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | Set memory and CPU limits                       | [Resource limits](usage.md#resource-limits)                                                |
 | Update Valheim                                  | [Update the game](usage.md#update-the-game)                                                |
 | Try an update before changing a modded server   | [Test an update on a copy](usage.md#test-an-update-on-a-copy)                              |
+| Update a modded server unattended               | [Test updates on a schedule](operations.md#test-updates-on-a-schedule)                     |
 | Delete a server                                 | [Delete a server](usage.md#delete-a-server)                                                |
 | Read the console or send commands               | [Send server commands](usage.md#send-server-commands)                                      |
 | Install, update, lock or downgrade mods         | [Manage mods](usage.md#manage-mods)                                                        |
@@ -41,6 +42,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | See or undo earlier versions of a config file   | [Compare with an earlier version](usage.md#compare-with-an-earlier-version)                |
 | Import, reset or roll back a world              | [Manage worlds](usage.md#manage-worlds)                                                    |
 | Back up and restore a world                     | [Back up or restore a world](operations.md#back-up-or-restore-a-world)                     |
+| Move a world or backup to another server        | [Import a world](usage.md#import-a-world)                                                  |
 | Keep backups off the host                       | [Remote backups](remote-backups.md)                                                        |
 | Find out when a backup holds a broken world     | [World check](operations.md#world-check)                                                   |
 | See what happened between two backups           | [Compare two backups](operations.md#compare-two-backups)                                   |
@@ -48,6 +50,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | Share a server's setup with another panel       | [Share a server as a template](usage.md#share-a-server-as-a-template)                      |
 | See how two servers differ                      | [Compare two servers](usage.md#compare-two-servers)                                        |
 | Ban, allow or make players admins               | [Player lists](usage.md#player-lists)                                                      |
+| Ban a player on every server                    | [Players across servers](usage.md#players-across-servers)                                  |
 | See when people play                            | [Player activity](usage.md#player-activity)                                                |
 | See which names a player has used, on any server | [Names](usage.md#names), [Players across servers](usage.md#players-across-servers)         |
 | Show server status to people without an account | [Public status page](usage.md#public-status-page)                                          |
@@ -55,6 +58,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | Show friends how to join a server               | [The overview](usage.md#the-overview), [Connections](usage.md#connections)                 |
 | Sign in with our SSO (Authelia, Authentik)      | [Sign in through a reverse proxy](configuration.md#sign-in-through-a-reverse-proxy)        |
 | Back up, restart or update on a timetable       | [Schedule maintenance](operations.md#schedule-maintenance)                                 |
+| Test a schedule without waiting for its time    | [Schedule maintenance](operations.md#schedule-maintenance)                                 |
 | Stop servers nobody is playing on               | [Stop a server when nobody plays](operations.md#stop-a-server-when-nobody-plays)           |
 | Be told about, or restart, a hung server        | [Restart a hung server](operations.md#restart-a-hung-server)                               |
 | Reset or upgrade the world with mods            | [Reset or upgrade the world with mods](operations.md#reset-or-upgrade-the-world-with-mods) |
@@ -62,6 +66,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | Get alerts in Discord or elsewhere              | [Get notified](usage.md#get-notified)                                                      |
 | Know when mods fail to load or updates appear   | [Add a rule](usage.md#add-a-rule)                                                          |
 | Let friends start servers from Discord          | [Use the Discord bot](usage.md#use-the-discord-bot)                                        |
+| Restart, back up or update servers from Discord | [Bot admins](usage.md#bot-admins)                                                          |
 | See who changed what                            | [Read the audit log](usage.md#read-the-audit-log)                                          |
 | Check the panel's health or report a bug        | [Check the diagnostics page](troubleshooting.md#check-the-diagnostics-page)                |
 | Back up the whole panel or upgrade it           | [Back up the whole installation](operations.md#back-up-the-whole-installation)             |

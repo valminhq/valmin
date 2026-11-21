@@ -105,7 +105,10 @@ func (n *Notifier) OnJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.Fini
 		InstanceName: fin.InstanceName,
 		Detail: []notify.Field{
 			{Name: "Reason", Value: failureReason(fin.Error)},
-			{Name: "What to do", Value: "Open the server's job history for the full log, then run the backup again."},
+			{
+				Name:  "What to do",
+				Value: "Open Operations on the server's overview for the full log, then run the backup again.",
+			},
 			{Name: "Job ID", Value: fin.ID},
 		},
 	}
@@ -200,6 +203,20 @@ func (n *Notifier) NotifyPowerCutSoon(ctx context.Context, powerOff, stopAt time
 				{Key: "power_off", Name: "Power goes off", Value: formatInstant(powerOff, p.Location())},
 				{Key: "stop_at", Name: "Servers stop", Value: formatInstant(stopAt, p.Location())},
 				{Key: "servers", Name: "Running servers", Value: servers},
+			},
+		}
+	})
+}
+
+// NotifySignInsBlocked reports to the destinations of the sign_ins_blocked rules that sign-ins to
+// the account username are refused after repeated failures, the first refused attempt coming from address.
+func (n *Notifier) NotifySignInsBlocked(ctx context.Context, username, address string) {
+	n.emitByRules(ctx, alerts.KindSignInsBlocked, "", func(*alerts.ParamsWire) *notify.Event {
+		return &notify.Event{
+			Kind: notify.KindSignInsBlocked,
+			Detail: []notify.Field{
+				{Key: "username", Name: "Account", Value: username},
+				{Key: "address", Name: "Blocked attempt from", Value: address},
 			},
 		}
 	})

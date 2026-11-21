@@ -74,7 +74,9 @@ every server gets its own copy.
 - Send alerts to Discord or any webhook for unexpected stops, crash loops, failed or
   stuck jobs, stale backups, low disk space, new game builds and more, with quiet hours.
   Each server can have its own channels and rules, alongside the shared ones.
-- Let friends check and start servers from Discord with `/status` and `/start`.
+- Let friends check, join and start servers from Discord with `/status`, `/join` and `/start`,
+  and let bot admins restart, back up and update them with `/restart`, `/stop`, `/backup` and
+  `/update`.
 
 **Running the panel**
 

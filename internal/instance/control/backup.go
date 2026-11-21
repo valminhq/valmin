@@ -95,8 +95,9 @@ func (b *Backupper) Run(run *BackupRun) jobs.Runner {
 			// backup over housekeeping. Say so and succeed.
 			jh.Log("could not prune old archives: " + err.Error())
 		}
+		logPruned(jh, pruned)
 
-		jh.Progress(ctx, 100, backupMessage(consistent))
+		jh.Progress(ctx, 100, backupMessage(consistent, len(pruned)))
 		return jobs.Outcome{
 			Status:   jobs.StatusSucceeded,
 			OnFinish: finishBackup(inst.ID, quiescing, row, pruned),
@@ -356,11 +357,27 @@ func (b *Backupper) resumeAfterBackup(
 	}
 }
 
-func backupMessage(consistent bool) string {
-	if consistent {
-		return "backup complete"
+// backupMessage is a finished backup job's progress line, with how many archives retention removed.
+func backupMessage(consistent bool, pruned int) string {
+	msg := "Backup complete"
+	if !consistent {
+		msg = "Hot copy complete (taken while the server was running, so it is best-effort)"
 	}
-	return "hot copy complete (taken while the server was running, so it is best-effort)"
+	switch pruned {
+	case 0:
+		return msg
+	case 1:
+		return msg + "; retention removed 1 older backup"
+	default:
+		return fmt.Sprintf("%s; retention removed %d older backups", msg, pruned)
+	}
+}
+
+// logPruned names in the job's log each archive retention is about to remove.
+func logPruned(jh *jobs.Handle, pruned []backup.Entry) {
+	for _, e := range pruned {
+		jh.Log("retention removes " + filepath.Base(e.Path))
+	}
 }
 
 // noRoom says why a stop must not write an archive, or returns "" when it may. A stop is never
@@ -433,6 +450,7 @@ func (b *Backupper) archiveAfterStop(
 	if err != nil {
 		jh.Log("could not prune old archives: " + err.Error())
 	}
+	logPruned(jh, pruned)
 	record := finishBackup(inst.ID, false, row, pruned)
 	var unrecorded atomic.Bool
 	finish = func(ctx context.Context, tx *sql.Tx) error { return recordArchive(ctx, tx, record, &unrecorded) }

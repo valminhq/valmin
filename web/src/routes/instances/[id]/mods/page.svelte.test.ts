@@ -93,6 +93,7 @@ const boot: PluginLoad = {
 	declared: 1,
 	loaded: 1,
 	failed: 0,
+	complete: true,
 	discrepancy: null
 };
 

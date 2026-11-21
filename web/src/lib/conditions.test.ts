@@ -5,6 +5,7 @@ import {
 	bandItems,
 	chipsFor,
 	conditionAge,
+	conditionAgeWords,
 	conditionDetail
 } from '#lib/conditions.js';
 import { formatBytes } from '#lib/format.js';
@@ -96,6 +97,18 @@ describe('formatBytes', () => {
 	it('says nothing rather than NaN when the daemon sent no number', () => {
 		const lowDisk = item('low_disk', { detail: { Free: 'unknown' } });
 		expect(conditionDetail(lowDisk)).toBe(' free, below the  floor');
+	});
+});
+
+describe('conditionAgeWords', () => {
+	it('says the age in words', () => {
+		const now = Date.parse('2026-09-20T12:00:00Z');
+		expect(conditionAgeWords(item('job_failed', { since_at: '2026-09-19T08:00:00Z' }), now)).toBe(
+			'for 28 hours'
+		);
+		expect(conditionAgeWords(item('job_failed', { since_at: '2026-09-20T11:59:00Z' }), now)).toBe(
+			'for 1 minute'
+		);
 	});
 });
 

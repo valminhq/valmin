@@ -28,6 +28,7 @@ function user(id: string, username: string): User {
 		owner: false,
 		created_at: '2026-09-01T00:00:00Z',
 		last_login_at: null,
+		password_change_required: false,
 		timezone: '',
 		hour_cycle: '',
 		date_order: ''

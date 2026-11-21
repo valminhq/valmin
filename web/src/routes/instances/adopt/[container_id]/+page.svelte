@@ -24,6 +24,7 @@
 	import { Label } from '#lib/components/ui/label/index.js';
 	import { Switch } from '#lib/components/ui/switch/index.js';
 	import Problem from '#lib/components/problem.svelte';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import WorldModifiers from '#lib/components/world-modifiers.svelte';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
@@ -36,6 +37,10 @@
 	let failure = $state<unknown>(null);
 	let busy = $state(false);
 	let job = $state<Job | null>(null);
+	// The preview failed, so there is nothing to confirm; an unrecoverable one can be removed.
+	let previewFailed = $state(false);
+	let unrecoverable = $state(false);
+	let confirmRemove = $state(false);
 
 	let name = $state('');
 	let serverName = $state('');
@@ -91,8 +96,26 @@
 				options = gameOptions;
 				if (!name) name = found.instance_id;
 			})
-			.catch((err) => (failure = err));
+			.catch((err) => {
+				failure = err;
+				previewFailed = true;
+				unrecoverable =
+					err instanceof ApiError &&
+					(err.details.reason === 'image_missing' || err.details.reason === 'data_missing');
+			});
 	});
+
+	async function remove() {
+		busy = true;
+		try {
+			await adoption.remove(containerID);
+			await goto(resolve('/'));
+		} catch (err) {
+			failure = err;
+		} finally {
+			busy = false;
+		}
+	}
 
 	async function submit(event: SubmitEvent) {
 		event.preventDefault();
@@ -285,7 +308,24 @@
 				</form>
 			</Card.Content>
 		</Card.Root>
-	{:else}
+	{:else if unrecoverable}
+		<div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-4">
+			<p class="text-sm text-muted-foreground">
+				Removing the container frees its ports. Its files in the data directory, if any, stay where
+				they are.
+			</p>
+			<Button variant="destructive" disabled={busy} onclick={() => (confirmRemove = true)}>
+				Remove container
+			</Button>
+		</div>
+		<DestructiveConfirm
+			bind:open={confirmRemove}
+			title="Remove this container?"
+			description="The container is deleted for good. Files on disk are not touched."
+			confirmLabel="Remove container"
+			onconfirm={remove}
+		/>
+	{:else if !previewFailed}
 		<p class="text-sm text-muted-foreground">Checking the container…</p>
 	{/if}
 </main>

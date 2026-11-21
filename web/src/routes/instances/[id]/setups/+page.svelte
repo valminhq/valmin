@@ -169,7 +169,8 @@
 			selectedId = '';
 			preview = null;
 		}
-		if (jobAction === 'restore') preview = null;
+		if (jobAction === 'restore' && jobTarget && jobTarget === selectedId)
+			void loadPreview(jobTarget);
 		void load(id);
 	}
 

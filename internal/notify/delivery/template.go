@@ -27,12 +27,16 @@ var defaultTemplates = map[alerts.Kind]string{
 	alerts.KindModsFailed: "**Mods:** {mods}\n**Reason:** {reason}\n**What to do:** {what_to_do}",
 	alerts.KindModUpdates: "**Updates:** {count}\n**Mods:** {mods}\n**What to do:** {what_to_do}",
 	alerts.KindPowerCut:   "**Power goes off:** {power_off}\n**Servers stop:** {stop_at}\n**Running servers:** {servers}",
+	alerts.KindSignInsBlocked: "**Account:** {username}\n**Blocked attempt from:** {address}\n" +
+		"Sign-ins to this account are refused for a short while.",
 	alerts.KindServerStarted: "**Server name:** {server_name}\n**World:** {world}\n**Join code:** {join_code}\n" +
 		"**Port:** {port}\n**Started:** {time}",
 	alerts.KindServerStopped: "**Reason:** {reason}\n**Server name:** {server_name}\n**World:** {world}\n" +
 		"**Stopped:** {time}",
-	alerts.KindInstanceDown:     "**Status:** {status}\n**Cause:** {reason}\n**What to do:** {what_to_do}",
-	alerts.KindGameUpdated:      "**Game build:** {build}\n**Mods updated:** {mods}\n**Updated:** {time}",
+	alerts.KindInstanceDown: "**Status:** {status}\n**Cause:** {reason}\n**What to do:** {what_to_do}",
+	alerts.KindGameUpdated:  "**Game build:** {build}\n**Mods updated:** {mods}\n**Updated:** {time}",
+	alerts.KindUpdateTestFinished: "**Result:** {status}\n**Game build:** {build}\n**Mods updated:** {mods}\n" +
+		"**Failed to load:** {failed_mods}\n**Finished:** {time}",
 	alerts.KindPlayerJoined:     "{player} joined",
 	alerts.KindPlayerLeft:       "{player} left",
 	alerts.KindBossDefeated:     "{boss} was defeated for the first time on day {day}. Fighters: {players}",

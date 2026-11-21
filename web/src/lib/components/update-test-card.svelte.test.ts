@@ -42,7 +42,13 @@ function report(overrides: Partial<UpdateTest> = {}): UpdateTest {
 		mod_changes: [{ full_name: 'Author-Mod', from: '1.0.0', to: '1.1.0', source: 'thunderstore' }],
 		failed: [],
 		not_seen: [],
-		plugin_load: { observed_at: '2026-09-24T09:00:00Z', declared: 3, loaded: 3, failed: 0 },
+		plugin_load: {
+			observed_at: '2026-09-24T09:00:00Z',
+			declared: 3,
+			loaded: 3,
+			failed: 0,
+			complete: true
+		},
 		...overrides
 	};
 }
@@ -128,7 +134,13 @@ describe('the update test card', () => {
 			admin,
 			report({
 				failed: [{ full_name: 'Author-Mod', load_error: 'Could not load [Mod 1.1.0]' }],
-				plugin_load: { observed_at: '2026-09-24T09:00:00Z', declared: 3, loaded: 3, failed: 1 }
+				plugin_load: {
+					observed_at: '2026-09-24T09:00:00Z',
+					declared: 3,
+					loaded: 3,
+					failed: 1,
+					complete: true
+				}
 			})
 		);
 
@@ -150,6 +162,42 @@ describe('the update test card', () => {
 		await open(admin, report({ plugin_load: null }));
 		expect(await screen.findByText(/has not written a mod loader log/)).toBeTruthy();
 		expect(screen.queryByText(/none failed/)).toBeNull();
+	});
+
+	it('does not call a copy whose loader had not finished a success', async () => {
+		await open(
+			admin,
+			report({
+				plugin_load: {
+					observed_at: '2026-09-24T09:00:00Z',
+					declared: 3,
+					loaded: 1,
+					failed: 0,
+					complete: false
+				}
+			})
+		);
+		expect(await screen.findByText(/loader on the copy had not finished/)).toBeTruthy();
+		expect(screen.queryByText(/none failed/)).toBeNull();
+	});
+
+	it('says the loader had not finished beside the mods that failed so far', async () => {
+		await open(
+			admin,
+			report({
+				failed: [{ full_name: 'Author-Mod', load_error: 'Could not load [Mod 1.1.0]' }],
+				plugin_load: {
+					observed_at: '2026-09-24T09:00:00Z',
+					declared: 3,
+					loaded: 1,
+					failed: 1,
+					complete: false
+				}
+			})
+		);
+		const result = await screen.findByTestId('boot-result');
+		expect(text(result)).toContain('1 mod failed to load on the copy');
+		expect(text(result)).toContain('loader on the copy had not finished');
 	});
 
 	it('applies only after the confirmation that names what happens', async () => {
@@ -295,7 +343,7 @@ describe('the update test card', () => {
 		);
 		await open(admin, null);
 
-		expect(await screen.findByText(/copying the server/)).toBeTruthy();
+		expect(await screen.findByText(/copying the server/i)).toBeTruthy();
 	});
 
 	it('tells a test copy where it came from instead of offering its own test', async () => {

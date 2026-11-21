@@ -5,7 +5,10 @@ import { actions } from '#lib/api/instances.js';
 import { session } from '#lib/state/session.svelte.js';
 import { FakeDaemon, instance, permissions } from '#lib/testing/daemon.js';
 import { click } from '#lib/testing/interact.js';
+import { socket } from '#lib/testing/socket.js';
 import RemoteBackupsPanel from './remote-backups-panel.svelte';
+
+vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 let daemon: FakeDaemon;
 
@@ -80,6 +83,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	session.permissions = null;
+	socket.reset();
 	vi.unstubAllGlobals();
 });
 
@@ -172,6 +176,22 @@ describe('the remote backups panel', () => {
 		session.permissions = permissions('inst-a', [actions.backupsList]);
 		render(RemoteBackupsPanel, { instance: instance({ id: 'inst-a' }) });
 		expect(await screen.findByText(/No remote copies yet/)).toBeTruthy();
+	});
+
+	it('re-reads the copies when the server announces a state change', async () => {
+		await open([actions.backupsList], [copy({ status: 'succeeded' })]);
+		const reads = () => daemon.requests('GET', '/instances/inst-a/remote-copies').length;
+		const before = reads();
+
+		socket.push('instance.inst-a.state', {
+			type: 'state',
+			instance: 'inst-a',
+			state: 'running',
+			restart_required: false,
+			pending_restart: false
+		});
+
+		await vi.waitFor(() => expect(reads()).toBe(before + 1));
 	});
 
 	it('shows setup guidance to a member without panel settings access', async () => {

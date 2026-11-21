@@ -44,7 +44,12 @@ func seedSealedInstance(t *testing.T, db *store.DB, k *crypto.Keeper, id string,
 // the key check, and changes nothing on a second run.
 func TestAcceptNewKey(t *testing.T) {
 	ctx := t.Context()
-	db, err := store.Open(ctx, "sqlite", "file:"+filepath.Join(t.TempDir(), "panel.db"))
+	db, err := store.Open(
+		ctx,
+		"sqlite",
+		"file:"+filepath.Join(t.TempDir(), "panel.db"),
+		store.CataloguePath(t.TempDir()),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +191,12 @@ func TestEveryEncryptedColumnHasARecoveryRule(t *testing.T) {
 // secrets but no key check refuses a key that cannot open them, and accepts the one that can.
 func TestAStartWithoutAKeyCheckNeedsTheKeyToOpenAStoredSecret(t *testing.T) {
 	ctx := t.Context()
-	db, err := store.Open(ctx, "sqlite", "file:"+filepath.Join(t.TempDir(), "panel.db"))
+	db, err := store.Open(
+		ctx,
+		"sqlite",
+		"file:"+filepath.Join(t.TempDir(), "panel.db"),
+		store.CataloguePath(t.TempDir()),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

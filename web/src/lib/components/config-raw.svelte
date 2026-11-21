@@ -5,6 +5,7 @@
 	import type { TextResource } from '#lib/api/client.js';
 	import { diffLines, hunks } from '#lib/diff.js';
 	import { Button } from '#lib/components/ui/button/index.js';
+	import SaveFooter from '#lib/components/save-footer.svelte';
 	import * as Alert from '#lib/components/ui/alert/index.js';
 	import { unsaved } from '#lib/state/dirty.svelte.js';
 	import Problem from '#lib/components/problem.svelte';
@@ -205,18 +206,13 @@
 			bind:value={text}
 		></Textarea>
 
-		<div class="flex flex-wrap items-center justify-between gap-3">
-			<p class="text-sm text-muted-foreground">
-				{changed ? 'Unsaved changes.' : 'Matches the file on disk.'}
-			</p>
-			<div class="flex gap-2">
-				<Button variant="ghost" size="sm" onclick={discard} disabled={!changed || saving}>
-					Discard changes
-				</Button>
-				<Button size="sm" onclick={save} disabled={!editable || !changed || !etag || saving}>
-					{saving ? 'Saving…' : 'Save file'}
-				</Button>
-			</div>
-		</div>
+		<SaveFooter
+			saveLabel="Save file"
+			{changed}
+			busy={saving}
+			invalid={!editable || !etag}
+			ondiscard={discard}
+			onsave={save}
+		/>
 	{/if}
 </div>

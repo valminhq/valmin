@@ -20,6 +20,7 @@
 	import { Label } from '#lib/components/ui/label/index.js';
 	import { Switch } from '#lib/components/ui/switch/index.js';
 	import Problem from '#lib/components/problem.svelte';
+	import SaveFooter from '#lib/components/save-footer.svelte';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import RcloneConnectionDialog from '#lib/components/rclone-connection-dialog.svelte';
 
@@ -243,13 +244,18 @@
 							password again when changing the URL, username, or folder. Pending copies are
 							cancelled; previous remote files stay untouched. Active transfers must finish first.
 						</p>
-						<div class="flex flex-wrap gap-2">
-							<Button type="submit" disabled={saving || testing}
-								>{saving ? 'Saving…' : 'Save destination'}</Button
-							>
+						<SaveFooter
+							saveLabel="Save destination"
+							changed={fields !== baseline || password !== ''}
+							creating={!destination}
+							busy={saving}
+							invalid={testing}
+							ondiscard={() => fill(destination)}
+						>
 							<Button
 								type="button"
 								variant="outline"
+								size="sm"
 								disabled={!destination ||
 									saving ||
 									testing ||
@@ -257,7 +263,7 @@
 									password !== ''}
 								onclick={test}>Test connection</Button
 							>
-						</div>
+						</SaveFooter>
 					</form>
 				</Card.Content>
 			</Card.Root>

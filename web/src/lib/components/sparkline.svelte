@@ -52,7 +52,13 @@
 <div class="grid gap-1">
 	<div class="flex flex-wrap items-baseline justify-between gap-x-3">
 		<span class="text-xs text-muted-foreground">{label}</span>
-		<span class="text-xl font-semibold tracking-tight tabular-nums">{value ?? 'unknown'}</span>
+		<!-- No sample yet reads as a muted dash, not a bold word that looks like a reading. -->
+		<span
+			class={[
+				'text-xl tabular-nums',
+				value === null ? 'text-muted-foreground' : 'font-semibold tracking-tight'
+			]}>{value ?? '—'}</span
+		>
 	</div>
 	<div class="h-10" aria-hidden="true">
 		{#if data.length > 1}

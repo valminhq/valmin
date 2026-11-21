@@ -3,10 +3,10 @@
 	import { unsaved } from '#lib/state/dirty.svelte.js';
 	import { actions, instances, type Instance, type SteamBranch } from '#lib/api/instances.js';
 	import { session } from '#lib/state/session.svelte.js';
-	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
 	import GameBranchPicker from '#lib/components/game-branch-picker.svelte';
 	import Problem from '#lib/components/problem.svelte';
+	import SaveFooter from '#lib/components/save-footer.svelte';
 
 	/** Chooses the Steam branch the next game update installs. Saving changes no files: the
 	 * update on the overview does, with an archive taken first. */
@@ -22,10 +22,13 @@
 
 	const canEdit = $derived(session.allowed(instance.id).includes(actions.gameUpdate));
 
-	$effect(() => {
+	/** Puts the form back on the daemon's row. */
+	function reset() {
 		branch = instance.game_branch;
 		password = '';
-	});
+	}
+
+	$effect(reset);
 
 	// Only someone who can change the branch sees the picker, so no one else asks for its options.
 	$effect(() => {
@@ -77,18 +80,19 @@
 					An older build may not load a world a newer one saved. The update archives the world
 					first, so it can be restored.
 				</p>
-				<div class="flex flex-wrap items-center gap-3">
-					<Button size="sm" disabled={!changed || branch.trim() === '' || saving} onclick={save}>
-						{saving ? 'Saving…' : 'Save game version'}
-					</Button>
-					{#if saved !== null && saved === branch.trim() && password === ''}
-						<a
-							class="text-sm underline"
-							href={resolve('/instances/[id]#update', { id: instance.id })}
-							>Run the game update to switch</a
-						>
-					{/if}
-				</div>
+				<SaveFooter
+					saveLabel="Save game version"
+					{changed}
+					busy={saving}
+					invalid={branch.trim() === ''}
+					ondiscard={reset}
+					onsave={save}
+				/>
+				{#if saved !== null && saved === branch.trim() && password === ''}
+					<a class="text-sm underline" href={resolve('/instances/[id]#update', { id: instance.id })}
+						>Run the game update to switch</a
+					>
+				{/if}
 			{:else}
 				<p class="text-sm text-muted-foreground">Loading…</p>
 			{/if}

@@ -103,6 +103,7 @@ func TestHostLevelRuleCannotNameAServer(t *testing.T) {
 	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
 	seedTestInstance(t, db, "midgard", 24560)
+	recordingReceiver(t, rt, http.StatusNoContent)
 	hook := createWebhook(t, rt, admin,
 		`{"name":"Discord","kind":"discord","url":"https://example.com/api/webhooks/1/x"}`)
 

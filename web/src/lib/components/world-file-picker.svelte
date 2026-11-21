@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Input } from '#lib/components/ui/input/index.js';
+	import FileInput from '#lib/components/file-input.svelte';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import { Switch } from '#lib/components/ui/switch/index.js';
 
@@ -23,18 +23,8 @@
 -->
 <div class="grid gap-2">
 	<Label for="world-folder">World folder</Label>
-	<!--
-		`webkitdirectory` is not in the HTML spec and is what every browser implements, so it
-		is spread rather than written as an attribute. The folder is the unit because a
-		Valheim 1.0 world *is* a directory, and its name is the world's name (`03 §4`).
-	-->
-	<Input
-		id="world-folder"
-		type="file"
-		{disabled}
-		bind:files={pickedFolder}
-		{...{ webkitdirectory: true, directory: true }}
-	/>
+	<!-- A Valheim 1.0 world is a directory, and its name is the world's name. -->
+	<FileInput id="world-folder" folder {disabled} bind:files={pickedFolder} />
 	<p class="text-sm text-muted-foreground">
 		Valheim saves a world as a folder named after it. Pick that folder — it is under
 		<span class="font-mono">worlds_local</span>.
@@ -43,9 +33,11 @@
 
 <div class="grid gap-2">
 	<Label for="world-files">Or files</Label>
-	<Input id="world-files" type="file" multiple {disabled} bind:files={picked} />
+	<FileInput id="world-files" multiple {disabled} bind:files={picked} />
 	<p class="text-sm text-muted-foreground">
-		A zip of that folder works too. Older Valheim saved a world as a pair instead — the
+		A zip of that folder works too, and so does a world backup (<span class="font-mono"
+			>.tar.gz</span
+		>) downloaded from a Valmin server. Older Valheim saved a world as a pair instead — the
 		<span class="font-mono">.db</span> and the <span class="font-mono">.fwl</span> of the same name —
 		and both files together are that world.
 	</p>

@@ -17,7 +17,7 @@ describe('the restart notice and badge', () => {
 		],
 		[{ restart_required: false, pending_restart: false }, null, null]
 	])('for %o says %s', (flags, notice, badge) => {
-		render(RestartNotice, { instance: flags });
+		render(RestartNotice, { instance: { state: 'running', ...flags }, canRestart: true });
 		render(StateBadge, {
 			state: 'running',
 			restartRequired: flags.restart_required,
@@ -32,5 +32,19 @@ describe('the restart notice and badge', () => {
 			const shown = words === notice || words === badge;
 			expect(!!screen.queryByText(words), words).toBe(shown);
 		}
+	});
+
+	// A stopped server applies its changes on its next start, and a viewer cannot restart.
+	it.each([
+		['a stopped server', 'stopped', true],
+		['a viewer', 'running', false]
+	])('says nothing for %s', (_name, state, canRestart) => {
+		const flags = { restart_required: true, pending_restart: true };
+		render(RestartNotice, { instance: { state, ...flags }, canRestart });
+		render(StateBadge, { state, restartRequired: canRestart, pendingRestart: state === 'stopped' });
+		expect(screen.queryByText('Restart to apply settings')).toBeNull();
+		// The badge keeps a launch change visible on a stopped server, as its alert is.
+		expect(screen.queryByText('pending restart')).toBeNull();
+		expect(!!screen.queryByText('restart required')).toBe(canRestart);
 	});
 });

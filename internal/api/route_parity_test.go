@@ -50,6 +50,7 @@ B- GET /api/v1/audit/filters
 B- POST /api/v1/auth/login
 B- POST /api/v1/auth/logout
 B- GET /api/v1/auth/me
+B- GET /api/v1/backups/orphaned
 B- GET /api/v1/game/options
 B- GET /api/v1/game/patch-notes
 B- GET /api/v1/instances
@@ -158,6 +159,7 @@ B- PATCH /api/v1/instances/{id}/webhooks/{wid}
 B- POST /api/v1/instances/{id}/webhooks/{wid}/test
 B- GET /api/v1/instances/{id}/worlds
 SL POST /api/v1/instances/{id}/worlds/import
+S- POST /api/v1/instances/{id}/worlds/import-backup
 B- DELETE /api/v1/instances/{id}/worlds/{name}
 B- POST /api/v1/instances/{id}/worlds/{name}/restore
 B- GET /api/v1/invites
@@ -168,10 +170,13 @@ B- GET /api/v1/jobs/{id}
 B- POST /api/v1/jobs/{id}/cancel
 B- PATCH /api/v1/me
 B- POST /api/v1/me/password
+B- GET /api/v1/me/sessions
+B- DELETE /api/v1/me/sessions/{id}
 B- GET /api/v1/me/permissions
 B- GET /api/v1/mods/search
 B- POST /api/v1/mods/sync
 B- GET /api/v1/mods/{namespace}/{name}
+B- DELETE /api/v1/orphans/{container_id}
 B- GET /api/v1/orphans/{container_id}
 B- POST /api/v1/orphans/{container_id}
 B- GET /api/v1/players
@@ -179,6 +184,7 @@ B- GET /api/v1/schedules
 B- POST /api/v1/schedules
 B- DELETE /api/v1/schedules/{id}
 B- PATCH /api/v1/schedules/{id}
+B- POST /api/v1/schedules/{id}/run
 B- POST /api/v1/setup
 B- GET /api/v1/templates
 B- GET /api/v1/users

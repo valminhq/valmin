@@ -4,7 +4,7 @@
 	import {
 		CONDITION_LABEL,
 		CONDITION_SENTENCE,
-		conditionAge,
+		conditionAgeWords,
 		conditionDetail
 	} from '#lib/conditions.js';
 	import { Badge } from '#lib/components/ui/badge/index.js';
@@ -66,7 +66,7 @@
 						>{CONDITION_SENTENCE[item.kind]}{#if detail}{' · ' + detail}{/if}</span
 					>
 					<span class="text-xs text-muted-foreground">
-						open {conditionAge(item)}
+						open {conditionAgeWords(item)}
 						{#if link}
 							·
 							<!-- Already resolved by destination(), which the rule cannot see through. -->

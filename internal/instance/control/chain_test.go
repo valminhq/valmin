@@ -280,6 +280,12 @@ func TestChainSkipsWhatAStoppedServerCannotDo(t *testing.T) {
 	if state := instanceState(t, w); state != instance.StateStopped {
 		t.Errorf("instance state = %s, want stopped", state)
 	}
+	if msg := deref(got.Message); msg != "Done, 1 of 2 steps skipped" {
+		t.Errorf("message = %q, want it to count the skipped command", msg)
+	}
+	if !strings.Contains(deref(got.Log), "step 1 skipped: the server is not running") {
+		t.Errorf("log %q does not say which step was skipped and why", deref(got.Log))
+	}
 }
 
 // TestChainSkipsACommandAServerCannotTake asserts a command refused because the container is not

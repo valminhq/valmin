@@ -16,7 +16,12 @@ import (
 func TestACopyMatchesAFreshMigration(t *testing.T) {
 	copied := Open(t)
 
-	fresh, err := store.Open(t.Context(), "sqlite", "file:"+filepath.Join(t.TempDir(), "panel.db"))
+	fresh, err := store.Open(
+		t.Context(),
+		"sqlite",
+		"file:"+filepath.Join(t.TempDir(), "panel.db"),
+		store.CataloguePath(t.TempDir()),
+	)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

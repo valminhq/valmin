@@ -81,6 +81,7 @@ type Server struct {
 	remoteBackups *RemoteBackups
 	diagnostics   *Diagnostics
 	discord       *discord.Bot
+	retention     *Retention
 	hub           *ws.Hub
 }
 
@@ -100,7 +101,7 @@ func (s *Server) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, run := range []func(context.Context){
 		s.supervisor.Run, s.mods.Run, s.scheduler.Run, s.shutdowns.Run, s.notifier.Run, s.notifier.Dispatcher.Run,
-		s.remoteBackups.worker.Run, s.players.Run, s.discord.Run,
+		s.remoteBackups.worker.Run, s.players.Run, s.discord.Run, s.retention.Run,
 	} {
 		wg.Go(func() { run(ctx) })
 	}
@@ -151,9 +152,10 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	rt := &Router{mux: http.NewServeMux(), api: http.NewServeMux(), within: w.cfg.Server.RequestTimeout.Std()}
 	healthRoutes(rt.mux, health)
 	gate := middleware.NewBootstrapGate(d.BootstrapPending)
-	grants := w.accountRoutes(gate)
+	grants, signIn := w.accountRoutes(gate)
 
 	webhooks, notifier := w.notifications(d.Options.WebhookSender)
+	signIn.Alerts = notifier
 	remoteBackups := w.remoteBackups()
 	alertRuleRoutes(w.routes, &AlertRules{
 		DB: w.db, Authz: w.az, Dispatcher: webhooks.dispatcher, TestSends: webhooks.testSends,
@@ -219,13 +221,14 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	diagnostics := w.diagnostics(instances, mods)
 	sched := w.schedules(instances, hub)
 	shutdowns := w.shutdowns(instances, notifier)
-	bot := w.discord(ctl.Starter, streams)
+	bot := w.discord(ctl, streams, mods)
 	bot.StopLead = shutdowns.StopLead()
 
 	srv := &Server{
 		router: rt, health: health, supervisor: ctl.Supervisor, instances: instances, mods: mods,
 		scheduler: sched, shutdowns: shutdowns, players: players, webhooks: webhooks, notifier: notifier,
 		remoteBackups: remoteBackups, diagnostics: diagnostics, discord: bot, hub: hub,
+		retention: &Retention{DB: w.db, Engine: w.engine},
 	}
 	w.engine.OnFinish(srv.onJobFinished)
 	registerCancellationPolicies(w.engine)
@@ -262,8 +265,9 @@ func (s *Server) onJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.Finish
 }
 
 // accountRoutes registers the user, session, permission, audit, job, key and export endpoints and
-// returns the grants handler, whose changes the hub announces.
-func (w *wiring) accountRoutes(gate *middleware.BootstrapGate) *Grants {
+// returns the grants handler, whose changes the hub announces, and the sign-in handler, which is
+// given the notifier once it exists.
+func (w *wiring) accountRoutes(gate *middleware.BootstrapGate) (*Grants, *Auth) {
 	permissionRoutes(w.routes, &Permissions{Authz: w.az, DB: w.db, Commands: w.commands})
 	a := NewAuth(auth.NewBootstrap(w.db), w.sessions, gate, w.keeper,
 		auth.NewDeviceTrust(w.db, func(msg []byte) ([]byte, error) {
@@ -287,7 +291,7 @@ func (w *wiring) accountRoutes(gate *middleware.BootstrapGate) *Grants {
 		FreeSpace:      func() (uint64, error) { return instance.FreeSpace(w.cfg.Data.Root) },
 		FreeSpaceFloor: uint64(max(w.cfg.Data.FreeSpaceFloorBytes, 0)),
 	}})
-	return grants
+	return grants, a
 }
 
 // notifications builds the webhook endpoints and the notifier every domain event goes through.
@@ -311,15 +315,50 @@ func (w *wiring) notifications(sender *notify.Sender) (*Webhooks, *delivery.Noti
 }
 
 // discord builds the Discord bot and its admin endpoints.
-func (w *wiring) discord(starter *control.Starter, streams *instance.Streams) *discord.Bot {
-	bot := discord.New(w.db, w.keeper, starter, func(id string) *int {
+func (w *wiring) discord(ctl *control.Components, streams *instance.Streams, mods *Mods) *discord.Bot {
+	bot := discord.New(w.db, w.keeper, ctl.Starter, func(id string) *int {
 		if r := streams.Reader(id); r != nil {
 			return r.Players()
 		}
 		return nil
 	})
+	bot.JoinCode = func(id string) string {
+		if r := streams.Reader(id); r != nil {
+			return r.JoinCode()
+		}
+		return ""
+	}
+	bot.Join = func(ctx context.Context, inst *store.Instance) discord.JoinInfo {
+		return discordJoin(ctx, inst, bot.JoinCode, mods)
+	}
+	bot.Chainer, bot.Updates, bot.Deleter = ctl.Chainer, ctl.UpdateTester, ctl.Deleter
 	discordRoutes(w.routes, &Discord{DB: w.db, Authz: w.az, Keeper: w.keeper, Bot: bot})
 	return bot
+}
+
+// discordJoin is how players join inst, as the bot's /join shows it: the crossplay join code, or
+// the join address and its Steam link, and the profile code while it matches the server's mods.
+func discordJoin(
+	ctx context.Context, inst *store.Instance, joinCode func(string) string, mods modpackReader,
+) discord.JoinInfo {
+	var info discord.JoinInfo
+	if inst.Crossplay {
+		info.Code = joinCode(inst.ID)
+	} else if addr := joinAddress(inst.JoinHost, inst.BasePort); addr != nil {
+		info.Address = *addr
+		if link := steamJoinURL(addr, false); link != nil {
+			info.SteamURL = *link
+		}
+	}
+	code, err := mods.currentModpackCode(ctx, inst.ID)
+	if err != nil {
+		slog.WarnContext(ctx, "could not read the profile code for discord",
+			slog.String("instance_id", inst.ID), slog.Any("error", err))
+	}
+	if code != nil {
+		info.ProfileCode, info.ProfileRegistry = code.Code, code.Registry
+	}
+	return info
 }
 
 // remoteBackups builds the off-host copy endpoints and their copy worker.

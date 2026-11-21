@@ -122,6 +122,7 @@ func instanceRoutes(rt *routeTable, h *Instances) {
 	rt.Handle("GET /api/v1/instances/inbox", http.HandlerFunc(h.inbox))
 	rt.Handle("GET /api/v1/orphans/{container_id}", http.HandlerFunc(h.previewAdoption))
 	rt.Handle("POST /api/v1/orphans/{container_id}", http.HandlerFunc(h.adopt))
+	rt.Handle("DELETE /api/v1/orphans/{container_id}", http.HandlerFunc(h.removeOrphan))
 	rt.Handle("GET /api/v1/game/options", http.HandlerFunc(h.options))
 	rt.Handle("GET /api/v1/game/patch-notes", http.HandlerFunc(h.patchNotes))
 	rt.Handle("GET /api/v1/instances/{id}", http.HandlerFunc(h.get))
@@ -157,12 +158,7 @@ func instanceRoutes(rt *routeTable, h *Instances) {
 	h.listRoutes(rt)
 	h.configRoutes(rt)
 	h.setupRoutes(rt)
-	// Stream, not Handle: 11 §8.1's 30 s TimeoutHandler would sever a large upload
-	// mid-transfer.
-	rt.Handle("GET /api/v1/instances/{id}/worlds", http.HandlerFunc(h.listWorlds))
-	rt.LargeStream("POST /api/v1/instances/{id}/worlds/import", http.HandlerFunc(h.importWorld))
-	rt.Handle("POST /api/v1/instances/{id}/worlds/{name}/restore", http.HandlerFunc(h.restoreWorldFromDisk))
-	rt.Handle("DELETE /api/v1/instances/{id}/worlds/{name}", http.HandlerFunc(h.deleteWorld))
+	h.worldRoutes(rt)
 	// Stream for the same reason in the other direction: a world archive over a slow link
 	// outlasts the request timeout, and a severed download is a corrupt file the operator
 	// only discovers when they try to restore from it.

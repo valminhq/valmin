@@ -114,6 +114,24 @@ export const PANEL_EVENTS: PanelEvent[] = [
 		}
 	},
 	{
+		kind: 'update_test_finished',
+		group: 'Maintenance',
+		label: 'Update test finished',
+		when: 'An update test on a copy of a server ended, whether every mod loaded or not.',
+		headline: 'Update test finished',
+		accent: '#5865F2',
+		template:
+			'**Result:** {status}\n**Game build:** {build}\n**Mods updated:** {mods}\n**Failed to load:** {failed_mods}\n**Finished:** {time}',
+		placeholders: ['status', 'build', 'mods', 'failed_mods', 'time', 'server', 'event'],
+		sample: {
+			status: 'Not every mod loaded: 1 failed: EpicLoot. Not applied.',
+			build: '21981590 to 22110001',
+			mods: 'ValheimModding-Jotunn 2.20.2, RandyKnapp-EpicLoot 0.10.4',
+			failed_mods: 'RandyKnapp-EpicLoot',
+			time: SERVER_TIME
+		}
+	},
+	{
 		kind: 'power_cut',
 		group: 'Server status',
 		label: 'Power cut soon',
@@ -128,6 +146,18 @@ export const PANEL_EVENTS: PanelEvent[] = [
 			stop_at: '17 Oct 2026, 22:55 UTC',
 			servers: 'Midgard, Ashlands'
 		}
+	},
+	{
+		kind: 'sign_ins_blocked',
+		group: 'Server status',
+		label: 'Sign-ins blocked',
+		when: 'Too many failed sign-ins for one account, from anywhere, and the panel starts refusing it. Sent at most once an hour for each account.',
+		headline: 'Sign-ins blocked after repeated failures',
+		accent: '#D83C3E',
+		template:
+			'**Account:** {username}\n**Blocked attempt from:** {address}\nSign-ins to this account are refused for a short while.',
+		placeholders: ['username', 'address', 'event'],
+		sample: { username: 'bea', address: '203.0.113.7' }
 	},
 	condition(
 		'crash_loop',
@@ -165,7 +195,7 @@ export const PANEL_EVENTS: PanelEvent[] = [
 		'Job failed',
 		'Backup failed',
 		[['reason', 'Reason', 'The archive could not be written.']],
-		'Open the server’s job history for the full log, then try the job again.'
+		'Open Operations on the server’s overview for the full log, then try the job again.'
 	),
 	condition(
 		'backup_attention',
@@ -291,7 +321,7 @@ export const GROUPS: { name: string; note: string; game?: boolean }[] = [
 ];
 
 /** Kinds that never concern one server, so their rules cover every server. */
-export const HOST_WIDE: RuleKind[] = ['low_disk', 'power_cut'];
+export const HOST_WIDE: RuleKind[] = ['low_disk', 'power_cut', 'sign_ins_blocked'];
 /** Kinds whose messages show a time, so a rule can choose the zone. */
 export const TIMED: RuleKind[] = [
 	'power_cut',
@@ -300,15 +330,22 @@ export const TIMED: RuleKind[] = [
 	'stale_backup',
 	'backup_attention',
 	'instance_down',
-	'game_updated'
+	'game_updated',
+	'update_test_finished'
 ];
 /** Whether a kind is a condition, sent when it opens and edited when it clears, rather than a
  * one-off event. */
 export const isCondition = (kind: RuleKind) =>
 	PANEL_EVENTS.some((e) => e.kind === kind) &&
-	!['server_started', 'server_stopped', 'power_cut', 'instance_down', 'game_updated'].includes(
-		kind
-	);
+	![
+		'server_started',
+		'server_stopped',
+		'power_cut',
+		'sign_ins_blocked',
+		'instance_down',
+		'game_updated',
+		'update_test_finished'
+	].includes(kind);
 
 /** alerts.Params.Defaults: what an empty threshold means. */
 export const DEFAULT_CRASH_COUNT = 3;

@@ -125,6 +125,7 @@ var instanceRouteAccess = map[string]string{
 	"POST /api/v1/instances/{id}/webhooks/{wid}/test":             "notifications.manage",
 	"GET /api/v1/instances/{id}/worlds":                           accessView,
 	"POST /api/v1/instances/{id}/worlds/import":                   "world.import",
+	"POST /api/v1/instances/{id}/worlds/import-backup":            "world.import",
 	"DELETE /api/v1/instances/{id}/worlds/{name}":                 "world.import",
 	"POST /api/v1/instances/{id}/worlds/{name}/restore":           "world.import",
 }
@@ -179,6 +180,7 @@ var globalRouteAccess = map[string]string{
 	"GET /api/v1/instances/inbox":                         accessMember,
 	"POST /api/v1/instances/manifest/preview":             accessAdmin,
 	"GET /api/v1/instances/orphans":                       accessAdmin,
+	"GET /api/v1/backups/orphaned":                        accessAdmin,
 	"GET /api/v1/invites":                                 accessHidden,
 	"POST /api/v1/invites":                                accessHidden,
 	"DELETE /api/v1/invites/{id}":                         accessHidden,
@@ -187,10 +189,13 @@ var globalRouteAccess = map[string]string{
 	"POST /api/v1/jobs/{id}/cancel":                       accessMember,
 	"PATCH /api/v1/me":                                    accessMember,
 	"POST /api/v1/me/password":                            accessMember,
+	"GET /api/v1/me/sessions":                             accessMember,
+	"DELETE /api/v1/me/sessions/{id}":                     accessMember,
 	"GET /api/v1/me/permissions":                          accessMember,
 	"GET /api/v1/mods/search":                             accessMember,
 	"POST /api/v1/mods/sync":                              accessHidden,
 	"GET /api/v1/mods/{namespace}/{name}":                 accessMember,
+	"DELETE /api/v1/orphans/{container_id}":               accessAdmin,
 	"GET /api/v1/orphans/{container_id}":                  accessAdmin,
 	"POST /api/v1/orphans/{container_id}":                 accessAdmin,
 	"GET /api/v1/players":                                 accessHidden,
@@ -198,6 +203,7 @@ var globalRouteAccess = map[string]string{
 	"POST /api/v1/schedules":                              accessMember,
 	"DELETE /api/v1/schedules/{id}":                       accessMember,
 	"PATCH /api/v1/schedules/{id}":                        accessMember,
+	"POST /api/v1/schedules/{id}/run":                     accessMember,
 	"POST /api/v1/setup":                                  accessPublic,
 	"GET /api/v1/templates":                               accessAdmin,
 	"GET /api/v1/users":                                   accessHidden,
@@ -279,7 +285,9 @@ func TestEveryInstanceRouteAuthorizesItsInstance(t *testing.T) {
 			viewer := as(rt, member, routeAccessRequest(method, target("inst-a")))
 			switch access {
 			case accessView:
-				if viewer.Code == http.StatusForbidden || (plain && viewer.Code >= 300) {
+				// A refusal over the server's state is an answer past the permission check.
+				stateRefusal := viewer.Code == http.StatusConflict && errCode(t, viewer) == "invalid_state"
+				if viewer.Code == http.StatusForbidden || (plain && viewer.Code >= 300 && !stateRefusal) {
 					t.Errorf("viewer = %d %s, want it let through", viewer.Code, viewer.Body)
 				}
 			case accessHidden:

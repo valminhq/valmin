@@ -27,6 +27,7 @@ const defaultPluginLoadWindow = 5 * time.Second
 type Notifier interface {
 	NotifyUnexpectedStop(ctx context.Context, inst *store.Instance, to, reason string)
 	NotifyPublicBuild(ctx context.Context, previous, observed string) func(context.Context, *sql.Tx) error
+	NotifyUpdateTest(ctx context.Context, res *UpdateTestResult)
 }
 
 // Deps are the collaborators control's components share.
@@ -54,14 +55,17 @@ type Deps struct {
 
 // Components is every instance job component, built once and wired to each other.
 type Components struct {
-	Starter       *Starter
-	Stopper       *Stopper
-	Restarter     *Restarter
-	Backupper     *Backupper
-	Pruner        *Pruner
-	Provisioner   *Provisioner
-	Deleter       *Deleter
-	Cloner        *Cloner
+	Starter     *Starter
+	Stopper     *Stopper
+	Restarter   *Restarter
+	Backupper   *Backupper
+	Pruner      *Pruner
+	Provisioner *Provisioner
+	Deleter     *Deleter
+	Cloner      *Cloner
+	// Ports reserves the base port of every server this panel creates, so concurrent creates
+	// never choose the same one.
+	Ports         *instance.Allocator
 	Restorer      *Restorer
 	WorldTooler   *WorldTooler
 	GameUpdater   *GameUpdater
@@ -117,6 +121,7 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	if d.Installer != nil {
 		c.Operations.Mods = d.Installer
 	}
+	c.Ports = instance.NewAllocator(d.DB, d.Runtime, cfg.Ports.Base, cfg.Ports.Stride)
 	c.Provisioner = &Provisioner{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Builds: builds,
 		DataRoot: dataRoot, HostRoot: hostRoot, SteamCMDImage: cfg.Game.SteamCMDImage,
@@ -144,9 +149,13 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	c.UpdateTester = &UpdateTester{
 		DB: d.DB, Engine: d.Engine, Chainer: c.Chainer, Cloner: c.Cloner, GameUpdater: c.GameUpdater,
 		Deleter: c.Deleter, Installer: d.Installer,
-		Ports:   instance.NewAllocator(d.DB, d.Runtime, cfg.Ports.Base, cfg.Ports.Stride),
+		Ports:   c.Ports,
 		Streams: d.Streams, ReadMods: d.ReadMods, DataRoot: dataRoot,
 		CPUs: goruntime.NumCPU(), AvailableMemoryMB: instance.AvailableMemoryMB,
+		ReadyTimeout: readyTimeout,
+	}
+	if d.Notifier != nil {
+		c.UpdateTester.Notify = d.Notifier.NotifyUpdateTest
 	}
 	c.UpdateChecker = &UpdateChecker{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Config: cfg, Notifier: d.Notifier,
