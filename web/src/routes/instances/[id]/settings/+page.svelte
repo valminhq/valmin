@@ -31,6 +31,7 @@
 	import Field, { focusFirstInvalid } from '#lib/components/field.svelte';
 	import Problem from '#lib/components/problem.svelte';
 	import RestartNotice from '#lib/components/restart-notice.svelte';
+	import SaveBar from '#lib/components/save-bar.svelte';
 	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import {
 		manifest,
@@ -790,28 +791,16 @@
 			</div>
 
 			{#if (canEdit || canEditLimits) && (changed.length > 0 || saving)}
-				<div
-					class="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t bg-background/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6"
+				<SaveBar
+					busy={saving}
+					disabled={!ready}
+					ondiscard={() => instance && adopt(instance)}
+					onsave={submit}
 				>
-					<p class="text-sm text-muted-foreground">
-						{changed.length}
-						{changed.length === 1 ? 'setting' : 'settings'} changed. The server picks
-						{changed.length === 1 ? 'it' : 'them'} up on its next start.
-					</p>
-					<div class="flex gap-2">
-						<Button
-							variant="ghost"
-							size="sm"
-							disabled={saving}
-							onclick={() => instance && adopt(instance)}
-						>
-							Discard changes
-						</Button>
-						<Button size="sm" disabled={!ready} onclick={submit}>
-							{saving ? 'Saving…' : 'Save changes'}
-						</Button>
-					</div>
-				</div>
+					{changed.length}
+					{changed.length === 1 ? 'setting' : 'settings'} changed. The server picks
+					{changed.length === 1 ? 'it' : 'them'} up on its next start.
+				</SaveBar>
 			{/if}
 		</div>
 
