@@ -3,6 +3,8 @@ import {
 	buildCron,
 	clockChanges,
 	defaultCronForm,
+	describeCron,
+	describeExpression,
 	describeSteps,
 	hourChoices,
 	monthDays,
@@ -204,9 +206,17 @@ describe('readCron', () => {
 		expect(readCron(expr)).toEqual(want);
 	});
 
+	// A hand-written daily, weekly or monthly expression may leave off the leading zero.
+	it.each([
+		{ expr: '0 4 * * *', want: { every: 'day', atTime: '04:00' } },
+		{ expr: '5 22 * * 1,3', want: { every: 'days', atTime: '22:05', weekdays: ['1', '3'] } },
+		{ expr: '0 4 22 * *', want: { every: 'month', atTime: '04:00', monthDay: '22' } }
+	])('reads the unpadded $expr into the controls', ({ expr, want }) => {
+		expect(readCron(expr)).toEqual(want);
+	});
+
 	// None of these is what the builder writes, so none is interpreted.
 	it.each([
-		'0 4 * * *',
 		'@daily',
 		'0 */5 * * *',
 		'00 04 * * 7',
@@ -220,9 +230,32 @@ describe('readCron', () => {
 		'0 0/6 * * *',
 		'05 */6 * * *',
 		'60 04 * * *',
+		'0 24 * * *',
 		'00 24 * * *',
 		' 00 04 * * *'
 	])('keeps %j as a written expression', (expr) => {
 		expect(readCron(expr)).toEqual({ every: 'custom', custom: expr });
+	});
+});
+
+describe('describeExpression', () => {
+	it.each([
+		{ expr: '0 4 * * *', want: 'Every day at 04:00' },
+		{ expr: '00 04 * * 1,3', want: 'Every Monday and Wednesday at 04:00' },
+		{ expr: '15 22 22 * *', want: 'Every month on the 22nd at 22:15' },
+		{ expr: '0 */12 * * *', want: 'Every 12 hours — 00:00, 12:00' }
+	])('says $expr in words', ({ expr, want }) => {
+		expect(describeExpression(expr)).toBe(want);
+	});
+
+	// Only the daemon knows what a hand-written expression means, so the SPA says nothing.
+	it.each(['@daily', '0 4 * * 1-5', '*/5 * * * *'])('says nothing for %j', (expr) => {
+		expect(describeExpression(expr)).toBe('');
+	});
+
+	it('asks for a day when none is chosen', () => {
+		expect(describeCron({ ...defaultCronForm(), every: 'days', weekdays: [] })).toBe(
+			'Choose at least one day'
+		);
 	});
 });

@@ -193,8 +193,10 @@ New schedules use the browser's time zone, including across daylight saving chan
 Existing schedules keep the time zone they were created with (UTC for schedules created
 before this change) until you move them, as described below. Upcoming runs, each
 schedule's next run, and skipped and failed runs are shown in your browser's time zone. Each
-row leads with its next run; its cron expression is the detail below, and a schedule whose
-cron expression uses another zone names that zone there.
+row shows its next run, says when it runs in words, such as "Every day at 04:00", with its
+zone in brackets when that is not yours, and keeps its cron expression as the detail below.
+A cron expression you wrote by hand is shown as written when it is not one of the builder's
+daily, weekly, monthly or every-few-hours shapes.
 
 On the days the clocks change, a schedule still runs once. A time in the hour the clocks
 skip runs when they jump past it, and a time in the hour they repeat runs the first time the
@@ -219,7 +221,16 @@ that stops the server, which also turns waiting off.
 The times in the form are in the schedule's own time zone, which the form names. When that
 differs from yours, the form offers a switch, **Run it in** followed by your zone and
 **instead**, that moves the schedule to your zone; the times in the form are then read in
-your zone. A cron expression you wrote by hand opens as **Cron expression**, as written.
+your zone. An expression written by hand that sets one time of day, such as `0 4 * * *`, on
+every day, on listed days from Monday to Sunday in order, or on a day of the month up to the
+28th, opens in the controls; any other expression you wrote opens as **Cron expression**, as
+written.
+
+When some of a server's schedules run in a zone other than yours, a line above the list says
+how many and offers **Move to** your zone, unless a schedule is open in the form below. After you confirm, each keeps its clock times and
+reads them in your zone, so a schedule that ran at 04:00 UTC now runs at 04:00 your time and
+its next run changes. A run already waiting for players stops waiting, as for any change of
+time.
 
 To try a schedule without waiting for its time, choose **Run now** on its row and confirm.
 It runs at once, as saved and as it would on its time: a sequence runs its steps in order,
