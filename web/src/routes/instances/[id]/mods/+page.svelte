@@ -1470,23 +1470,25 @@
 				{#each pending.nodes as node (`${node.full_name}:${node.source}`)}
 					{@const replaces =
 						!node.no_op && node.from_version !== '' && node.from_version !== node.version}
-					<li class="flex flex-wrap items-center gap-2">
-						<span class="font-medium">{node.full_name}</span>
-						<span class={['tabular-nums', sourceText[node.source] ?? 'text-muted-foreground']}>
-							{replaces ? `${node.from_version} → ` : ''}{node.version}
+					<li class="flex flex-wrap items-center gap-x-2 gap-y-1">
+						<span class="font-medium wrap-anywhere">{node.full_name}</span>
+						<span class="inline-flex flex-wrap items-center gap-2">
+							<span class={['tabular-nums', sourceText[node.source] ?? 'text-muted-foreground']}>
+								{replaces ? `${node.from_version} → ` : ''}{node.version}
+							</span>
+							<Badge variant="outline" class={sourceBadge[node.source]}>
+								{sourceLabel[node.source] ?? node.source}
+							</Badge>
+							{#if node.no_op}
+								<Badge variant="secondary">already installed</Badge>
+							{:else if node.change === 'downgrade'}
+								<Badge variant="destructive">downgrade</Badge>
+							{:else if replaces}
+								<Badge variant="outline">update</Badge>
+							{:else if node.transitive}
+								<Badge variant="outline">dependency</Badge>
+							{/if}
 						</span>
-						<Badge variant="outline" class={sourceBadge[node.source]}>
-							{sourceLabel[node.source] ?? node.source}
-						</Badge>
-						{#if node.no_op}
-							<Badge variant="secondary">already installed</Badge>
-						{:else if node.change === 'downgrade'}
-							<Badge variant="destructive">downgrade</Badge>
-						{:else if replaces}
-							<Badge variant="outline">update</Badge>
-						{:else if node.transitive}
-							<Badge variant="outline">dependency</Badge>
-						{/if}
 						{#if replaces && node.change !== 'downgrade'}
 							<div class="basis-full">
 								<ChangelogToggle

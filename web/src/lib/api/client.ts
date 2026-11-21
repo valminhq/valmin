@@ -1,4 +1,5 @@
 import { ApiError, NetworkError, type ErrorEnvelope } from './errors';
+import { trackPageRead } from '#lib/state/busy.svelte.js';
 
 /**
  * The panel's REST client, hand-rolled by decision (`06 §4`, F6). Live state arrives over the
@@ -58,8 +59,8 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
 	else if (options.body !== undefined) headers['Content-Type'] = 'application/json';
 	if (stateChanging(method)) headers[CSRF_HEADER] = csrfToken();
 
-	try {
-		return await fetch(BASE + path, {
+	const transmit = () =>
+		fetch(BASE + path, {
 			method,
 			headers,
 			credentials: 'same-origin',
@@ -69,6 +70,8 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
 				options.text ??
 				(options.body === undefined ? undefined : JSON.stringify(options.body))
 		});
+	try {
+		return await (stateChanging(method) ? transmit() : trackPageRead(transmit));
 	} catch (cause) {
 		throw new NetworkError(cause);
 	}

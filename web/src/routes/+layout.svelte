@@ -3,10 +3,11 @@
 	import AppHeader from '#lib/components/app-header.svelte';
 	import { ModeWatcher } from 'mode-watcher';
 	import { beforeNavigate, goto } from '$app/navigation';
-	import { page, updated } from '$app/state';
+	import { navigating, page, updated } from '$app/state';
 	import { resolve } from '$app/paths';
 	import ReloadNotice from '#lib/components/reload-notice.svelte';
 	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
+	import { loading, navigationStarted } from '#lib/state/busy.svelte.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { instanceList } from '#lib/state/instances.svelte.js';
 	import { socket } from '#lib/socket/index.svelte.js';
@@ -127,6 +128,7 @@
 	// lands on that build. Back and Forward stay client-side; so do query-only changes, which
 	// callers make with replace and keep focus for.
 	beforeNavigate((nav) => {
+		if (!nav.shallow) navigationStarted();
 		if (nav.shallow && nav.type === 'goto') return;
 		if (hasUnsaved()) {
 			if (!nav.willUnload && nav.type !== 'popstate' && nav.to) {
@@ -174,6 +176,9 @@
 	Skip to content
 </a>
 
+{#if loading.count > 0 || navigating.to}
+	<div class="loading-bar" role="progressbar" aria-label="Loading the page"></div>
+{/if}
 {#if session.user && !isPublic && !isStatus}
 	<AppHeader />
 {/if}
@@ -195,3 +200,42 @@
 <div id="main" tabindex="-1">
 	{@render children()}
 </div>
+
+<style>
+	/* Shows only for a load that outlasts the delay, so a fast page never flashes it. */
+	.loading-bar {
+		position: fixed;
+		top: env(safe-area-inset-top, 0px);
+		left: 0;
+		z-index: 60;
+		height: 2px;
+		width: 100%;
+		background: var(--primary);
+		opacity: 0;
+		transform-origin: left;
+		animation:
+			loading-show 0s linear 300ms forwards,
+			loading-slide 1.4s ease-in-out 300ms infinite;
+	}
+
+	@keyframes loading-show {
+		to {
+			opacity: 1;
+		}
+	}
+
+	@keyframes loading-slide {
+		0% {
+			transform: translateX(-100%) scaleX(0.3);
+		}
+		100% {
+			transform: translateX(100%) scaleX(0.3);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.loading-bar {
+			animation: loading-show 0s linear 300ms forwards;
+		}
+	}
+</style>

@@ -34,7 +34,9 @@
 -->
 {#if job}
 	<div class="grid gap-2">
-		<Progress value={job.progress} max={100} />
+		{#if !isTerminal(job.status)}
+			<Progress value={job.progress} max={100} />
+		{/if}
 		<p class="text-sm text-muted-foreground">
 			{job.message ? jobMessage(job.message) : job.status}
 			{#if job.status === 'running'}<span class="tabular-nums"> · {job.progress}%</span>{/if}
