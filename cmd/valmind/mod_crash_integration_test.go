@@ -146,7 +146,7 @@ func seedModIndex(t *testing.T, p *panel, fixtures ...modFixture) {
 // written rather than after the job has finished.
 func openPanelDB(t *testing.T, p *panel) *store.DB {
 	t.Helper()
-	db, err := store.Open(t.Context(), "sqlite", "file:"+filepath.Join(p.root, "panel.db"))
+	db, err := store.Open(t.Context(), "sqlite", "file:"+filepath.Join(p.root, "panel.db"), store.CataloguePath(p.root))
 	if err != nil {
 		t.Fatalf("open the panel database: %v", err)
 	}

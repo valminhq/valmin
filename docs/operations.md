@@ -116,7 +116,8 @@ built, explored or destroyed.
   snapshot it took first only as it finishes, so that job is listed in the period that ends
   at its snapshot, not the one that starts there.
   Finished jobs are kept for 30 days by default (`jobs.retention_days`) and at most the
-  newest 500 per server, so an old period, or a long one on a busy server, may be incomplete.
+  newest 500 of each kind per server, so an old period, or a long one on a busy server, may
+  be incomplete.
 - **Other changes** (administrators only): audit log entries for the server that are not
   jobs, such as configuration edits. When the period holds more entries than the dialog
   reads, a link opens the audit log for those days.
@@ -414,6 +415,7 @@ mods. With the default configuration, the data root contains:
 | `backups/`               | World backup archives and pre-upgrade database copies.           |
 | `cache/steam/896660/`    | Downloaded game builds, one directory per build of any branch.   |
 | `cache/<registry>/`      | Downloaded mod packages, one directory per registry.             |
+| `cache/catalogue.db`     | The registries' mod catalogue. A cache; it needs no backup.      |
 | `setups/blobs/`          | Package files retained for saved setups.                         |
 | `exports/`               | The latest [installation export](#move-to-a-new-host).           |
 

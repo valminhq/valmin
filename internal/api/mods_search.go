@@ -56,8 +56,8 @@ func toModSummary(ctx context.Context, p *store.ModPackage) modSummary {
 }
 
 // modSearchResponse is GET /mods/search's body. SyncedAt is page-level rather than per-row,
-// since one sync updates every package at once; it reads the kv key syncRun writes, and is null
-// before the first sync.
+// since one sync updates every package at once; it reads the catalogue state the sync writes,
+// and is null before the first sync.
 type modSearchResponse struct {
 	Items      []modSummary     `json:"items"`
 	NextCursor *string          `json:"next_cursor"`
@@ -263,7 +263,12 @@ func (m *Mods) registryStatuses(r *http.Request) []registryStatus {
 		_, enabled := m.Clients[src]
 		status := registryStatus{Source: src.String(), Enabled: enabled}
 		var stamp string
-		if ok, err := m.DB.KVGet(r.Context(), manager.SyncedAtKey(src), &stamp); err == nil && ok && stamp != "" {
+		if ok, err := m.DB.CatalogueStateGet(
+			r.Context(),
+			manager.SyncedAtKey(src),
+			&stamp,
+		); err == nil && ok &&
+			stamp != "" {
 			status.SyncedAt = &stamp
 		}
 		statuses = append(statuses, status)

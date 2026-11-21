@@ -105,10 +105,10 @@ func TestInstanceModsCataloguedJoinsTheInstalledRegistryOnly(t *testing.T) {
 	}
 }
 
-// TestInstanceModsCataloguedCarriesTheListingStamp asserts the join reports when a sync last
-// wrote each catalogue row, the one fact that tells a package pulled upstream from one still
-// listed, since a sync never deletes a row (Q39). A package with no row has no stamp.
-func TestInstanceModsCataloguedCarriesTheListingStamp(t *testing.T) {
+// TestInstanceModsCataloguedCarriesTheUnlistedStamp asserts the join reports when a complete
+// listing omitted a catalogue row, the one fact that tells a package pulled upstream from one
+// still listed, since a sync never deletes a row. Listing the package again clears the stamp.
+func TestInstanceModsCataloguedCarriesTheUnlistedStamp(t *testing.T) {
 	t.Parallel()
 	db := open(t)
 	ctx := t.Context()
@@ -118,34 +118,54 @@ func TestInstanceModsCataloguedCarriesTheListingStamp(t *testing.T) {
 		crossplay_instance_id, created_at, updated_at
 	) VALUES ('inst-a', 'inst-a', 'stopped', '/srv/valmin/instances/inst-a', 2456,
 		'Server', 'World', 'v1.k.n.ct', 'cp-a', ?, ?)`, Now(), Now())
-	for _, name := range []string{"Still-Listed", "Never-Listed"} {
+	for _, name := range []string{"Still-Listed", "Pulled", "Never-Listed"} {
 		exec(t, db.Writer, `INSERT INTO instance_mods (
 			instance_id, full_name, source, version, installed_as, file_manifest, installed_at
 		) VALUES ('inst-a', ?, 'thunderstore', '1.0.0', 'explicit', '[]', ?)`, name, Now())
 	}
-	before := time.Now()
-	if err := db.UpsertModPackages(ctx, []ModPackage{{
-		FullName: "Still-Listed", Source: source.Thunderstore, Namespace: "Still",
-		Name: "Listed", LatestVersion: "1.0.0", CategoriesJSON: "[]",
-	}}, nil); err != nil {
-		t.Fatal(err)
+	upsert := func(names ...string) {
+		t.Helper()
+		rows := make([]ModPackage, 0, len(names))
+		for _, name := range names {
+			rows = append(rows, ModPackage{
+				FullName: name, Source: source.Thunderstore, Namespace: "Ns", Name: name,
+				LatestVersion: "1.0.0", CategoriesJSON: "[]",
+			})
+		}
+		if err := db.UpsertModPackages(ctx, rows, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unlisted := func() map[string]*CataloguedMod {
+		t.Helper()
+		got, err := db.InstanceModsCatalogued(ctx, "inst-a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]*CataloguedMod{}
+		for i := range got {
+			out[got[i].FullName] = &got[i]
+		}
+		return out
 	}
 
-	got, err := db.InstanceModsCatalogued(ctx, "inst-a")
-	if err != nil {
+	upsert("Still-Listed", "Pulled")
+	if err := db.MarkUnlisted(ctx, source.Thunderstore, map[string]bool{"Still-Listed": true}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	for _, c := range got {
-		switch c.FullName {
-		case "Still-Listed":
-			stamp, err := ParseTime(c.ListedAt)
-			if err != nil || stamp.Before(before.Truncate(time.Second)) {
-				t.Errorf("Still-Listed ListedAt = %q (%v), want the upsert's stamp", c.ListedAt, err)
-			}
-		case "Never-Listed":
-			if c.Package != nil || c.ListedAt != "" {
-				t.Errorf("Never-Listed = %+v, %q, want no row and no stamp", c.Package, c.ListedAt)
-			}
-		}
+	got := unlisted()
+	if c := got["Still-Listed"]; c.Package == nil || c.UnlistedAt != "" {
+		t.Errorf("Still-Listed = %+v, %q, want a row and no stamp", c.Package, c.UnlistedAt)
+	}
+	if c := got["Pulled"]; c.Package == nil || c.UnlistedAt == "" {
+		t.Errorf("Pulled = %+v, %q, want a row with an unlisted stamp", c.Package, c.UnlistedAt)
+	}
+	if c := got["Never-Listed"]; c.Package != nil || c.UnlistedAt != "" {
+		t.Errorf("Never-Listed = %+v, %q, want no row and no stamp", c.Package, c.UnlistedAt)
+	}
+
+	upsert("Pulled")
+	if c := unlisted()["Pulled"]; c.UnlistedAt != "" {
+		t.Errorf("Pulled after being listed again: UnlistedAt = %q, want none", c.UnlistedAt)
 	}
 }

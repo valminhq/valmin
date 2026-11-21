@@ -9,10 +9,14 @@ import (
 	"github.com/valminhq/valmin/internal/runtime"
 )
 
-// SampleInterval is how often a sample is published. Docker's stats stream emits roughly
-// once a second; sampling at half that is plenty for a graph and halves the fan-out
-// (14 §4.3).
+// SampleInterval is how often a sample is published while anyone is subscribed. Docker's
+// stats stream emits roughly once a second; sampling at half that is plenty for a graph and
+// halves the fan-out.
 const SampleInterval = 2 * time.Second
+
+// idleSampleInterval is how often a sample is taken while nobody is subscribed, keeping
+// Latest recent for the one-shot reads.
+const idleSampleInterval = 30 * time.Second
 
 // Sample is one stats message (04 §4). The pointer fields are the honest ones: a nil is
 // "the panel does not know", which is a different statement from zero and renders
@@ -37,11 +41,14 @@ type Sample struct {
 	Players *int
 }
 
-// Sampler polls one container's resource usage. One goroutine per running container
-// (14 §4.3), publishing every SampleInterval to whoever is subscribed.
+// Sampler polls one container's resource usage. One goroutine per running container,
+// sampling every SampleInterval while anyone is subscribed and every idleSampleInterval
+// otherwise.
 type Sampler struct {
 	mu   sync.Mutex
 	subs subscribers[Sample]
+	// wake tells a waiting loop that a subscriber arrived.
+	wake chan struct{}
 	// prev is the previous raw sample, which is the whole reason this type holds state: the
 	// CPU percentage is a delta and belongs to the caller that holds both readings
 	// (internal/runtime deliberately derives nothing).
@@ -56,7 +63,7 @@ type Sampler struct {
 	players func() *int
 }
 
-func newSampler() *Sampler { return &Sampler{} }
+func newSampler() *Sampler { return &Sampler{wake: make(chan struct{}, 1)} }
 
 // Subscribe calls fn with each sample from now on, until cancel returns. fn runs on the
 // sampling loop and must not block.
@@ -64,6 +71,10 @@ func (s *Sampler) Subscribe(fn func(Sample)) (cancel func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id := s.subs.add(fn)
+	select {
+	case s.wake <- struct{}{}:
+	default:
+	}
 	return func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -165,10 +176,20 @@ func (s *subscribers[T]) send(v T) {
 	}
 }
 
+// interval is the wait before the next sample: short while anyone is subscribed.
+func (s *Sampler) interval() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.subs.fns) > 0 {
+		return SampleInterval
+	}
+	return idleSampleInterval
+}
+
+// run samples containerID until ctx is done or the container is gone.
 func (s *Sampler) run(ctx context.Context, rt runtime.Runtime, instanceID, containerID string) {
-	ticker := time.NewTicker(SampleInterval)
-	defer ticker.Stop()
 	for {
+		started := time.Now()
 		raw, err := rt.Stats(ctx, containerID)
 		switch {
 		case err == nil:
@@ -178,7 +199,7 @@ func (s *Sampler) run(ctx context.Context, rt runtime.Runtime, instanceID, conta
 			return
 		default:
 			// A container that has gone away stops the sampler; anything else is transient
-			// and the next tick retries. 14 §8 stops the sampler on `stopped` regardless.
+			// and the next sample retries.
 			if containerGone(ctx, rt, containerID) {
 				return
 			}
@@ -187,10 +208,23 @@ func (s *Sampler) run(ctx context.Context, rt runtime.Runtime, instanceID, conta
 				slog.String("container_id", containerID), slog.Any("error", err))
 		}
 
+		if !s.wait(ctx, started) {
+			return
+		}
+	}
+}
+
+// wait blocks until interval has passed since last, re-reading the interval whenever a
+// subscriber arrives, so a new subscriber shortens an idle wait without bringing the next
+// sample closer than SampleInterval. It returns false once ctx is done.
+func (s *Sampler) wait(ctx context.Context, last time.Time) bool {
+	for {
 		select {
 		case <-ctx.Done():
-			return
-		case <-ticker.C:
+			return false
+		case <-s.wake:
+		case <-time.After(time.Until(last.Add(s.interval()))):
+			return true
 		}
 	}
 }
@@ -216,9 +250,9 @@ func (s *Sampler) start(rt runtime.Runtime, instanceID, containerID string) {
 	s.loop.start(containerID, func(ctx context.Context) { s.run(ctx, rt, instanceID, containerID) })
 }
 
-// Latest returns the most recent sample, and false if nothing has been sampled yet. It exists so
-// a one-shot read can answer with a real CPU percentage: that number is a delta between two
-// samples, so a fresh reading of its own could only report null (E10).
+// Latest returns the most recent sample, up to idleSampleInterval old while nobody is
+// subscribed, and false if nothing has been sampled yet. A one-shot read answers from it
+// because the CPU percentage is a delta between two samples.
 func (s *Sampler) Latest() (Sample, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

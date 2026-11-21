@@ -224,7 +224,7 @@ func Defaults() Config {
 		Ports: Ports{Base: 2456, Stride: 5},
 		Thunderstore: Thunderstore{
 			BaseURL:      "https://thunderstore.io",
-			SyncInterval: Duration(time.Hour),
+			SyncInterval: Duration(6 * time.Hour),
 		},
 		Hexium: Hexium{
 			BaseURL: "https://valheim.hexium.gg",

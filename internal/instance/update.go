@@ -105,7 +105,7 @@ func StageUpdate(ctx context.Context, dataDir, cacheRoot, buildID string) error 
 	if err := backup.DiscardStaged(ServerDir(dataDir)); err != nil {
 		return fmt.Errorf("clear the staged server: %w", err)
 	}
-	if err := CloneWithProgress(ctx, cache, staged, time.Second, func(int) {}); err != nil {
+	if err := CloneWithProgress(ctx, cache, staged, time.Second, nil); err != nil {
 		return err
 	}
 

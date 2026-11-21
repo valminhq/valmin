@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { FakeDaemon, envelope } from '#lib/testing/daemon.js';
+import { socket } from '#lib/testing/socket.js';
 import PlayerHistory from './player-history.svelte';
 
 vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
@@ -70,6 +71,60 @@ it('keeps the last complete chart visible when a refresh fails and retries expli
 	fail = false;
 	await fireEvent.click(screen.getByRole('button', { name: 'Retry activity' }));
 	expect(await screen.findByText('Peak players')).toBeTruthy();
+});
+
+function live(players: number) {
+	socket.push('instance.inst-a.stats', {
+		type: 'stats',
+		instance: 'inst-a',
+		ts: new Date().toISOString(),
+		cpu_pct: null,
+		mem_bytes: 0,
+		mem_limit: 0,
+		mem_pct: null,
+		players,
+		rx_bytes_per_second: null,
+		tx_bytes_per_second: null
+	});
+}
+
+it('reloads the live window when the player count changes, not on every sample', async () => {
+	daemon.on('GET', path, (request) =>
+		page(request.query.get('from')!, request.query.get('to')!, [], null)
+	);
+	render(PlayerHistory, { instanceId: 'inst-a' });
+	expect(await screen.findByText('Peak players')).toBeTruthy();
+
+	// The loaded window starts and ends at one player, so readings of one are no change.
+	live(1);
+	live(1);
+	await new Promise((resolve) => setTimeout(resolve, 2_500));
+	expect(daemon.requests('GET', path)).toHaveLength(1);
+	live(2);
+	await vi.waitFor(() => expect(daemon.requests('GET', path)).toHaveLength(2), {
+		timeout: 4000
+	});
+}, 10_000);
+
+it('compares the first live reading with the latest count in the window', async () => {
+	daemon.on('GET', path, (request) => {
+		const from = request.query.get('from')!;
+		const to = request.query.get('to')!;
+		const at = (offset: number) => new Date(Date.parse(from) + offset).toISOString();
+		// Newest first, as the daemon pages them.
+		const items = [
+			{ id: 'newest', observed_at: at(120_000), players: 3 },
+			{ id: 'oldest', observed_at: at(60_000), players: 0 }
+		];
+		return page(from, to, items, null);
+	});
+	render(PlayerHistory, { instanceId: 'inst-a' });
+	expect(await screen.findByText('Peak players')).toBeTruthy();
+
+	live(0);
+	await vi.waitFor(() => expect(daemon.requests('GET', path)).toHaveLength(2), {
+		timeout: 4000
+	});
 });
 
 it('exposes gaps and interval details to keyboard and table readers', async () => {

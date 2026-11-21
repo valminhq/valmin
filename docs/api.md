@@ -1268,7 +1268,8 @@ name_taken`. The URL is write-only: no response contains it, because it is the w
 that channel. A URL the panel refuses, such as a private address, is `422` on `url`.
 Deliveries can be narrowed with `webhook_id`, `rule_id` and `status` (`pending`,
 `delivered` or `failed`). Each record has the event kind, the server, the number of
-attempts and the last error, which never contains the URL.
+attempts and the last error, which never contains the URL. A delivered or failed record is
+kept for 30 days; the records of an alert are kept until 30 days after it resolves.
 
 A rule has `condition_kind`, `instance_id` (`null` for every server), `webhook_ids`,
 `enabled`, `params` and the quiet hours fields described below. Every webhook a rule names
@@ -1595,6 +1596,10 @@ Available topics:
 
 The server checks permission per topic and replies with `subscribed` or `error`.
 
+A `state` message is also sent, with the state unchanged, when a job on the server starts or
+finishes and when its setup operation is abandoned. Read `GET /instances/{id}/jobs` and
+`GET /instances/{id}/operation` again on each one.
+
 `{"type":"mods","instance":"ID"}` means the mod install queue submitted an install, or one
 finished with nothing queued after it. Read `GET /instances/{id}/mods` and
 `GET /instances/{id}/mods/queue` again.
@@ -1618,8 +1623,9 @@ and past that its oldest closes the same way.
 
 ### Stats samples
 
-`GET /instances/{id}/stats` and the `instance.{id}.stats` topic carry the same sample,
-taken every two seconds while the server runs:
+`GET /instances/{id}/stats` and the `instance.{id}.stats` topic carry the same sample. While
+the server runs, a sample is taken every two seconds while anyone is subscribed to the topic
+and every 30 seconds otherwise, so the HTTP read can be up to 30 seconds old:
 
 | Field | Meaning |
 | --- | --- |

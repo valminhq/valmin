@@ -269,6 +269,12 @@ const jobColumns = `id, kind, status, lock_key, instance_id, instance_name, sche
 	checkpoint, resume_after, progress, message, lease_owner, lease_until, cancel_requested_at,
 	clean, requested_by, attempt, error_code, error, log, created_at, started_at, finished_at`
 
+// jobListColumns is jobColumns with NULL in place of the log, for lists that never show it: the
+// log is the widest column and only one job's detail reads it.
+const jobListColumns = `id, kind, status, lock_key, instance_id, instance_name, schedule_id, scheduled, payload,
+	checkpoint, resume_after, progress, message, lease_owner, lease_until, cancel_requested_at,
+	clean, requested_by, attempt, error_code, error, NULL, created_at, started_at, finished_at`
+
 func scanJob(s scanner) (Job, error) {
 	var j Job
 	var instanceID, scheduleID, checkpoint, message, leaseOwner, leaseUntil, cancelAt sql.NullString
@@ -436,16 +442,19 @@ func (db *DB) JobRanAt(ctx context.Context, instanceID string, at time.Time) (bo
 	return ran, nil
 }
 
-// SweepTerminalJobs is 12 §7's retention sweep: one DELETE at daemon start. A row is pruned once
-// it is older than retentionDays or falls outside the most recent 500 terminal rows for its
-// instance_id, whichever bites first. Global jobs share one such group.
+// SweepTerminalJobs prunes terminal jobs in one DELETE: a row goes once it is older than
+// retentionDays or falls outside the most recent 500 terminal rows of its instance and kind,
+// whichever bites first. Global jobs group by kind alone, so a frequent kind never evicts the
+// last run of a rare one.
 func (db *DB) SweepTerminalJobs(ctx context.Context, now time.Time, retentionDays int) (int64, error) {
 	cutoff := FormatTime(now.AddDate(0, 0, -retentionDays))
 	res, err := db.Writer.ExecContext(ctx, `
 		DELETE FROM job_runs WHERE id IN (
 			SELECT id FROM (
 				SELECT id, created_at,
-				       ROW_NUMBER() OVER (PARTITION BY instance_id ORDER BY created_at DESC) AS rn
+				       ROW_NUMBER() OVER (
+					       PARTITION BY COALESCE(instance_id, ''), kind ORDER BY created_at DESC
+				       ) AS rn
 				FROM job_runs
 				WHERE status IN ('succeeded', 'failed', 'cancelled')
 			) ranked
@@ -477,26 +486,30 @@ func (db *DB) LatestCleanSignalPerInstance(ctx context.Context) ([]Job, error) {
 		`instance_id`, "latest clean signal per instance")
 }
 
-// latestJobs is the greatest-n-per-group read the conditions are built from: one row per
-// partition, newest first, over the rows where matches.
+// latestJobs is the greatest-n-per-group read the conditions are built from: the newest row of
+// each partition over the rows where matches, without its log, ordered by partition. The order
+// decides which job an alert names when several failed on one instance.
 func (db *DB) latestJobs(ctx context.Context, where, partition, what string) ([]Job, error) {
+	// The window ranks ids only, so its sort carries no payloads or logs.
 	rows, err := db.Reader.QueryContext(ctx, fmt.Sprintf(`
-		SELECT %s FROM (
-			SELECT *, ROW_NUMBER() OVER (
-				PARTITION BY %s ORDER BY created_at DESC, id DESC
-			) AS rn
-			FROM job_runs WHERE %s
-		) ranked WHERE rn = 1`, jobColumns, partition, where))
+		SELECT %s FROM job_runs WHERE id IN (
+			SELECT id FROM (
+				SELECT id, ROW_NUMBER() OVER (
+					PARTITION BY %s ORDER BY created_at DESC, id DESC
+				) AS rn
+				FROM job_runs WHERE %s
+			) ranked WHERE rn = 1
+		) ORDER BY %s`, jobListColumns, partition, where, partition))
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", what, err)
 	}
 	return collectJobs(rows, what)
 }
 
-// RunningJobs returns every job currently claimed, for the overrun check.
+// RunningJobs returns every job currently claimed, without logs, for the overrun check.
 func (db *DB) RunningJobs(ctx context.Context) ([]Job, error) {
 	rows, err := db.Reader.QueryContext(ctx, fmt.Sprintf(
-		`SELECT %s FROM job_runs WHERE status = 'running' ORDER BY started_at`, jobColumns))
+		`SELECT %s FROM job_runs WHERE status = 'running' ORDER BY started_at`, jobListColumns))
 	if err != nil {
 		return nil, fmt.Errorf("read running jobs: %w", err)
 	}
@@ -529,7 +542,8 @@ type JobFilter struct {
 	Until         time.Time
 }
 
-// ListJobsForInstance reads an instance's job history, newest first, one keyset page at a time.
+// ListJobsForInstance reads an instance's job history without logs, newest first, one keyset page
+// at a time.
 // beforeCreatedAt and beforeID are the previous page's last row; empty values start at the newest.
 func (db *DB) ListJobsForInstance(
 	ctx context.Context, instanceID string, beforeCreatedAt, beforeID string, limit int, filter JobFilter,
@@ -555,7 +569,7 @@ func (db *DB) ListJobsForInstance(
 
 	rows, err := db.Reader.QueryContext(ctx, fmt.Sprintf(
 		`SELECT %s FROM job_runs WHERE %s ORDER BY created_at DESC, id DESC LIMIT ?`,
-		jobColumns, where), args...)
+		jobListColumns, where), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list jobs for instance %s: %w", instanceID, err)
 	}

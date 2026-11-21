@@ -982,9 +982,10 @@ panel could measure. Gaps marked **not observed** are excluded from the summarie
 they do not mean that the server was empty. The panel retains 30 days of observations,
 so a period without a retained starting count begins with unknown coverage.
 
-The live period refreshes while the page is visible. **Now** comes from the live stats
-feed and shows **unknown** when its reading is missing or stale. The count history
-does not identify individual players or prove how long any one person played.
+While the page is visible, the live period refreshes when the player count changes
+and every five minutes. **Now** comes from the live stats feed and shows **unknown**
+when its reading is missing or stale. The count history does not identify individual
+players or prove how long any one person played.
 
 ### Seen on this server
 
@@ -1469,8 +1470,8 @@ Add as many rules as you like, including several for the same event: for example
 rules for the same event gets one message.
 
 Each rule in the list shows where it posts and its settings in brief. Its switch pauses it;
-nothing is deleted. **Deliveries** shows what it has sent, **Duplicate** opens a copy to save
-as a new rule, the pencil edits it, and the bin deletes it.
+nothing is deleted. **Deliveries** shows what it has sent in the last 30 days, **Duplicate**
+opens a copy to save as a new rule, the pencil edits it, and the bin deletes it.
 
 A problem or maintenance event is sent when it starts. When it clears, Valmin edits that same
 Discord message: it turns green and its title reads **Resolved after 23 minutes: …**. If the

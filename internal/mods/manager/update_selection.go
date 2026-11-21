@@ -4,45 +4,33 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"time"
 
 	"github.com/valminhq/valmin/internal/mods/semver"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// ListingStarts returns the last complete listing start for each registry.
-func ListingStarts(ctx context.Context, db *store.DB) (map[source.Source]time.Time, error) {
-	out := map[source.Source]time.Time{}
+// CompletedListings reports the registries whose catalogue holds a complete listing.
+func CompletedListings(ctx context.Context, db *store.DB) (map[source.Source]bool, error) {
+	out := map[source.Source]bool{}
 	for _, src := range source.All() {
 		var stamp string
-		ok, err := db.KVGet(ctx, ListingStartedKey(src), &stamp)
+		ok, err := db.CatalogueStateGet(ctx, ListingCompletedKey(src), &stamp)
 		if err != nil {
-			return nil, fmt.Errorf("read the listing start of %s: %w", src, err)
+			return nil, fmt.Errorf("read the listing state of %s: %w", src, err)
 		}
-		if !ok {
-			continue
-		}
-		started, err := store.ParseTime(stamp)
-		if err != nil {
-			return nil, fmt.Errorf("read the listing start of %s: %w", src, err)
-		}
-		out[src] = started
+		out[src] = ok
 	}
 	return out, nil
 }
 
 // Unlisted reports whether the installed registry's last complete listing omitted a package.
-func Unlisted(c *store.CataloguedMod, starts map[source.Source]time.Time) bool {
-	started, ok := starts[c.Source]
-	if !ok {
+// Before any complete listing nothing counts as unlisted.
+func Unlisted(c *store.CataloguedMod, completed map[source.Source]bool) bool {
+	if !completed[c.Source] {
 		return false
 	}
-	if c.Package == nil {
-		return true
-	}
-	listed, err := store.ParseTime(c.ListedAt)
-	return err == nil && listed.Before(started)
+	return c.Package == nil || c.UnlistedAt != ""
 }
 
 // ModUpdateVersion offers only a newer version from the installed registry.
@@ -64,7 +52,7 @@ func (p *Planner) PendingUpdates(ctx context.Context, instanceID string) ([]Upda
 	if err != nil {
 		return nil, fmt.Errorf("read installed mods: %w", err)
 	}
-	starts, err := ListingStarts(ctx, p.DB)
+	completed, err := CompletedListings(ctx, p.DB)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +65,7 @@ func (p *Planner) PendingUpdates(ctx context.Context, instanceID string) ([]Upda
 		member, inPack := members[rows[i].FullName]
 		if !rows[i].Enabled || rows[i].Locked || IsPack(rows[i].Package) ||
 			inPack && FollowsPack(&rows[i].InstanceMod, member.Version) ||
-			!slices.Contains(p.Enabled, rows[i].Source) || Unlisted(&rows[i], starts) {
+			!slices.Contains(p.Enabled, rows[i].Source) || Unlisted(&rows[i], completed) {
 			continue
 		}
 		version := ModUpdateVersion(&rows[i].InstanceMod, rows[i].Package)

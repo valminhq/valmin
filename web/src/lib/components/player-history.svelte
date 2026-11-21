@@ -28,6 +28,8 @@
 	let tablePage = $state(0);
 	let retry = $state(0);
 	let previousWindow = '';
+	// Reloads a window that ends now; the live stats call it when the player count changes.
+	let reloadLive: (() => void) | null = null;
 	const activity = $derived(history ? playerActivity(history.range, history.points) : null);
 	const intervals = $derived(activity?.intervals ?? []);
 	const chosen = $derived(selected >= 0 ? intervals[selected] : undefined);
@@ -83,6 +85,9 @@
 		void retry;
 		let disposed = false;
 		let inFlight = false;
+		// A reload asked for while one runs, done once that one ends.
+		let again = false;
+		let liveTimer: ReturnType<typeof setTimeout> | undefined;
 		const key = `${id}:${span}:${end}`;
 		if (previousWindow !== key) history = null;
 		previousWindow = key;
@@ -91,7 +96,11 @@
 		selected = -1;
 		tablePage = 0;
 		async function reload() {
-			if (disposed || inFlight || (end === null && document.visibilityState === 'hidden')) return;
+			if (disposed || (end === null && document.visibilityState === 'hidden')) return;
+			if (inFlight) {
+				again = true;
+				return;
+			}
 			inFlight = true;
 			const requestedTo = new Date(end ?? Date.now()).toISOString();
 			const requestedFrom = new Date(Date.parse(requestedTo) - span).toISOString();
@@ -116,13 +125,23 @@
 				if (!disposed) {
 					inFlight = false;
 					loading = false;
+					if (again) {
+						again = false;
+						void reload();
+					}
 				}
 			}
 		}
 		void reload();
+		// Waits for the recorder, which writes the observation after the live count changes.
+		reloadLive = () => {
+			if (end !== null) return;
+			clearTimeout(liveTimer);
+			liveTimer = setTimeout(() => void reload(), 2_000);
+		};
 		const refresh = setInterval(() => {
 			if (end === null) void reload();
-		}, 15_000);
+		}, 300_000);
 		const connected = socket.onConnected(() => {
 			if (end === null) void reload();
 		});
@@ -132,6 +151,8 @@
 		document.addEventListener('visibilitychange', visible);
 		return () => {
 			disposed = true;
+			reloadLive = null;
+			clearTimeout(liveTimer);
 			clearInterval(refresh);
 			connected();
 			document.removeEventListener('visibilitychange', visible);
@@ -142,11 +163,18 @@
 		const id = instanceId;
 		let disposed = false;
 		let received = false;
+		let lastLive: number | null | undefined;
 		nowReading = null;
 		const off = socket.subscribe(topics.stats(id), (message: ServerMessage) => {
 			if (message.type !== 'stats') return;
 			received = true;
 			nowReading = { players: message.players, at: Date.parse(message.ts) };
+			// The first reading after the history loads is compared with its latest count, later
+			// ones with the reading before.
+			if (!history) return;
+			const before = lastLive !== undefined ? lastLive : intervals.at(-1)?.players;
+			if (before !== undefined && message.players !== before) reloadLive?.();
+			lastLive = message.players;
 		});
 		void instances.stats(id).then(
 			(reading) => {

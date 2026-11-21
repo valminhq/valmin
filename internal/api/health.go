@@ -30,8 +30,7 @@ func healthRoutes(mux *http.ServeMux, h *Health) {
 func (h *Health) Drain() { h.draining.Store(true) }
 
 // live answers as long as the process runs. It must not touch the database: a liveness
-// probe that fails because SQLite is busy restarts a panel that was merely under load,
-// and restarting means the daemon lease dance of 12 §5.1 for no reason.
+// probe that fails because SQLite is busy restarts a panel that was merely under load.
 func (h *Health) live(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)

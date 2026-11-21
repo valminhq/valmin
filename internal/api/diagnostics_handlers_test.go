@@ -401,7 +401,7 @@ func TestEachRegistryProbeSendsItsOwnETag(t *testing.T) {
 	t.Parallel()
 	rt, db, _ := bootstrappedRouter(t)
 	for src, etag := range map[source.Source]string{source.Thunderstore: `"ts-1"`, source.Hexium: `"hx-1"`} {
-		if err := db.KVSet(t.Context(), manager.ETagKey(src), etag); err != nil {
+		if err := db.CatalogueStateSet(t.Context(), manager.ETagKey(src), etag); err != nil {
 			t.Fatal(err)
 		}
 	}
