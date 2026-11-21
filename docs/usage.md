@@ -1372,7 +1372,8 @@ sign in at all, see [reset an account password](troubleshooting.md#reset-an-acco
 
 Open the account menu and choose **Date and time**. Pick a zone from the list, such as
 `Europe/Berlin`, and save. The panel then shows times in that zone, and new schedules run
-in it. Existing schedules keep their zone until you change their time. The page is
+in it. Existing schedules keep their zone until you move them on
+[Maintenance](operations.md#schedule-maintenance). The page is
 `/account/date-time`.
 
 Under the zone, **Clock** chooses a 24-hour or 12-hour clock and **Date** chooses day, month,
