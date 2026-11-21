@@ -191,8 +191,9 @@ On **Maintenance**, choose **What to run** and **How often**, then choose
 New schedules use the browser's time zone, including across daylight saving changes.
 Existing schedules keep the time zone they were created with (UTC for schedules created
 before this change) until you move them, as described below. Upcoming runs, each
-schedule's next run, and skipped and failed runs are shown in your browser's time zone. A
-schedule whose cron expression uses another zone names it on its row.
+schedule's next run, and skipped and failed runs are shown in your browser's time zone. Each
+row leads with its next run; its cron expression is the detail below, and a schedule whose
+cron expression uses another zone names that zone there.
 
 On the days the clocks change, a schedule still runs once. A time in the hour the clocks
 skip runs when they jump past it, and a time in the hour they repeat runs the first time the
@@ -264,7 +265,9 @@ for each one, in order. A step is one of:
 Each step runs as the job it normally is and appears in the job history. The next step
 starts when the previous one has finished, and the sequence stops at the first step that
 fails; the sequence then shows as **Failed**, and the server stays as that step left it.
-Stopping a stopped server, or starting a running one, counts as done. Backing up a
+Stopping a stopped server, or starting a running one, counts as done. A step the server
+cannot take, such as a command or a wait on a stopped server, is skipped; the job's last line
+then says how many steps were skipped, and its log says which and why. Backing up a
 running server stops it for the backup and starts it again before the next step. A game
 update needs a stopped server, so put **Stop the server** before it. A sequence with an
 update step is skipped on a modded server, as an update alone is.

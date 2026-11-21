@@ -278,6 +278,18 @@ func (c *Chainer) Submit(ctx context.Context, in *ChainSubmission) (*store.Job, 
 // own and no further step runs.
 func ChainCancelPolicy(string) (cancellable bool, phase string) { return true, "" }
 
+// chainMessage is a finished chain's progress line, naming the steps it skipped.
+func chainMessage(skipped, steps int) string {
+	switch skipped {
+	case 0:
+		return "All steps done"
+	case 1:
+		return fmt.Sprintf("Done, 1 of %d steps skipped", steps)
+	default:
+		return fmt.Sprintf("Done, %d of %d steps skipped", skipped, steps)
+	}
+}
+
 // Run is the chain job.
 func (c *Chainer) Run(in *ChainSubmission) jobs.Runner {
 	steps := in.Steps
@@ -285,6 +297,7 @@ func (c *Chainer) Run(in *ChainSubmission) jobs.Runner {
 		if err := c.requireState(ctx, in.Instance.ID, in.From); err != nil {
 			return jobs.Failed(errcode.InvalidState, err)
 		}
+		skipped := 0
 		for i, step := range steps {
 			if jh.CancelRequested(ctx) {
 				return jobs.Outcome{Status: jobs.StatusCancelled}
@@ -294,6 +307,9 @@ func (c *Chainer) Run(in *ChainSubmission) jobs.Runner {
 			switch {
 			case err == nil:
 				jh.Log(fmt.Sprintf("step %d done", i+1))
+			case errors.Is(err, errStepSkipped):
+				skipped++
+				jh.Log(fmt.Sprintf("step %d %s", i+1, err))
 			case errors.Is(err, jobs.ErrCancelRequested):
 				return jobs.Outcome{Status: jobs.StatusCancelled}
 			case ctx.Err() != nil, errors.Is(err, jobs.ErrShuttingDown):
@@ -305,7 +321,7 @@ func (c *Chainer) Run(in *ChainSubmission) jobs.Runner {
 				}
 			}
 		}
-		jh.Progress(ctx, 100, "all steps done")
+		jh.Progress(ctx, 100, chainMessage(skipped, len(steps)))
 		return jobs.Outcome{Status: jobs.StatusSucceeded}
 	}
 }

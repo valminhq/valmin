@@ -561,7 +561,8 @@ in the `stopped` or `running` state.
 
 `POST /api/v1/instances/{id}/update-test` with `{"game": true, "mods": true}` returns a
 `202` `update_test` job. At least one of the two must be true, or the request answers
-`422`. The job copies the server, puts the new game build (`game`) and the pending mod
+`422`. When neither chosen part has anything to try (the last check found the game current,
+and no mod update is pending), it answers `409 invalid_state`. The job copies the server, puts the new game build (`game`) and the pending mod
 updates (`mods`) on the copy, starts it, waits for its world to load and logs what the mod
 loader said about each plugin.
 A running source is copied live, so the copy's world is as of the game's last save and its

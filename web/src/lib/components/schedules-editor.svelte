@@ -572,16 +572,19 @@
 							<div class="grid min-w-0 grow basis-64 gap-1">
 								<div class="flex flex-wrap items-center gap-2">
 									<span class="text-sm font-medium">{label(s.kind)}</span>
-									<Badge variant="outline" class="font-mono">{s.cron}</Badge>
+									{#if s.enabled}
+										<span class="text-sm">next {when(s.next_run_at)}</span>
+									{/if}
 									{#if !s.enabled}<Badge variant="secondary">paused</Badge>{/if}
 									{#if s.deferred_since}<Badge>waiting for players</Badge>{/if}
 								</div>
 								{#if s.steps}
 									<p class="text-sm" data-testid="chain-steps">{describeSteps(s.steps)}</p>
 								{/if}
+								<!-- Times are in the viewer's zone; the cron is written in the schedule's own. -->
 								<p class="text-sm text-muted-foreground">
-									next {when(s.next_run_at)} · last {when(s.last_run_at)}
-									{#if s.timezone !== viewer}· shown in {viewer}, schedule uses {s.timezone}{/if}
+									last {when(s.last_run_at)} · <span class="font-mono">{s.cron}</span>
+									{#if s.timezone !== viewer}in {s.timezone}, times shown in {viewer}{/if}
 									{#if s.created_by_username}· set up by {s.created_by_username}{/if}
 									{#if s.wait_for_empty}· waits up to {deferral(s.max_deferral_seconds)} for players to
 										leave{/if}

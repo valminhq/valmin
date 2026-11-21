@@ -519,7 +519,8 @@ list, and keeps the answer for an hour.
 On a modded server, **Test an update on a copy** on the overview shows what an update would
 do before anything on the server changes. It needs permission to clone, update and manage
 mods, which administrators have. Choose whether to try the new game build, the pending mod
-updates, or both, and choose **Test on a copy**.
+updates, or both, and choose **Test on a copy**. When the chosen parts have nothing to try,
+the test is refused instead of copying the server for nothing.
 
 Valmin then:
 

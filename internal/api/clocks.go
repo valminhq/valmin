@@ -178,8 +178,24 @@ func (s *Schedules) submitSchedule(
 	return chainer.SubmitStep(ctx, inst, &steps[0], origin)
 }
 
-// errNothingToTest is a scheduled update test with no game or mod update to try.
+// errNothingToTest is an update test with no game or mod update to try.
 var errNothingToTest = errors.New("no game or mod updates are pending")
+
+// pendingUpdates reports what an update test of inst could try: the game unless the last check
+// found it current, and the mods when any update is pending.
+func pendingUpdates(
+	ctx context.Context, db *store.DB, tester *control.UpdateTester, inst *store.Instance,
+) (game, mods bool, err error) {
+	status, err := observeUpdateStatus(ctx, db, inst)
+	if err != nil {
+		return false, false, err
+	}
+	pending, err := tester.PendingMods(ctx, inst.ID)
+	if err != nil {
+		return false, false, err
+	}
+	return status.UpdateAvailable == nil || *status.UpdateAvailable, len(pending) > 0, nil
+}
 
 // submitUpdateTest queues the update test schedule sc runs on inst: the game unless the last
 // check found it current, and the mods when any update is pending. With neither it refuses with
@@ -187,21 +203,16 @@ var errNothingToTest = errors.New("no game or mod updates are pending")
 func (s *Schedules) submitUpdateTest(
 	ctx context.Context, sc *store.Schedule, inst *store.Instance, origin control.StepOrigin,
 ) (*store.Job, error) {
-	status, err := observeUpdateStatus(ctx, s.DB, inst)
-	if err != nil {
-		return nil, err
-	}
 	tester := s.Instances.ctl.UpdateTester
-	mods, err := tester.PendingMods(ctx, inst.ID)
+	game, mods, err := pendingUpdates(ctx, s.DB, tester, inst)
 	if err != nil {
 		return nil, err
 	}
-	game := status.UpdateAvailable == nil || *status.UpdateAvailable
-	if !game && len(mods) == 0 {
+	if !game && !mods {
 		return nil, errNothingToTest
 	}
 	job, err := tester.Submit(ctx, &control.UpdateTestSubmission{
-		Instance: inst, Game: game, Mods: len(mods) > 0, Apply: scheduledApply(sc),
+		Instance: inst, Game: game, Mods: mods, Apply: scheduledApply(sc),
 		RequestedBy: origin.RequestedBy, ScheduleID: origin.ScheduleID, Audit: origin.Audit,
 	})
 	if err != nil {
