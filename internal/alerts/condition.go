@@ -63,6 +63,9 @@ var (
 	// KindPowerCut is a planned power cut close enough that every running server is about to
 	// stop. Host-level.
 	KindPowerCut = Kind{"power_cut"}
+	// KindSignInsBlocked is an account whose sign-ins were refused after too many failures
+	// from anywhere. Host-level.
+	KindSignInsBlocked = Kind{"sign_ins_blocked"}
 	// KindServerStarted is a start or restart that left the server running.
 	KindServerStarted = Kind{"server_started"}
 	// KindServerStopped is a stop the panel made, by hand, by auto-stop or for a power cut. A
@@ -101,8 +104,8 @@ var gameEvents = []Kind{
 
 var events = slices.Concat(
 	[]Kind{
-		KindPowerCut, KindServerStarted, KindServerStopped, KindInstanceDown, KindGameUpdated,
-		KindUpdateTestFinished,
+		KindPowerCut, KindSignInsBlocked, KindServerStarted, KindServerStopped, KindInstanceDown,
+		KindGameUpdated, KindUpdateTestFinished,
 	}, gameEvents)
 
 // ParseKind resolves a condition or event kind name to its constant. An unresolved name is the
@@ -120,7 +123,9 @@ func ParseKind(name string) (Kind, bool) {
 func Kinds() []Kind { return append([]Kind(nil), all...) }
 
 // HostWide reports whether k never concerns one server, so a rule for it cannot name one.
-func HostWide(k Kind) bool { return k == KindLowDisk || k == KindPowerCut }
+func HostWide(k Kind) bool {
+	return k == KindLowDisk || k == KindPowerCut || k == KindSignInsBlocked
+}
 
 // Condition is one thing currently believed true. InstanceID is empty for a host-level
 // condition.

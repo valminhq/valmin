@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -203,6 +204,29 @@ func (s *Sessions) Revoke(ctx context.Context, userID, sessionID string, audit *
 	}
 	s.notifyRevoked(sessionID, "")
 	return nil
+}
+
+// RecordBlockedSignIns writes the audit entry for an account whose sign-ins are being refused
+// after repeated failures, from address. It reports false, and writes nothing, for a name no
+// account has.
+func (s *Sessions) RecordBlockedSignIns(ctx context.Context, username, address string) (bool, error) {
+	rec, err := s.db.UserForLogin(ctx, username)
+	if err != nil {
+		return false, fmt.Errorf("look up user: %w", err)
+	}
+	if rec == nil {
+		return false, nil
+	}
+	detail, err := json.Marshal(map[string]string{"username": username, "address": address})
+	if err != nil {
+		return false, fmt.Errorf("encode audit detail: %w", err)
+	}
+	if err := s.db.WriteAuditLog(ctx, &store.AuditEntry{
+		Action: "auth.login.blocked", Detail: string(detail), IP: address,
+	}); err != nil {
+		return false, fmt.Errorf("record blocked sign-ins: %w", err)
+	}
+	return true, nil
 }
 
 // AnnounceUserRevoked closes the user's live sockets, after the transaction that deleted

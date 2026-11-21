@@ -10,11 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/alerts"
 	"github.com/valminhq/valmin/internal/api/middleware"
 	"github.com/valminhq/valmin/internal/auth"
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -763,5 +765,46 @@ func TestSessionsNeedASession(t *testing.T) {
 		if rec := send(rt, req); rec.Code != http.StatusUnauthorized && rec.Code != http.StatusForbidden {
 			t.Errorf("%s %s without a session = %d, want 401 or 403", req.Method, req.URL.Path, rec.Code)
 		}
+	}
+}
+
+// Asserts that guesses spread over many addresses until an account's failed-login budget runs
+// out raise one alert and one audit entry for it, however many more refused attempts follow,
+// and none for a name no account has.
+func TestBlockedSignInsAlertOncePerAccount(t *testing.T) {
+	t.Parallel()
+	rt, db := pendingRouter(t)
+	send(rt, httptest.NewRequest(http.MethodPost, "/api/v1/setup", jsonBody(t, map[string]string{
+		"token": bootstrapToken(t, db), "username": "ada", "password": "a-fine-password",
+	})))
+	hook := seedWebhook(t, db, "ops")
+	seedRule(t, db, alerts.KindSignInsBlocked, "", hook)
+
+	guess := func(username string, rounds int) {
+		for i := range rounds {
+			for range loginNameBurst {
+				r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", jsonBody(t,
+					map[string]string{"username": username, "password": "not-it"}))
+				r.RemoteAddr = fmt.Sprintf("198.51.100.%d:5555", i+1)
+				send(rt, r)
+			}
+		}
+	}
+	rounds := failedLoginBurst/loginNameBurst + 3
+
+	guess("nobody", rounds)
+	time.Sleep(200 * time.Millisecond)
+	assertDeliveries(t, db, "a name no account has", hook, map[string]int{})
+
+	guess("ada", rounds)
+	// The report runs after the refusal, so wait for it.
+	deadline := time.Now().Add(5 * time.Second)
+	for len(deliveriesOfKind(t, db, notify.KindSignInsBlocked)) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	assertDeliveries(t, db, "the destination of the rule", hook, map[string]int{"sign_ins_blocked": 1})
+	rows, err := db.ListAuditLog(t.Context(), &store.AuditFilter{Action: "auth.login.blocked"}, "", "", 10)
+	if err != nil || len(rows) != 1 {
+		t.Errorf("audit rows = %d, err %v, want 1", len(rows), err)
 	}
 }

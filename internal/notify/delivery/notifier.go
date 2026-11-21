@@ -208,6 +208,20 @@ func (n *Notifier) NotifyPowerCutSoon(ctx context.Context, powerOff, stopAt time
 	})
 }
 
+// NotifySignInsBlocked reports to the destinations of the sign_ins_blocked rules that sign-ins to
+// the account username are refused after repeated failures, the first refused attempt coming from address.
+func (n *Notifier) NotifySignInsBlocked(ctx context.Context, username, address string) {
+	n.emitByRules(ctx, alerts.KindSignInsBlocked, "", func(*alerts.ParamsWire) *notify.Event {
+		return &notify.Event{
+			Kind: notify.KindSignInsBlocked,
+			Detail: []notify.Field{
+				{Key: "username", Name: "Account", Value: username},
+				{Key: "address", Name: "Blocked attempt from", Value: address},
+			},
+		}
+	})
+}
+
 // NotifyPublicBuild owes a notification when the observed public build is one the panel has
 // not seen before. An unchanged observation is the common case — the check runs hourly — and
 // says nothing, so a receiver is told about a new build once rather than every hour until

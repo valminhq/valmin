@@ -147,6 +147,18 @@ export const PANEL_EVENTS: PanelEvent[] = [
 			servers: 'Midgard, Ashlands'
 		}
 	},
+	{
+		kind: 'sign_ins_blocked',
+		group: 'Server status',
+		label: 'Sign-ins blocked',
+		when: 'Too many failed sign-ins for one account, from anywhere, and the panel starts refusing it. Sent at most once an hour for each account.',
+		headline: 'Sign-ins blocked after repeated failures',
+		accent: '#D83C3E',
+		template:
+			'**Account:** {username}\n**Blocked attempt from:** {address}\nSign-ins to this account are refused for a short while.',
+		placeholders: ['username', 'address', 'event'],
+		sample: { username: 'bea', address: '203.0.113.7' }
+	},
 	condition(
 		'crash_loop',
 		'Problems',
@@ -309,7 +321,7 @@ export const GROUPS: { name: string; note: string; game?: boolean }[] = [
 ];
 
 /** Kinds that never concern one server, so their rules cover every server. */
-export const HOST_WIDE: RuleKind[] = ['low_disk', 'power_cut'];
+export const HOST_WIDE: RuleKind[] = ['low_disk', 'power_cut', 'sign_ins_blocked'];
 /** Kinds whose messages show a time, so a rule can choose the zone. */
 export const TIMED: RuleKind[] = [
 	'power_cut',
@@ -329,6 +341,7 @@ export const isCondition = (kind: RuleKind) =>
 		'server_started',
 		'server_stopped',
 		'power_cut',
+		'sign_ins_blocked',
 		'instance_down',
 		'game_updated',
 		'update_test_finished'

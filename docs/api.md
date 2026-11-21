@@ -1314,8 +1314,13 @@ ones; any other is `422` on `webhook_ids`, worded as if it did not exist. The co
 `job_failed`, `job_stuck`, `crash_loop`, `unclean_stop`, `instance_error`,
 `restart_required`, `update_available`, `stale_backup`, `backup_attention`, `mods_failed`,
 `mod_updates` and `low_disk`, plus the one-off events `server_started`, `server_stopped`,
-`instance_down`, `game_updated`, `update_test_finished` and `power_cut`, and the game events
-below.
+`instance_down`, `game_updated`, `update_test_finished`, `power_cut` and `sign_ins_blocked`, and the game
+events below.
+
+`sign_ins_blocked` is sent when an account's failed sign-ins from any address reach the
+limit and the panel starts refusing it. It is sent at most once an hour for each username, and
+only for a username an account has, with the `username` and the `address` of the first refused
+attempt. It is host-wide, like `low_disk` and `power_cut`.
 
 Three events are sent without any rule to every enabled destination with `catch_all` on that
 serves the event's server, which is every shared destination and the server's own:
@@ -1395,6 +1400,7 @@ kept. The names each kind fills:
 | `game_updated`     | `build`, `mods`, `time`                                       |
 | `update_test_finished` | `status`, `build`, `mods`, `failed_mods`, `time`          |
 | `power_cut`        | `power_off`, `stop_at`, `servers`                             |
+| `sign_ins_blocked` | `username`, `address`                                         |
 | Game events        | The event's own fields, as listed for ValminEye above         |
 
 `what_to_do` is empty on `alert_resolved`. A field named in `hidden_fields` is empty too.
@@ -1473,7 +1479,7 @@ is ignored. Creating, changing and deleting a rule writes an audit log entry wit
 operation `alert_rule_create`, `alert_rule_update` or `alert_rule_delete`, and a rule test
 `alert_rule_test`. Under `/admin` its action is `panel.settings`; under a server's prefix it
 is `notifications.manage`, with the server. Destination changes are audited the same way.
-Deleting a rule that does not exist returns `404`. A `low_disk` or `power_cut` rule is
+Deleting a rule that does not exist returns `404`. A `low_disk`, `power_cut` or `sign_ins_blocked` rule is
 host-wide: naming an `instance_id` on one, or creating one under a server's prefix, returns
 `422`.
 

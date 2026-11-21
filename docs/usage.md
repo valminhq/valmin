@@ -1477,6 +1477,7 @@ Select **Add rule** and choose the event:
 | Server status          | **Stopped unexpectedly**              | A server stopped or restarted on its own: a crash, running out of memory or a host reboot. Also a server the [watchdog](operations.md#restart-a-hung-server) found hung. |
 | Server status          | **Server updated**                    | A game update installed a new build, or applying tested updates updated mods. |
 | Server status          | **Power cut soon**                    | A planned power cut is close: players are being warned. Administration page only. |
+| Server status          | **Sign-ins blocked**                  | An account had too many failed sign-ins from anywhere and the panel is refusing it for a short while. At most once an hour per account, and only for an account that exists. Administration page only. |
 | Problems               | **Crash loop**                        | A server is crashing repeatedly.                                     |
 | Problems               | **Server error**                      | A server is in an error state and needs a check.                     |
 | Problems               | **Unclean stop**                      | A server stopped before its world finished saving.                   |

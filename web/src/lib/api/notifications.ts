@@ -79,6 +79,7 @@ export type GameKind =
 export type RuleKind =
 	| InboxKind
 	| 'power_cut'
+	| 'sign_ins_blocked'
 	| 'server_started'
 	| 'server_stopped'
 	| 'instance_down'
