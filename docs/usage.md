@@ -85,7 +85,7 @@ the account can see something under it. Opening one of these pages by its addres
 access shows **Page not found**.
 
 The account menu, named after your username, shows who you are signed in as, then
-**Change password**, **Date and time**, **Report an issue** and **Sign out**.
+**Change password**, **Signed-in devices**, **Date and time**, **Report an issue** and **Sign out**.
 **Report an issue** opens a new issue on the project's GitHub page in a new tab.
 **Sign out** opens the sign-in page. When the panel
 [signs in through a reverse proxy](#sign-in-with-single-sign-on), it opens the SSO gateway's
@@ -1367,6 +1367,14 @@ in other browsers or on other devices, is signed out. Attempts are limited to fi
 minute, whether or not the current password was right. An administrator resetting your
 password from **Users** signs you out everywhere, including this browser. If you cannot
 sign in at all, see [reset an account password](troubleshooting.md#reset-an-account-password).
+
+### See where you are signed in
+
+Open the account menu and choose **Signed-in devices**. The page lists each browser or
+device signed in to your account, with its address, its browser as it reported itself, when
+it was last active and when it signed in. This browser is marked. Choose **Sign out** on
+another and confirm: it stops being signed in at once and has to sign in again. By default a session
+lasts up to 30 days, and ends after a day without use. The page is `/account/sessions`.
 
 ### Set your time zone and time format
 

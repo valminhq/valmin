@@ -49,6 +49,7 @@ const LABELS: Record<string, string> = {
 	'schedules.delete': 'Schedule deleted',
 	'schedules.run': 'Schedule run now',
 	'users.password.change': 'Password changed',
+	'users.session.revoke': 'Device signed out',
 	'users.create': 'User created',
 	'users.update': 'User changed',
 	'users.delete': 'User deleted',
@@ -294,6 +295,7 @@ const PHRASES: Record<string, Phrase> = {
 		}`,
 	'users.delete': (d) => `deleted the user ${text(d.username) || '(unnamed)'}`,
 	'users.password.reset': (d) => `reset the password of ${text(d.username) || 'a user'}`,
+	'users.session.revoke': () => 'signed one of their devices out',
 	// Only operations with a sentence; the rest keep their raw detail, which names them.
 	'panel.settings': (d) => (d.operation === 'deep_checks' ? 'ran the deep checks' : '')
 };
