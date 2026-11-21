@@ -80,6 +80,22 @@ func TestDecode(t *testing.T) {
 	}
 }
 
+// TestDecodeNamesAnUnknownField keeps the refusal of a mistyped field from reading as broken
+// JSON: the message and details.field name the field.
+func TestDecodeNamesAnUnknownField(t *testing.T) {
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/instances", strings.NewReader(`{"nam":"x"}`))
+	r.Header.Set("Content-Type", "application/json")
+	var v struct {
+		Name string `json:"name"`
+	}
+	rec := httptest.NewRecorder()
+	apierr.Write(rec, r, Decode(r, &v))
+	if body := rec.Body.String(); !strings.Contains(body, `"field":"nam"`) ||
+		!strings.Contains(body, "does not accept: nam.") {
+		t.Errorf("refusal = %s, want it to name the field", body)
+	}
+}
+
 // TestCursorRoundTrips holds ADR-035: the cursor is opaque, and a client that tampers with
 // one gets invalid_parameter rather than a silently shifted page.
 func TestCursorRoundTrips(t *testing.T) {

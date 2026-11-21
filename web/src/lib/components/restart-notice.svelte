@@ -4,7 +4,17 @@
 	import Info from '@lucide/svelte/icons/info';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
-	let { instance }: { instance: Pick<Instance, 'restart_required' | 'pending_restart'> } = $props();
+	let {
+		instance,
+		canRestart
+	}: {
+		instance: Pick<Instance, 'state' | 'restart_required' | 'pending_restart'>;
+		/** Whether the viewer may restart the server; the notice is for someone who can act on it. */
+		canRestart: boolean;
+	} = $props();
+
+	// A stopped server applies its changes on its next start anyway, which needs no notice.
+	const shown = $derived(canRestart && instance.state === 'running');
 </script>
 
 <!--
@@ -13,7 +23,7 @@
 	the next start, a mod install is not (ADR-118, ADR-107). `pending_restart` is the operator's
 	own config or mod change, so it is information rather than a warning.
 -->
-{#if instance.restart_required}
+{#if shown && instance.restart_required}
 	<Alert.Root>
 		<TriangleAlert />
 		<Alert.Title>Restart to apply settings</Alert.Title>
@@ -23,7 +33,7 @@
 			the container before starting the server.
 		</Alert.Description>
 	</Alert.Root>
-{:else if instance.pending_restart}
+{:else if shown && instance.pending_restart}
 	<Alert.Root>
 		<Info />
 		<Alert.Title>Changes apply on next start</Alert.Title>

@@ -35,8 +35,8 @@ func Accepted(w http.ResponseWriter, r *http.Request, jobID string, stub any) {
 }
 
 // Decode reads a JSON request body into v. Unknown fields are rejected rather than
-// ignored: a mistyped field that silently does nothing is the failure shape this project
-// designs against.
+// ignored, as malformed_json naming the field: a mistyped field that silently does nothing is
+// the failure shape this project designs against.
 func Decode(r *http.Request, v any) error {
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		if mediaType, _, _ := strings.Cut(ct, ";"); strings.TrimSpace(mediaType) != "application/json" {
@@ -50,6 +50,11 @@ func Decode(r *http.Request, v any) error {
 		var tooLarge *http.MaxBytesError
 		if stderrors.As(err, &tooLarge) {
 			return apierr.New(errcode.PayloadTooLarge).With("limit_bytes", tooLarge.Limit).Wrap(err)
+		}
+		if field, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
+			field = strings.Trim(field, `"`)
+			return apierr.New(errcode.MalformedJSON).With("field", field).
+				Msg(fmt.Sprintf("The request has a field this endpoint does not accept: %s.", field)).Wrap(err)
 		}
 		return apierr.New(errcode.MalformedJSON).Wrap(err)
 	}
