@@ -458,3 +458,67 @@ func TestUpdateSelfSetsTheTimeFormat(t *testing.T) {
 		}
 	}
 }
+
+// mustChange reads whether the account that produced from is asked to choose its own password.
+func mustChange(t *testing.T, rt *Server, from *httptest.ResponseRecorder) bool {
+	t.Helper()
+	rec := send(rt, authenticated(httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", http.NoBody), from))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("me = %d (%s)", rec.Code, rec.Body)
+	}
+	var me struct {
+		Required bool `json:"password_change_required"`
+	}
+	decodeInto(t, rec, &me)
+	return me.Required
+}
+
+// Asserts a password an administrator chose or issued has to be replaced by its owner, that the
+// owner's own change clears the request, and that an account made any other way is never asked.
+func TestAdminIssuedPasswordsAskForAChange(t *testing.T) {
+	t.Parallel()
+	rt, _, admin := bootstrappedRouter(t)
+	if mustChange(t, rt, admin) {
+		t.Error("the first administrator chose their own password and is asked to change it")
+	}
+
+	create := send(rt, authenticated(httptest.NewRequest(http.MethodPost, "/api/v1/users",
+		jsonBody(t, map[string]string{"username": "bea", "password": "given-password", "role": "member"})), admin))
+	var created struct {
+		ID       string `json:"id"`
+		Required bool   `json:"password_change_required"`
+	}
+	decodeInto(t, create, &created)
+	if !created.Required {
+		t.Error("the create response does not say the new account must change its password")
+	}
+
+	patch := send(rt, authenticated(httptest.NewRequest(http.MethodPatch, "/api/v1/users/"+created.ID,
+		jsonBody(t, map[string]any{"role": "member", "disabled": false})), admin))
+	var patched struct {
+		Required bool `json:"password_change_required"`
+	}
+	decodeInto(t, patch, &patched)
+	if patch.Code != http.StatusOK || !patched.Required {
+		t.Errorf("patch = %d, flag %v, want 200 and the account still flagged", patch.Code, patched.Required)
+	}
+
+	bea := loginAs(t, rt, "bea", "given-password")
+	if !mustChange(t, rt, bea) {
+		t.Fatal("an account created by an administrator is not asked to change its password")
+	}
+	if rec := changePassword(t, rt, bea, "given-password", "bea-own-password"); rec.Code != http.StatusNoContent {
+		t.Fatalf("change = %d (%s)", rec.Code, rec.Body)
+	}
+	if mustChange(t, rt, bea) {
+		t.Error("choosing a password did not clear the request")
+	}
+
+	reset := send(rt, authenticated(httptest.NewRequest(http.MethodPost,
+		"/api/v1/users/"+created.ID+"/password/reset", http.NoBody), admin))
+	var issued struct{ Password string }
+	decodeInto(t, reset, &issued)
+	if !mustChange(t, rt, loginAs(t, rt, "bea", issued.Password)) {
+		t.Error("a password an administrator issued is not asked to be changed")
+	}
+}

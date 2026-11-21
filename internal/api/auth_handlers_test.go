@@ -358,6 +358,10 @@ func TestProxySignIn(t *testing.T) {
 		t.Fatalf("member through the proxy = %d, session cookie %q; want 200 and a cookie",
 			member.Code, cookieValue(member, "valmin_session"))
 	}
+	// The proxy vouches for the member, who never types the password an administrator chose.
+	if mustChange(t, rt, member) {
+		t.Error("a member signed in by the proxy is asked to change a password they never use")
+	}
 	if got := viaProxy("192.0.2.1:4000", "ada").Code; got != http.StatusUnauthorized {
 		t.Errorf("admin through the proxy = %d, want 401", got)
 	}

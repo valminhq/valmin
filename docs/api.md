@@ -1519,7 +1519,7 @@ administrator-only, and everyone else gets `404`. Paths are relative to `/api/v1
 | `POST`   | `/invites/{token}/redeem`    | Create an account from an invite. Needs no session.      |
 
 An account has `id`, `username`, `role` (`admin` or `member`), `disabled`, `owner`,
-`created_at` and `last_login_at`. `POST /users` takes `username`, `password` (at least
+`created_at`, `last_login_at` and `password_change_required`. `POST /users` takes `username`, `password` (at least
 eight characters) and `role`; a taken username is `409 name_taken`. The owner, the
 account created at first-run setup, cannot be demoted, disabled or deleted, and only the
 owner can reset its password: those requests answer `403`. Usernames are case-sensitive. A password reset returns `{"password": "..."}` and ends every
@@ -1839,6 +1839,16 @@ either follows the browser's language settings.
 | `401`  | `unauthenticated`   | There is no valid session.                                                |
 | `422`  | `validation_failed` | `timezone` is `invalid`: not a zone the panel knows, or `Local`.          |
 | `422`  | `validation_failed` | `hour_cycle` or `date_order` is `not_an_option`: not one of those values. |
+
+## Passwords an administrator issued
+
+Every account object, from `GET /auth/me`, the login response, `GET /users`, `POST /users`,
+`PATCH /users/{id}` and `PATCH /me`, carries `password_change_required`. It is `true` for an
+account an administrator created, and after an administrator resets its password, and `false`
+otherwise: for the first administrator, for an account created from an invite, after the
+account's own `POST /me/password`, after `valmind admin reset`, and for a member signed in by a
+trusted proxy. The flag is advisory. The panel's own pages send a signed-in account that has it
+to the change password page, but the API does not refuse any other request because of it.
 
 ## End the session
 

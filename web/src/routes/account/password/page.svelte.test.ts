@@ -18,6 +18,7 @@ const ada: User = {
 	owner: true,
 	created_at: '2026-09-01T00:00:00Z',
 	last_login_at: null,
+	password_change_required: false,
 	timezone: '',
 	hour_cycle: '',
 	date_order: ''
@@ -114,5 +115,26 @@ describe('the change password screen', () => {
 
 		expect(await screen.findByText(/Password must be at least 8 characters\./)).toBeTruthy();
 		expect(screen.queryByText('Password changed')).toBeNull();
+	});
+
+	// An account whose password an administrator chose is told why it was sent here, and the
+	// request is cleared in this tab once the password is replaced, so the sign-in gate lets go.
+	it('asks for a password of one’s own when an administrator chose the current one', async () => {
+		session.user = { ...ada, password_change_required: true };
+		daemon.on('POST', '/me/password', () => new Response(null, { status: 204 }));
+		render(Page);
+		expect(screen.getByText('Choose your own password')).toBeTruthy();
+
+		await fill('given-password', 'a-brand-new-password', 'a-brand-new-password');
+		await click(submit());
+
+		expect(await screen.findByText('Password changed')).toBeTruthy();
+		expect(session.user?.password_change_required).toBe(false);
+		expect(screen.queryByText('Choose your own password')).toBeNull();
+	});
+
+	it('says nothing of the kind for an account that chose its own password', () => {
+		render(Page);
+		expect(screen.queryByText('Choose your own password')).toBeNull();
 	});
 });
