@@ -388,7 +388,7 @@
 			<p class="text-sm text-muted-foreground">This server is not here.</p>
 		{/if}
 	{:else}
-		<RestartNotice {instance} />
+		<RestartNotice {instance} canRestart={session.allowed(id).includes(actions.restart)} />
 
 		{#if !canEdit && !canEditLimits}
 			<p class="text-sm text-muted-foreground" data-testid="settings-blocked">

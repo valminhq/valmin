@@ -747,7 +747,7 @@
 		<!-- ADR-012: the mods on disk and the mods in memory have diverged, and only a restart
 		     closes that. Said here as well as on the server page because this is the screen
 		     that just caused it. -->
-		<RestartNotice {instance} />
+		<RestartNotice {instance} canRestart={session.allowed(id).includes(actions.restart)} />
 	{/if}
 
 	{#if jobId}

@@ -50,6 +50,33 @@ describe('summaries of recorded actions', () => {
 		],
 		['delete without the flag', 'instances.delete', {}, 'Alex deleted Viking World'],
 		[
+			'clone',
+			'instance.clone',
+			{ destination_name: 'Viking World copy' },
+			'Alex cloned Viking World as Viking World copy'
+		],
+		['password viewed', 'instances.password.read', {}, 'Alex viewed the password of Viking World'],
+		[
+			'user created',
+			'users.create',
+			{ username: 'bjorn', role: 'member' },
+			'Alex created the user bjorn as member'
+		],
+		[
+			'user changed',
+			'users.update',
+			{ username: 'bjorn', role: 'admin', disabled: false },
+			'Alex changed bjorn to admin, enabled'
+		],
+		['user deleted', 'users.delete', { username: 'bjorn' }, 'Alex deleted the user bjorn'],
+		[
+			'password reset',
+			'users.password.reset',
+			{ username: 'bjorn' },
+			'Alex reset the password of bjorn'
+		],
+		['deep checks', 'panel.settings', { operation: 'deep_checks' }, 'Alex ran the deep checks'],
+		[
 			'create from scratch',
 			'instances.create',
 			{ name: 'Fresh', source: 'new' },
@@ -397,8 +424,13 @@ describe('entries the summary cannot read', () => {
 		],
 		[
 			'an old-format entry of an existing action',
-			{ action: 'users.password.reset', detail: '{"target":"u-2"}' },
-			'Alex: Users password reset: {"target":"u-2"}'
+			{ action: 'users.password.change', detail: '{"target":"u-2"}' },
+			'Alex: Password changed: {"target":"u-2"}'
+		],
+		[
+			'a panel operation without a sentence',
+			{ action: 'panel.settings', detail: '{"operation":"export_download"}' },
+			'Alex: Panel settings: {"operation":"export_download"}'
 		]
 	];
 
@@ -542,8 +574,8 @@ describe('action labels', () => {
 		['instances.mods.install', 'Mod installed'],
 		['schedules.delete', 'Schedule deleted'],
 		['schedules.run', 'Schedule run now'],
-		['users.password.reset', 'Users password reset'],
-		['users.password.change', 'Users password changed'],
+		['users.password.reset', 'Password reset'],
+		['users.password.change', 'Password changed'],
 		['instance.adopt', 'Instance adopt'],
 		['instances.players.banned_players.write', 'Instances players banned players write'],
 		['', '']

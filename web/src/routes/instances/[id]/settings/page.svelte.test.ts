@@ -211,7 +211,10 @@ describe('the server settings screen', () => {
 	// A saved launch edit applies on the next start, and the screen says so whenever the
 	// daemon reports the running server is behind.
 	it('shows the restart notice only when the daemon says a restart is needed', async () => {
-		await open([actions.settings], instance({ restart_required: true }));
+		await open(
+			[actions.settings, actions.restart],
+			instance({ state: 'running', restart_required: true })
+		);
 		expect(screen.getByText('Restart to apply settings')).toBeTruthy();
 	});
 

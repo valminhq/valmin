@@ -6,7 +6,6 @@
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { api } from '#lib/api/client.js';
-	import { actions } from '#lib/api/instances.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { instanceList } from '#lib/state/instances.svelte.js';
 	import { socketStatus } from '#lib/socket/index.svelte.js';
@@ -32,10 +31,10 @@
 	import Bot from '@lucide/svelte/icons/bot';
 	import Zap from '@lucide/svelte/icons/zap';
 	import Users from '@lucide/svelte/icons/users';
+	import { adminPageActions } from '#lib/admin-pages.js';
 
 	// Visibility comes from the granted actions, never from a role name (`09 §4`).
 	const granted = $derived(session.allowedGlobally());
-	const canAdminPanel = $derived(granted.includes(actions.panelSettings));
 	const adminLinks = $derived(
 		[
 			{
@@ -43,77 +42,77 @@
 				label: 'Users',
 				group: 'People',
 				icon: UserRoundCog,
-				visible: granted.includes(actions.usersManage)
+				visible: granted.includes(adminPageActions.users)
 			},
 			{
 				href: resolve('admin/invites'),
 				label: 'Invites',
 				group: 'People',
 				icon: Link,
-				visible: granted.includes(actions.invitesManage)
+				visible: granted.includes(adminPageActions.invites)
 			},
 			{
 				href: resolve('admin/players'),
 				label: 'Players',
 				group: 'People',
 				icon: Users,
-				visible: granted.includes(actions.playersManage)
+				visible: granted.includes(adminPageActions.players)
 			},
 			{
 				href: resolve('admin/audit'),
 				label: 'Audit log',
 				group: 'System',
 				icon: ScrollText,
-				visible: granted.includes(actions.auditRead)
+				visible: granted.includes(adminPageActions.audit)
 			},
 			{
 				href: resolve('admin/remote-backups'),
 				label: 'Remote backups',
 				group: 'Integrations',
 				icon: CloudUpload,
-				visible: canAdminPanel
+				visible: granted.includes(adminPageActions['remote-backups'])
 			},
 			{
 				href: resolve('admin/webhooks'),
 				label: 'Notifications',
 				group: 'Integrations',
 				icon: BellRing,
-				visible: canAdminPanel
+				visible: granted.includes(adminPageActions.webhooks)
 			},
 			{
 				href: resolve('admin/shutdowns'),
 				label: 'Power cuts',
 				group: 'System',
 				icon: Zap,
-				visible: granted.includes(actions.schedulesGlobal)
+				visible: granted.includes(adminPageActions.shutdowns)
 			},
 			{
 				href: resolve('admin/discord'),
 				label: 'Discord bot',
 				group: 'Integrations',
 				icon: Bot,
-				visible: canAdminPanel
+				visible: granted.includes(adminPageActions.discord)
 			},
 			{
 				href: resolve('admin/diagnostics'),
 				label: 'Diagnostics',
 				group: 'System',
 				icon: Stethoscope,
-				visible: canAdminPanel
+				visible: granted.includes(adminPageActions.diagnostics)
 			},
 			{
 				href: resolve('admin/export'),
 				label: 'Export installation',
 				group: 'Advanced',
 				icon: PackageOpen,
-				visible: canAdminPanel
+				visible: granted.includes(adminPageActions.export)
 			},
 			{
 				href: resolve('admin/keys'),
 				label: 'Encryption keys',
 				group: 'Advanced',
 				icon: KeyRound,
-				visible: canAdminPanel
+				visible: granted.includes(adminPageActions.keys)
 			}
 		].filter((link) => link.visible)
 	);

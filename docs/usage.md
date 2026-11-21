@@ -81,7 +81,8 @@ The **Administration** menu groups its pages under four headings:
 | **Advanced**     | [Export installation](operations.md#move-to-a-new-host), [Encryption keys](operations.md#rotate-encryption-keys)                                                 |
 
 Each page is shown only to accounts that may use it, and a heading appears only when
-the account can see something under it.
+the account can see something under it. Opening one of these pages by its address without
+access shows **Page not found**.
 
 The account menu, named after your username, shows who you are signed in as, then
 **Change password**, **Date and time**, **Report an issue** and **Sign out**.
@@ -235,6 +236,10 @@ two different badges:
   restarts.
 - **pending restart**: saved mod configuration, mod changes or a restored setup are
   waiting for the next start. This one is informational and never raises an alert.
+
+**pending restart** shows only on a running server, since a stopped one starts with the saved
+changes. The matching notice on the overview, Mods, Mod config and Settings pages shows only on a
+running server, and only to someone who may restart it.
 
 ### The overview
 
