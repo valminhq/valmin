@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/valminhq/valmin/internal/crypto"
@@ -660,4 +662,36 @@ func hasJobOfKind(t *testing.T, db *store.DB, instanceID, kind string) bool {
 		t.Fatal(err)
 	}
 	return n > 0
+}
+
+// Asserts a burst of simultaneous creates each gets its own port range, rather than most being told
+// the host has no range left because they all picked the same one.
+func TestConcurrentCreatesEachGetAPortRange(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _ := provisionWorld(t)
+
+	const creates = 15
+	codes := make([]int, creates)
+	var wg sync.WaitGroup
+	for i := range creates {
+		wg.Go(func() {
+			codes[i] = as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances",
+				jsonBody(t, validCreateBody(fmt.Sprintf("burst-%d", i))))).Code
+		})
+	}
+	wg.Wait()
+
+	for i, code := range codes {
+		if code != http.StatusAccepted {
+			t.Errorf("create %d = %d, want 202", i, code)
+		}
+	}
+	var distinct int
+	if err := db.Reader.QueryRowContext(t.Context(),
+		`SELECT COUNT(DISTINCT base_port) FROM instances`).Scan(&distinct); err != nil {
+		t.Fatal(err)
+	}
+	if distinct != creates {
+		t.Errorf("%d distinct base ports, want %d", distinct, creates)
+	}
 }
