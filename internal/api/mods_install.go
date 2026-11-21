@@ -167,9 +167,9 @@ type installedModView struct {
 // load (Q38); "not_seen" is a plugin it said nothing about, which stays the superset for a failure
 // no failure line describes.
 const (
-	LoadLoaded  = "loaded"
-	LoadNotSeen = "not_seen"
-	LoadFailed  = "failed"
+	LoadLoaded  = string(instance.ModLoaded)
+	LoadNotSeen = string(instance.ModNotSeen)
+	LoadFailed  = string(instance.ModFailed)
 )
 
 // pluginLoadView is the boot-level half of load verification: what BepInEx said it would
@@ -181,6 +181,8 @@ type pluginLoadView struct {
 	Loaded   int  `json:"loaded"`
 	// Failed is how many plugins the loader said it could not load.
 	Failed int `json:"failed"`
+	// Complete is whether the loader logged that it finished. Until then the counts are partial.
+	Complete bool `json:"complete"`
 	// Discrepancy is null when the two agree. It is reported rather than resolved: the
 	// gap between them is a plugin BepInEx meant to load and never named.
 	Discrepancy *string `json:"discrepancy"`
@@ -329,26 +331,16 @@ func withPack(view *installedModView, row *store.InstanceMod, members map[string
 // loadStatus reports whether one mod loaded, and the loader's line when it said it could not.
 // Null means no answer: the package places no plugin, or there is no chainloader run to read yet.
 // An admin who has not restarted since installing must not be told the mod is not loading.
-//
-// A failure line outranks a load line: a plugin whose load threw was named `Loading [...]` on
-// its way to the exception.
 func loadStatus(
 	fullName string, manifest []installer.ManifestEntry, load *instance.PluginLoad,
 ) (status, reason *string) {
-	if load == nil {
+	st, why := load.ModStatus(fullName, installer.Paths(manifest))
+	if st == "" {
 		return nil, nil
 	}
-	paths := installer.Paths(manifest)
-	if !instance.IsPlugin(paths) {
-		return nil, nil
-	}
-	if why, failed := load.FailedFor(fullName, paths); failed {
-		s := LoadFailed
+	s := string(st)
+	if st == instance.ModFailed {
 		return &s, &why
-	}
-	s := LoadNotSeen
-	if load.Loaded(fullName, paths) {
-		s = LoadLoaded
 	}
 	return &s, nil
 }
@@ -361,6 +353,7 @@ func toPluginLoadView(load *instance.PluginLoad) *pluginLoadView {
 		ObservedAt: load.ObservedAt.UTC().Format(time.RFC3339),
 		Loaded:     load.LoadedCount(),
 		Failed:     len(load.Failed),
+		Complete:   load.Complete,
 	}
 	if load.Declared >= 0 {
 		declared := load.Declared

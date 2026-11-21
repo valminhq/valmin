@@ -34,6 +34,7 @@ function schedule(overrides: Partial<Schedule> = {}): Schedule {
 		deferred_until: null,
 		upcoming_runs: [],
 		steps: null,
+		apply: null,
 		...overrides
 	};
 }

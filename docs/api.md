@@ -121,7 +121,7 @@ Schedules run jobs on a cron timetable. Paths are relative to `/api/v1`.
 | -------- | --------------------- | --------------------------------------------------------------- |
 | `GET`    | `/schedules`          | Schedules you can see, with their next runs.                    |
 | `POST`   | `/schedules`          | Create a schedule; returns `201` and the schedule.              |
-| `PATCH`  | `/schedules/{id}`     | Change `cron`, `timezone`, `enabled`, `steps` or player policy. |
+| `PATCH`  | `/schedules/{id}`     | Change `cron`, `timezone`, `enabled`, `steps`, `apply` or player policy. |
 | `DELETE` | `/schedules/{id}`     | Delete a schedule; returns `204`.                               |
 | `POST`   | `/schedules/{id}/run` | Run a server schedule now; returns `202` and the job.           |
 
@@ -135,6 +135,7 @@ permission its kind needs:
 | `backup`       | One server   | `backups.create`   |
 | `restart`      | One server   | `instance.restart` |
 | `game_update`  | One server   | `instance.update`  |
+| `update_test`  | One server   | `instance.update`  |
 | `chain`        | One server   | `instance.stop`, and each step's own |
 | `update_check` | The panel    | `schedules.global` |
 | `prune`        | The panel    | `schedules.global` |
@@ -144,7 +145,23 @@ An unknown kind is `422` on `kind`, and a server kind without `instance_id` is `
 too. An `instance_id` that names no server you can see, or no server at all, is `404`. The list shows panel schedules to accounts with `schedules.global`, and a server's
 schedules to anyone who can see that server. Each schedule also returns `last_run_at`,
 `next_run_at` and `created_by_username`. A scheduled `game_update` on a modded server is
-always skipped, because the update needs a person to confirm it.
+always skipped, because the update needs a person to confirm it; `update_test` is the way to
+update one unattended.
+
+### Test updates on a schedule
+
+An `update_test` schedule runs the [update test](#test-updates-on-a-copy) on its server. Each
+run tries the game when the last update check did not find the server current, and the mods
+when any update is pending; with neither, the run is skipped. A run on a server that still
+has a copy is skipped too. `apply` (boolean, default `false`) applies the tested updates once
+the test ends, as `POST /instances/{id}/update-test/apply` would, but only when the copy's
+mod loader finished, named every enabled plugin package without a failure and kept its count,
+and the server is stopped or running with a player count of zero, read again when the test
+ends. Otherwise the copy is kept. The `update_apply` job carries the schedule's id and the
+test's `requested_by`.
+Each schedule returns `apply`, `null` unless its kind is `update_test`; `apply` on any other
+kind is `422` on `apply`. Like a `game_update`, an `update_test` schedule may run at most once
+an hour.
 
 ### Run a chain of steps
 
@@ -197,7 +214,9 @@ are. It needs what editing the schedule needs, and is entered in the audit log a
 
 A schedule holding a run for players, a panel schedule (`update_check`, `prune`,
 `alert_scan`), a server in a state the kind cannot run from, and a `game_update` (or a chain
-with one) on a modded server are `409 invalid_state`. A `backup`, `restart` or `game_update`
+with one) on a modded server are `409 invalid_state`. So is an `update_test` with nothing
+pending, or on a server that already has a copy, answered as `POST /instances/{id}/update-test`
+answers it. A `backup`, `restart` or `game_update`
 schedule on a server busy with another job, and a chain while another chain runs on the
 server, are `409 job_in_progress`. Otherwise a chain is accepted and, as on its time, fails at
 the first step the server cannot take.
@@ -542,7 +561,8 @@ in the `stopped` or `running` state.
 `POST /api/v1/instances/{id}/update-test` with `{"game": true, "mods": true}` returns a
 `202` `update_test` job. At least one of the two must be true, or the request answers
 `422`. The job copies the server, puts the new game build (`game`) and the pending mod
-updates (`mods`) on the copy, starts it and logs what the mod loader said about each plugin.
+updates (`mods`) on the copy, starts it, waits for its world to load and logs what the mod
+loader said about each plugin.
 A running source is copied live, so the copy's world is as of the game's last save and its
 seed backup is not marked consistent. The copy is a server whose `test_of` is the source's
 id. It is not public, has crossplay off, runs with the source's `mem_limit_mb` and half its
@@ -563,8 +583,9 @@ stopped or running and its test ran to the end), `apply_blocker` (why it is not 
 a sentence, or null), the
 `mod_changes` (`full_name`, `from`, `to`, `source`) where the copy runs a newer version,
 `failed` (`full_name`, `load_error`) and `not_seen` for the copy's load verification, and
-`plugin_load`, which is null until the copy's loader has written a log. While the copy is
-being created the build ids are empty and the lists are empty. The copy has no grants of
+`plugin_load`, which is null until the copy's loader has written a log. Its `complete` is
+false while the loader has not logged that it finished, and the counts are then partial.
+While the copy is being created the build ids are empty and the lists are empty. The copy has no grants of
 its own, so an account that cannot see the copy, which is anyone but an administrator, gets
 `{"test": null}` even when the server has one.
 
@@ -1278,7 +1299,8 @@ ones; any other is `422` on `webhook_ids`, worded as if it did not exist. The co
 `job_failed`, `job_stuck`, `crash_loop`, `unclean_stop`, `instance_error`,
 `restart_required`, `update_available`, `stale_backup`, `backup_attention`, `mods_failed`,
 `mod_updates` and `low_disk`, plus the one-off events `server_started`, `server_stopped`,
-`instance_down`, `game_updated` and `power_cut`, and the game events below.
+`instance_down`, `game_updated`, `update_test_finished` and `power_cut`, and the game events
+below.
 
 Three events are sent without any rule to every enabled destination with `catch_all` on that
 serves the event's server, which is every shared destination and the server's own:
@@ -1288,7 +1310,7 @@ build; servers on another branch are left out; it concerns no one server, so it 
 shared destinations only), and `backup_failed`. Alert rules (`/api/v1/admin/alert-rules`) route a condition kind
 to chosen destinations and send `alert_opened` and `alert_resolved`.
 
-Five `condition_kind` values are one-off events rather than conditions, sent only to the
+Six `condition_kind` values are one-off events rather than conditions, sent only to the
 destinations of an enabled rule for them. `server_started` sends `server_started` when a
 start or restart leaves a server running, once its log says the world loaded and, on
 crossplay, once it has a join code; it is sent without them after 15 minutes.
@@ -1299,7 +1321,12 @@ on its own, as the built-in event below does; a destination the rule names gets 
 message instead of the built-in one. `game_updated` sends `game_updated` when a game update
 installs a build other than the one the server ran, with `build`, never for a copy made to test
 updates, and when applying tested updates updates mods, with
-`mods`; an apply that also installs a build sends the build in a message of its own. `power_cut` (host-wide, so its rule names no server) sends `power_cut_soon` once per planned power cut, when players are warned (`warn_at`), with
+`mods`; an apply that also installs a build sends the build in a message of its own.
+`update_test_finished` sends `update_test_finished` when an update test ends, by hand or on a
+schedule, unless it was cancelled: `status` says whether it failed, whether every mod loaded,
+and whether the updates are being applied or why an apply the schedule asked for is not;
+`build` is the game build the copy moved to, `mods` the mod updates on it and `failed_mods`
+the packages that failed to load. `power_cut` (host-wide, so its rule names no server) sends `power_cut_soon` once per planned power cut, when players are warned (`warn_at`), with
 the cut time, the stop time and the running servers. Inside a rule's quiet hours they are
 not sent at all. Alerts held during a
 rule's quiet hours are sent when the window ends. A rule sends `alert_resolved` only for an
@@ -1351,6 +1378,7 @@ kept. The names each kind fills:
 | `server_stopped`   | `reason`, `server_name`, `world`, `time`                      |
 | `instance_down`    | `status`, `reason`, `what_to_do`, `time`                      |
 | `game_updated`     | `build`, `mods`, `time`                                       |
+| `update_test_finished` | `status`, `build`, `mods`, `failed_mods`, `time`          |
 | `power_cut`        | `power_off`, `stop_at`, `servers`                             |
 | Game events        | The event's own fields, as listed for ValminEye above         |
 

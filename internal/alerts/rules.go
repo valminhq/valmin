@@ -43,6 +43,7 @@ const (
 	FieldStatus     = "status"
 	FieldBuild      = "build"
 	FieldMods       = "mods"
+	FieldFailedMods = "failed_mods"
 )
 
 // MessageFields is the fields a kind's message can carry, each of which a rule can hide.
@@ -56,6 +57,8 @@ func MessageFields(k Kind) []string {
 		return []string{FieldStatus, FieldReason, FieldTime}
 	case KindGameUpdated:
 		return []string{FieldBuild, FieldMods, FieldTime}
+	case KindUpdateTestFinished:
+		return []string{FieldStatus, FieldBuild, FieldMods, FieldFailedMods, FieldTime}
 	}
 	return nil
 }

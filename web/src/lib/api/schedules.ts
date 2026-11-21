@@ -38,6 +38,9 @@ export interface Schedule {
 	upcoming_runs: string[];
 	/** A chain's steps, in order. Null for every other kind. */
 	steps: ChainStep[] | null;
+	/** Whether an update test applies what it tested when every mod loaded and nobody is on.
+	 * Null for every other kind. */
+	apply: boolean | null;
 }
 
 /**
@@ -64,6 +67,7 @@ export interface CreateSchedule {
 	max_deferral_seconds?: number;
 	unknown_players?: 'wait' | 'run';
 	steps?: ChainStep[];
+	apply?: boolean;
 }
 
 export interface PatchSchedule {
@@ -74,6 +78,7 @@ export interface PatchSchedule {
 	wait_for_empty?: boolean;
 	max_deferral_seconds?: number;
 	unknown_players?: 'wait' | 'run';
+	apply?: boolean;
 }
 
 /** How often the schedule builder runs a task. `custom` is an expression written by hand. */
@@ -201,6 +206,12 @@ export const scheduleKinds = [
 	{ kind: 'backup', action: 'backups.create', label: 'Back up this server', playerAware: true },
 	{ kind: 'restart', action: 'instance.restart', label: 'Restart this server', playerAware: true },
 	{ kind: 'game_update', action: 'instance.update', label: 'Update the game', playerAware: false },
+	{
+		kind: 'update_test',
+		action: 'instance.update',
+		label: 'Test updates on a copy',
+		playerAware: false
+	},
 	// A chain is offered to anyone who may stop the server; each step is then checked against
 	// the action it needs, and a chain is player aware only when one of its steps stops the server.
 	{ kind: 'chain', action: 'instance.stop', label: 'Run a sequence of steps', playerAware: false }

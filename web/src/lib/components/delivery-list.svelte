@@ -52,6 +52,7 @@
 		server_started: 'Server started',
 		server_stopped: 'Server stopped',
 		game_updated: 'Server updated',
+		update_test_finished: 'Update test finished',
 		...Object.fromEntries(GAME_EVENTS.map((e) => [e.kind, e.headline]))
 	};
 

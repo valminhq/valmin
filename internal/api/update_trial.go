@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -13,7 +12,6 @@ import (
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
-	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -109,11 +107,15 @@ func (h *Instances) applyUpdateTest(w http.ResponseWriter, r *http.Request) {
 	Accepted(w, r, job.ID, toJobView(job))
 }
 
-// writeUpdateTestError answers the refusals of an update test or its apply.
+// writeUpdateTestError answers the refusals of an update test or its apply, and any other job
+// submission error as writeJobSubmitError does.
 func writeUpdateTestError(w http.ResponseWriter, r *http.Request, err error) {
 	var exists *control.UpdateTestExistsError
 	var lowMemory *control.LowMemoryError
 	switch {
+	case errors.Is(err, errNothingToTest):
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).
+			Msg("No game or mod updates are pending, so there is nothing to test."))
 	case errors.As(err, &exists):
 		apierr.Write(w, r, apierr.New(errcode.InvalidState).With("test_copy_id", exists.CopyID).
 			Msg("This server already has an update test copy. Apply it or discard it first."))
@@ -203,17 +205,13 @@ func (h *Instances) updateTestReport(w http.ResponseWriter, r *http.Request) {
 		JSON(w, r, http.StatusOK, map[string]*updateTestView{"test": nil})
 		return
 	}
-	view, err := h.updateTestView(r, inst, testCopy)
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
-	}
-	JSON(w, r, http.StatusOK, map[string]*updateTestView{"test": view})
+	JSON(w, r, http.StatusOK, map[string]*updateTestView{"test": h.updateTestView(r, inst, testCopy)})
 }
 
 // updateTestView compares a server with its copy and reads the copy's load verification. A copy
-// whose game files are not in place yet, as while it is being created, reports no changes.
-func (h *Instances) updateTestView(r *http.Request, inst, testCopy *store.Instance) (*updateTestView, error) {
+// whose game files are not in place yet, as while it is being created, reports no changes, and
+// one whose mod load cannot be read reports none.
+func (h *Instances) updateTestView(r *http.Request, inst, testCopy *store.Instance) *updateTestView {
 	view := &updateTestView{
 		CopyID: testCopy.ID, CopyName: testCopy.Name, CopyState: testCopy.State, CopyPort: testCopy.BasePort,
 		CopyMemLimit: testCopy.MemLimitMB, CopyCPULimit: testCopy.CPULimit, Branch: inst.GameBranch,
@@ -226,7 +224,7 @@ func (h *Instances) updateTestView(r *http.Request, inst, testCopy *store.Instan
 		view.ApplyBlocker = &reason
 	}
 	if instance.State(testCopy.State) == instance.StateProvisioning {
-		return view, nil
+		return view
 	}
 	changes, err := h.ctl.UpdateTester.Changes(r.Context(), inst, testCopy)
 	if err != nil {
@@ -234,7 +232,7 @@ func (h *Instances) updateTestView(r *http.Request, inst, testCopy *store.Instan
 		// be discarded.
 		slog.WarnContext(r.Context(), "could not compare the update test copy with its server",
 			slog.String("instance_id", testCopy.ID), slog.Any("error", err))
-		return view, nil
+		return view
 	}
 	view.SourceBuildID, view.CopyBuildID = changes.SourceBuildID, changes.CopyBuildID
 	view.GameNewer = changes.GameNewer()
@@ -244,30 +242,16 @@ func (h *Instances) updateTestView(r *http.Request, inst, testCopy *store.Instan
 			testModChange{FullName: m.FullName, From: m.FromVersion, To: m.Version, Source: m.Source},
 		)
 	}
-	load, err := instance.ReadPluginLoad(testCopy.DataDir, h.Streams.Patterns())
+	verdict, err := h.ctl.UpdateTester.Verify(r.Context(), testCopy)
 	if err != nil {
-		slog.WarnContext(r.Context(), "could not read the update test copy's BepInEx log",
+		slog.WarnContext(r.Context(), "could not read the update test copy's mod load",
 			slog.String("instance_id", testCopy.ID), slog.Any("error", err))
+		return view
 	}
-	view.PluginLoad = toPluginLoadView(load)
-	mods, err := h.DB.InstanceMods(r.Context(), testCopy.ID)
-	if err != nil {
-		return nil, err
+	view.PluginLoad = toPluginLoadView(verdict.Load)
+	for _, f := range verdict.Failed {
+		view.Failed = append(view.Failed, failedModView{FullName: f.FullName, LoadError: f.Reason})
 	}
-	for i := range mods {
-		if !mods[i].Enabled {
-			continue
-		}
-		var manifest []installer.ManifestEntry
-		_ = json.Unmarshal([]byte(mods[i].FileManifest), &manifest)
-		status, reason := loadStatus(mods[i].FullName, manifest, load)
-		switch {
-		case status == nil:
-		case *status == LoadFailed:
-			view.Failed = append(view.Failed, failedModView{FullName: mods[i].FullName, LoadError: *reason})
-		case *status == LoadNotSeen:
-			view.NotSeen = append(view.NotSeen, mods[i].FullName)
-		}
-	}
-	return view, nil
+	view.NotSeen = append(view.NotSeen, verdict.NotSeen...)
+	return view
 }

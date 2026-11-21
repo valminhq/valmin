@@ -105,6 +105,70 @@ func (n *Notifier) NotifyGameUpdated(ctx context.Context, instanceID, build stri
 	})
 }
 
+// NotifyUpdateTest reports an update test that ended to the update_test_finished rules covering
+// its server: whether it failed, how the copy's mods loaded and whether the updates are being
+// applied, with what the copy runs that the server does not.
+func (n *Notifier) NotifyUpdateTest(ctx context.Context, res *control.UpdateTestResult) {
+	inst := res.Instance
+	if len(n.rulesFor(ctx, alerts.KindUpdateTestFinished, inst.ID)) == 0 {
+		return
+	}
+	var build string
+	var mods, failed []string
+	if c := res.Changes; c != nil {
+		if c.GameNewer() {
+			build = c.SourceBuildID + " to " + c.CopyBuildID
+		}
+		for _, m := range c.Mods {
+			mods = append(mods, m.FullName+" "+m.Version)
+		}
+	}
+	if v := res.Verdict; v != nil {
+		for _, f := range v.Failed {
+			failed = append(failed, f.FullName)
+		}
+	}
+	at := time.Now().UTC()
+	n.emitByRules(ctx, alerts.KindUpdateTestFinished, inst.ID, func(p *alerts.ParamsWire) *notify.Event {
+		return &notify.Event{
+			Kind: notify.KindUpdateTestFinished, InstanceID: inst.ID, InstanceName: inst.Name,
+			Detail: shown(p, []shownField{
+				{alerts.FieldStatus, "Result", updateTestStatus(res)},
+				{alerts.FieldBuild, "Game build", build},
+				{alerts.FieldMods, "Mods updated", strings.Join(mods, ", ")},
+				{alerts.FieldFailedMods, "Failed to load", strings.Join(failed, ", ")},
+				{alerts.FieldTime, "Finished", formatInstant(at, p.Location())},
+			}),
+		}
+	})
+}
+
+// updateTestStatus is an update test's result as one sentence. Why an apply did not happen is
+// given only when the mods loaded, since otherwise the verdict already says it.
+func updateTestStatus(res *control.UpdateTestResult) string {
+	if res.Error != "" {
+		return "The test failed: " + res.Error
+	}
+	verdict, loaded := "Every mod loaded.", true
+	switch {
+	case res.Verdict == nil:
+		verdict, loaded = "The copy started, but its mods could not be checked.", false
+	case len(res.Verdict.Problems()) > 0:
+		verdict, loaded = "Not every mod loaded: "+strings.Join(res.Verdict.Problems(), "; ")+".", false
+	}
+	switch {
+	case res.Applying && res.Unchanged():
+		return verdict + " The copy runs nothing newer than the server, so it is being removed."
+	case res.Applying:
+		return verdict + " The updates are being applied."
+	case res.NotApplied != "" && loaded:
+		return verdict + " Not applied: " + res.NotApplied + "."
+	case res.NotApplied != "":
+		return verdict + " Not applied."
+	}
+	return verdict
+}
+
 // NotifyServerStarted reports a server that reached running to the server_started rules
 // covering it. Nobody can join before the server logs that its world loaded, nor a crossplay
 // server before it logs its join code, so the message waits up to wait for both and is sent

@@ -31,8 +31,10 @@ var defaultTemplates = map[alerts.Kind]string{
 		"**Port:** {port}\n**Started:** {time}",
 	alerts.KindServerStopped: "**Reason:** {reason}\n**Server name:** {server_name}\n**World:** {world}\n" +
 		"**Stopped:** {time}",
-	alerts.KindInstanceDown:     "**Status:** {status}\n**Cause:** {reason}\n**What to do:** {what_to_do}",
-	alerts.KindGameUpdated:      "**Game build:** {build}\n**Mods updated:** {mods}\n**Updated:** {time}",
+	alerts.KindInstanceDown: "**Status:** {status}\n**Cause:** {reason}\n**What to do:** {what_to_do}",
+	alerts.KindGameUpdated:  "**Game build:** {build}\n**Mods updated:** {mods}\n**Updated:** {time}",
+	alerts.KindUpdateTestFinished: "**Result:** {status}\n**Game build:** {build}\n**Mods updated:** {mods}\n" +
+		"**Failed to load:** {failed_mods}\n**Finished:** {time}",
 	alerts.KindPlayerJoined:     "{player} joined",
 	alerts.KindPlayerLeft:       "{player} left",
 	alerts.KindBossDefeated:     "{boss} was defeated for the first time on day {day}. Fighters: {players}",
