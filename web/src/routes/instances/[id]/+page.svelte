@@ -275,7 +275,7 @@
 			</Alert.Root>
 		{/if}
 
-		<div class="grid gap-4 md:grid-cols-2">
+		<div class="grid gap-4 md:grid-cols-2 {inst.state === 'running' ? '' : 'items-start'}">
 			<Card.Root>
 				<Card.Header>
 					<Card.Title>Resources</Card.Title>

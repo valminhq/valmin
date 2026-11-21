@@ -142,12 +142,12 @@
 						{/if}
 					</p>
 				{/if}
-				<div class="flex flex-wrap items-center gap-x-4 gap-y-2 sm:ml-auto">
+				<div class="flex w-full items-center gap-x-4 gap-y-2 sm:ml-auto sm:w-auto">
 					{#if instance && instanceList.items.length > 1}
 						<label class="sr-only" for="server-switcher">Switch server</label>
 						<NativeSelect
 							id="server-switcher"
-							class="max-w-48 sm:max-w-64"
+							class="min-w-0 flex-1 sm:max-w-64 sm:flex-none"
 							value={id}
 							onchange={switchTo}
 						>
@@ -158,10 +158,11 @@
 					{/if}
 					{#if offerCompare}
 						<a
-							class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground hover:underline"
+							class="inline-flex min-h-6 min-w-6 items-center justify-center gap-1.5 text-sm text-muted-foreground hover:text-foreground hover:underline"
 							href={compareHref}
 						>
-							<GitCompare class="size-4" aria-hidden="true" /> Compare with another server
+							<GitCompare class="size-4" aria-hidden="true" />
+							<span class="sr-only sm:not-sr-only">Compare with another server</span>
 						</a>
 					{/if}
 				</div>
