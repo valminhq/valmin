@@ -1,11 +1,11 @@
 <script lang="ts">
+	import { column } from '#lib/layout.js';
 	import { navigationMenu } from '#lib/navigation-menu.js';
 	import { leave } from '#lib/nav.js';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { api } from '#lib/api/client.js';
-	import { actions } from '#lib/api/instances.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { instanceList } from '#lib/state/instances.svelte.js';
 	import { socketStatus } from '#lib/socket/index.svelte.js';
@@ -21,16 +21,21 @@
 	import KeyRound from '@lucide/svelte/icons/key-round';
 	import PackageOpen from '@lucide/svelte/icons/package-open';
 	import LockKeyhole from '@lucide/svelte/icons/lock-keyhole';
+	import MonitorSmartphone from '@lucide/svelte/icons/monitor-smartphone';
 	import Clock from '@lucide/svelte/icons/clock';
+	import Monitor from '@lucide/svelte/icons/monitor';
+	import Sun from '@lucide/svelte/icons/sun';
+	import Moon from '@lucide/svelte/icons/moon';
+	import { setMode, userPrefersMode } from 'mode-watcher';
 	import Stethoscope from '@lucide/svelte/icons/stethoscope';
 	import CloudUpload from '@lucide/svelte/icons/cloud-upload';
 	import Bot from '@lucide/svelte/icons/bot';
 	import Zap from '@lucide/svelte/icons/zap';
 	import Users from '@lucide/svelte/icons/users';
+	import { adminPageActions } from '#lib/admin-pages.js';
 
 	// Visibility comes from the granted actions, never from a role name (`09 §4`).
 	const granted = $derived(session.allowedGlobally());
-	const canAdminPanel = $derived(granted.includes(actions.panelSettings));
 	const adminLinks = $derived(
 		[
 			{
@@ -38,77 +43,77 @@
 				label: 'Users',
 				group: 'People',
 				icon: UserRoundCog,
-				visible: granted.includes(actions.usersManage)
+				visible: granted.includes(adminPageActions.users)
 			},
 			{
 				href: resolve('admin/invites'),
 				label: 'Invites',
 				group: 'People',
 				icon: Link,
-				visible: granted.includes(actions.invitesManage)
+				visible: granted.includes(adminPageActions.invites)
 			},
 			{
 				href: resolve('admin/players'),
 				label: 'Players',
 				group: 'People',
 				icon: Users,
-				visible: granted.includes(actions.playersManage)
+				visible: granted.includes(adminPageActions.players)
 			},
 			{
 				href: resolve('admin/audit'),
 				label: 'Audit log',
 				group: 'System',
 				icon: ScrollText,
-				visible: granted.includes(actions.auditRead)
+				visible: granted.includes(adminPageActions.audit)
 			},
 			{
 				href: resolve('admin/remote-backups'),
 				label: 'Remote backups',
 				group: 'Integrations',
 				icon: CloudUpload,
-				visible: canAdminPanel
+				visible: granted.includes(adminPageActions['remote-backups'])
 			},
 			{
 				href: resolve('admin/webhooks'),
 				label: 'Notifications',
 				group: 'Integrations',
 				icon: BellRing,
-				visible: canAdminPanel
+				visible: granted.includes(adminPageActions.webhooks)
 			},
 			{
 				href: resolve('admin/shutdowns'),
 				label: 'Power cuts',
 				group: 'System',
 				icon: Zap,
-				visible: granted.includes(actions.schedulesGlobal)
+				visible: granted.includes(adminPageActions.shutdowns)
 			},
 			{
 				href: resolve('admin/discord'),
 				label: 'Discord bot',
 				group: 'Integrations',
 				icon: Bot,
-				visible: canAdminPanel
+				visible: granted.includes(adminPageActions.discord)
 			},
 			{
 				href: resolve('admin/diagnostics'),
 				label: 'Diagnostics',
 				group: 'System',
 				icon: Stethoscope,
-				visible: canAdminPanel
+				visible: granted.includes(adminPageActions.diagnostics)
 			},
 			{
 				href: resolve('admin/export'),
 				label: 'Export installation',
 				group: 'Advanced',
 				icon: PackageOpen,
-				visible: canAdminPanel
+				visible: granted.includes(adminPageActions.export)
 			},
 			{
 				href: resolve('admin/keys'),
 				label: 'Encryption keys',
 				group: 'Advanced',
 				icon: KeyRound,
-				visible: canAdminPanel
+				visible: granted.includes(adminPageActions.keys)
 			}
 		].filter((link) => link.visible)
 	);
@@ -138,6 +143,22 @@
 		}
 	}
 
+	// The colour themes the header button steps through; system follows the device.
+	const themes = [
+		['system', 'System', Monitor],
+		['light', 'Light', Sun],
+		['dark', 'Dark', Moon]
+	] as const;
+	const themeAt = $derived(
+		Math.max(
+			0,
+			themes.findIndex(([value]) => value === userPrefersMode.current)
+		)
+	);
+	const theme = $derived(themes[themeAt]);
+	const nextTheme = $derived(themes[(themeAt + 1) % themes.length]);
+	const ThemeIcon = $derived(theme[2]);
+
 	const summary =
 		'group inline-flex cursor-pointer list-none items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden';
 	const panel =
@@ -159,87 +180,103 @@
 	</li>
 {/snippet}
 
-<header class="flex flex-wrap items-center gap-2 border-b bg-card px-4 py-3 sm:px-6">
-	<a class="text-lg font-semibold tracking-tight" href={resolve('/')}>Valmin</a>
-	<Button
-		variant={home ? 'secondary' : 'ghost'}
-		size="sm"
-		aria-current={home ? 'page' : undefined}
-		href={resolve('/')}>Servers</Button
-	>
-	<nav
-		aria-label="Administration and account"
-		class="flex w-full min-w-0 flex-wrap items-center justify-end gap-1 sm:ml-auto sm:w-auto"
-	>
-		{#if socketStatus.value !== 'open'}
-			<span role="status" class="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
-				{socketStatus.value === 'connecting'
-					? 'reconnecting…'
-					: socketStatus.value === 'ended'
-						? 'disconnected, reload to reconnect'
-						: 'offline'}
-			</span>
-		{/if}
-		{#if adminLinks.length > 0}
+<header class="border-b bg-card">
+	<div class={[column, 'flex flex-wrap items-center gap-2 py-3']}>
+		<a class="text-lg font-semibold tracking-tight" href={resolve('/')}>Valmin</a>
+		<Button
+			variant={home ? 'secondary' : 'ghost'}
+			size="sm"
+			aria-current={home ? 'page' : undefined}
+			href={resolve('/')}>Servers</Button
+		>
+		<nav
+			aria-label="Administration and account"
+			class="flex w-full min-w-0 flex-wrap items-center justify-end gap-1 sm:ml-auto sm:w-auto"
+		>
+			{#if socketStatus.value !== 'open'}
+				<span role="status" class="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+					{socketStatus.value === 'connecting'
+						? 'reconnecting…'
+						: socketStatus.value === 'ended'
+							? 'disconnected, reload to reconnect'
+							: 'offline'}
+				</span>
+			{/if}
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				aria-label="Theme: {theme[1]}. Switch to {nextTheme[1]}"
+				title="Theme: {theme[1]}"
+				onclick={() => setMode(nextTheme[0])}
+			>
+				<ThemeIcon />
+			</Button>
+			{#if adminLinks.length > 0}
+				<details use:navigationMenu class="relative">
+					<summary class={summary}>
+						<span class="sm:hidden">Admin</span><span class="hidden sm:inline"
+							>{openAdmin ? openAdmin.label : 'Administration'}</span
+						>
+						<ChevronDown class="size-4 transition-transform group-open:rotate-180" />
+					</summary>
+					<ul class={panel}>
+						{#each groups as group, i (group.name)}
+							<li>
+								{#if i > 0}<Separator class="my-1" />{/if}
+								<p
+									id="admin-{group.name.toLowerCase()}"
+									class="px-2 py-1 text-xs font-medium text-muted-foreground"
+								>
+									{group.name}
+								</p>
+
+								<ul aria-labelledby="admin-{group.name.toLowerCase()}" class="grid gap-0.5">
+									{#each group.links as link (link.href)}
+										{@render adminItem(link)}
+									{/each}
+								</ul>
+							</li>
+						{/each}
+					</ul>
+				</details>
+			{/if}
 			<details use:navigationMenu class="relative">
 				<summary class={summary}>
-					<span class="sm:hidden">Admin</span><span class="hidden sm:inline"
-						>{openAdmin ? openAdmin.label : 'Administration'}</span
-					>
+					<span class="max-w-20 truncate sm:max-w-32">{session.user?.username ?? 'Account'}</span>
 					<ChevronDown class="size-4 transition-transform group-open:rotate-180" />
 				</summary>
-				<ul class={panel}>
-					{#each groups as group, i (group.name)}
-						<li>
-							{#if i > 0}<Separator class="my-1" />{/if}
-							<p
-								id="admin-{group.name.toLowerCase()}"
-								class="px-2 py-1 text-xs font-medium text-muted-foreground"
-							>
-								{group.name}
-							</p>
+				<div class={panel}>
+					<p class="max-w-60 px-2 py-1.5 text-xs break-words text-muted-foreground">
+						Signed in as {session.user?.username ?? ''}
+					</p>
 
-							<ul aria-labelledby="admin-{group.name.toLowerCase()}" class="grid gap-0.5">
-								{#each group.links as link (link.href)}
-									{@render adminItem(link)}
-								{/each}
-							</ul>
-						</li>
-					{/each}
-				</ul>
+					<a class={item} href={resolve('account/password')}>
+						<LockKeyhole class="size-4" aria-hidden="true" />
+						Change password
+					</a>
+
+					<a class={item} href={resolve('account/sessions')}>
+						<MonitorSmartphone class="size-4" aria-hidden="true" />
+						Signed-in devices
+					</a>
+
+					<a class={item} href={resolve('account/date-time')}>
+						<Clock class="size-4" aria-hidden="true" />
+						Date and time
+					</a>
+					<a
+						class={item}
+						href="https://github.com/valminhq/valmin/issues/new"
+						target="_blank"
+						rel="noopener noreferrer"
+					>
+						<Bug class="size-4" aria-hidden="true" /> Report an issue
+					</a>
+					<button class={item} type="button" onclick={signOut}>
+						<LogOut class="size-4" aria-hidden="true" /> Sign out
+					</button>
+				</div>
 			</details>
-		{/if}
-		<details use:navigationMenu class="relative">
-			<summary class={summary}>
-				<span class="max-w-20 truncate sm:max-w-32">{session.user?.username ?? 'Account'}</span>
-				<ChevronDown class="size-4 transition-transform group-open:rotate-180" />
-			</summary>
-			<div class={panel}>
-				<p class="max-w-60 px-2 py-1.5 text-xs break-words text-muted-foreground">
-					Signed in as {session.user?.username ?? ''}
-				</p>
-
-				<a class={item} href={resolve('account/password')}>
-					<LockKeyhole class="size-4" aria-hidden="true" />
-					Change password
-				</a>
-
-				<a class={item} href={resolve('account/date-time')}>
-					<Clock class="size-4" aria-hidden="true" />
-					Date and time
-				</a>
-				<a
-					class={item}
-					href="https://github.com/valminhq/valmin/issues/new"
-					target="_blank"
-					rel="noopener noreferrer"
-				>
-					<Bug class="size-4" aria-hidden="true" /> Report an issue
-				</a>
-				<button class={item} type="button" onclick={signOut}>
-					<LogOut class="size-4" aria-hidden="true" /> Sign out
-				</button>
-			</div>
-		</details>
-	</nav>
+		</nav>
+	</div>
 </header>

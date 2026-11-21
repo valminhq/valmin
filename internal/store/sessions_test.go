@@ -1,6 +1,8 @@
 package store
 
 import (
+	"errors"
+	"slices"
 	"testing"
 	"time"
 )
@@ -208,5 +210,70 @@ func TestDeleteSessionsForUserReachesEveryConnection(t *testing.T) {
 	}
 	if s, _, err := db.SessionAndUser(t.Context(), h3); err != nil || s == nil {
 		t.Errorf("an unrelated user's session was also revoked: %+v, %v", s, err)
+	}
+}
+
+func TestListSessionsForUserIsTheirLiveSessionsNewestFirst(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	for _, u := range []string{"u1", "u2"} {
+		if err := db.CreateUser(t.Context(), u, u, "h", RoleMember, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	newSession(t, db, "old", "u1", now.Add(-2*time.Hour), 24*time.Hour, 48*time.Hour)
+	newSession(t, db, "new", "u1", now, time.Hour, 24*time.Hour)
+	newSession(t, db, "idle-expired", "u1", now.Add(-3*time.Hour), time.Hour, 24*time.Hour)
+	newSession(t, db, "someone-else", "u2", now, time.Hour, 24*time.Hour)
+
+	got, err := db.ListSessionsForUser(t.Context(), "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(got))
+	for _, s := range got {
+		ids = append(ids, s.ID)
+	}
+	if want := []string{"new", "old"}; !slices.Equal(ids, want) {
+		t.Errorf("ListSessionsForUser = %v, want %v", ids, want)
+	}
+	if got[0].IP != "203.0.113.7" || got[0].UserAgent != "test-agent" {
+		t.Errorf("session lost its address or agent: %+v", got[0])
+	}
+}
+
+// Asserts one user cannot end another's session by naming its id, and that ending one's own
+// writes its audit row in the same step.
+func TestDeleteUserSessionOnlyReachesTheUsersOwn(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	for _, u := range []string{"u1", "u2"} {
+		if err := db.CreateUser(t.Context(), u, u, "h", RoleMember, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now()
+	mine := newSession(t, db, "s-mine", "u1", now, time.Hour, 24*time.Hour)
+	theirs := newSession(t, db, "s-theirs", "u2", now, time.Hour, 24*time.Hour)
+
+	err := db.DeleteUserSession(t.Context(), "u1", "s-theirs", nil)
+	if !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("deleting another user's session = %v, want ErrSessionNotFound", err)
+	}
+	if s, _, _ := db.SessionAndUser(t.Context(), theirs); s == nil {
+		t.Fatal("another user's session was ended")
+	}
+
+	audit := &AuditEntry{UserID: "u1", Action: "users.session.revoke", Detail: "{}"}
+	if err := db.DeleteUserSession(t.Context(), "u1", "s-mine", audit); err != nil {
+		t.Fatal(err)
+	}
+	if s, _, _ := db.SessionAndUser(t.Context(), mine); s != nil {
+		t.Error("the user's own session survived")
+	}
+	rows, err := db.ListAuditLog(t.Context(), &AuditFilter{Action: "users.session.revoke"}, "", "", 10)
+	if err != nil || len(rows) != 1 {
+		t.Errorf("audit rows = %d, err %v, want 1", len(rows), err)
 	}
 }

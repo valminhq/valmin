@@ -12,28 +12,33 @@
 	// attached (F2). `error` is a parking state with one way out (`12 §2.4`), so it is the
 	// one that has to look different.
 	const variant = $derived(
-		state === 'error' ? 'destructive' : state === 'running' ? 'default' : 'secondary'
+		state === 'error'
+			? 'destructive'
+			: state === 'running'
+				? 'success'
+				: isTransient(state)
+					? 'warning'
+					: 'secondary'
 	);
 	const label = $derived(state.replaceAll('_', ' '));
 </script>
 
 <span class="inline-flex flex-wrap items-center gap-2">
-	<Badge
-		{variant}
-		class={state === 'running'
-			? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-			: isTransient(state)
-				? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-				: undefined}
+	<Badge {variant}
 		>{label}{#if isTransient(state)}…{/if}</Badge
 	>
 	{#if restartRequired}
 		<Badge
-			variant="outline"
-			class="border-amber-300 text-amber-800 dark:border-amber-800 dark:text-amber-300"
+			variant="warning-outline"
+			title="A launch setting or the password changed. The server runs with the old values until it restarts."
 			>restart required</Badge
 		>
-	{:else if pendingRestart}
-		<Badge variant="outline">pending restart</Badge>
+		<!-- A stopped server picks up saved mod and config changes when it starts; nothing waits. -->
+	{:else if state === 'running' && pendingRestart}
+		<Badge
+			variant="outline"
+			title="Saved mod or configuration changes are waiting for the next start."
+			>pending restart</Badge
+		>
 	{/if}
 </span>

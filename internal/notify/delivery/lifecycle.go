@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/valminhq/valmin/internal/alerts"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/store"
@@ -24,8 +26,11 @@ const lifecycleWait = 2 * time.Minute
 // before lowering it.
 const joinCodeWait = 15 * time.Minute
 
-// announceLifecycle is OnJobFinished's share of a start, restart or stop that succeeded. It runs
-// apart from the finish transaction, which holds the writer the deliveries need.
+// announceLifecycle is OnJobFinished's share of a start, restart, stop or update that succeeded.
+// It runs apart from the finish transaction, which holds the writer the deliveries need.
+//
+// An update apply installs its game build through a game_update job of its own, which announces
+// the build, so the apply announces only the mods it updated.
 func (n *Notifier) announceLifecycle(ctx context.Context, fin *jobs.FinishedJob) {
 	if fin.Status != jobs.StatusSucceeded || fin.InstanceID == nil {
 		return
@@ -39,7 +44,129 @@ func (n *Notifier) announceLifecycle(ctx context.Context, fin *jobs.FinishedJob)
 		n.background(ctx, func(ctx context.Context) {
 			n.NotifyServerStopped(ctx, instanceID, payload.Reason, fin.RequestedBy, lifecycleWait)
 		})
+	case jobs.KindGameUpdate:
+		payload, _ := fin.Payload.(control.GameUpdatePayload)
+		n.background(ctx, func(ctx context.Context) { n.notifyNewBuild(ctx, instanceID, payload.FromBuild) })
+	case jobs.KindUpdateApply:
+		payload, _ := fin.Payload.(control.UpdateApplyPayload)
+		if len(payload.Mods) == 0 {
+			return
+		}
+		mods := make([]string, 0, len(payload.Mods))
+		for _, m := range payload.Mods {
+			mods = append(mods, m.FullName+" "+m.Version)
+		}
+		n.background(ctx, func(ctx context.Context) { n.NotifyGameUpdated(ctx, instanceID, "", mods) })
 	}
+}
+
+// notifyNewBuild reports the build a game update installed, unless the server still runs from,
+// the build it ran before.
+func (n *Notifier) notifyNewBuild(ctx context.Context, instanceID, from string) {
+	inst, err := n.DB.InstanceByID(ctx, instanceID)
+	if err != nil || inst == nil {
+		slog.WarnContext(ctx, "read instance for an update notification",
+			slog.String("instance_id", instanceID), slog.Any("error", err))
+		return
+	}
+	build := instance.InstalledBuilds([]store.Instance{*inst})[inst.ID]
+	if build == "" || build == from {
+		return
+	}
+	n.NotifyGameUpdated(ctx, instanceID, build, nil)
+}
+
+// NotifyGameUpdated reports an update installed on a server to the game_updated rules covering
+// it: build is the game build it moved to, empty when the game did not change, and mods the mods
+// updated. A copy made to test updates is never reported.
+func (n *Notifier) NotifyGameUpdated(ctx context.Context, instanceID, build string, mods []string) {
+	if len(n.rulesFor(ctx, alerts.KindGameUpdated, instanceID)) == 0 {
+		return
+	}
+	inst, err := n.DB.InstanceByID(ctx, instanceID)
+	if err != nil || inst == nil {
+		slog.WarnContext(ctx, "read instance for an update notification",
+			slog.String("instance_id", instanceID), slog.Any("error", err))
+		return
+	}
+	if inst.TestOf != nil {
+		return
+	}
+	at := time.Now().UTC()
+	n.emitByRules(ctx, alerts.KindGameUpdated, instanceID, func(p *alerts.ParamsWire) *notify.Event {
+		return &notify.Event{
+			Kind: notify.KindGameUpdated, InstanceID: inst.ID, InstanceName: inst.Name,
+			Detail: shown(p, []shownField{
+				{alerts.FieldBuild, "Game build", build},
+				{alerts.FieldMods, "Mods updated", strings.Join(mods, ", ")},
+				{alerts.FieldTime, "Updated", formatInstant(at, p.Location())},
+			}),
+		}
+	})
+}
+
+// NotifyUpdateTest reports an update test that ended to the update_test_finished rules covering
+// its server: whether it failed, how the copy's mods loaded and whether the updates are being
+// applied, with what the copy runs that the server does not.
+func (n *Notifier) NotifyUpdateTest(ctx context.Context, res *control.UpdateTestResult) {
+	inst := res.Instance
+	if len(n.rulesFor(ctx, alerts.KindUpdateTestFinished, inst.ID)) == 0 {
+		return
+	}
+	var build string
+	var mods, failed []string
+	if c := res.Changes; c != nil {
+		if c.GameNewer() {
+			build = c.SourceBuildID + " to " + c.CopyBuildID
+		}
+		for _, m := range c.Mods {
+			mods = append(mods, m.FullName+" "+m.Version)
+		}
+	}
+	if v := res.Verdict; v != nil {
+		for _, f := range v.Failed {
+			failed = append(failed, f.FullName)
+		}
+	}
+	at := time.Now().UTC()
+	n.emitByRules(ctx, alerts.KindUpdateTestFinished, inst.ID, func(p *alerts.ParamsWire) *notify.Event {
+		return &notify.Event{
+			Kind: notify.KindUpdateTestFinished, InstanceID: inst.ID, InstanceName: inst.Name,
+			Detail: shown(p, []shownField{
+				{alerts.FieldStatus, "Result", updateTestStatus(res)},
+				{alerts.FieldBuild, "Game build", build},
+				{alerts.FieldMods, "Mods updated", strings.Join(mods, ", ")},
+				{alerts.FieldFailedMods, "Failed to load", strings.Join(failed, ", ")},
+				{alerts.FieldTime, "Finished", formatInstant(at, p.Location())},
+			}),
+		}
+	})
+}
+
+// updateTestStatus is an update test's result as one sentence. Why an apply did not happen is
+// given only when the mods loaded, since otherwise the verdict already says it.
+func updateTestStatus(res *control.UpdateTestResult) string {
+	if res.Error != "" {
+		return "The test failed: " + res.Error
+	}
+	verdict, loaded := "Every mod loaded.", true
+	switch {
+	case res.Verdict == nil:
+		verdict, loaded = "The copy started, but its mods could not be checked.", false
+	case len(res.Verdict.Problems()) > 0:
+		verdict, loaded = "Not every mod loaded: "+strings.Join(res.Verdict.Problems(), "; ")+".", false
+	}
+	switch {
+	case res.Applying && res.Unchanged():
+		return verdict + " The copy runs nothing newer than the server, so it is being removed."
+	case res.Applying:
+		return verdict + " The updates are being applied."
+	case res.NotApplied != "" && loaded:
+		return verdict + " Not applied: " + res.NotApplied + "."
+	case res.NotApplied != "":
+		return verdict + " Not applied."
+	}
+	return verdict
 }
 
 // NotifyServerStarted reports a server that reached running to the server_started rules

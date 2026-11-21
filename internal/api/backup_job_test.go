@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -657,5 +658,60 @@ func TestBackupFlagsAShrunkWorldAndKeepsTheLastOneThatPassed(t *testing.T) {
 		httptest.NewRequest(http.MethodPost, missing, http.NoBody),
 	); rec.Code != http.StatusNotFound {
 		t.Errorf("acknowledge of an unknown archive = %d, want 404", rec.Code)
+	}
+}
+
+// Asserts the list names the archives the next consistent and the next best-effort backup would
+// remove: retention runs over the whole catalogue after either, a pinned archive is never named,
+// and a class with no limit keeps all of its own.
+func TestListBackupsNamesWhatTheNextBackupRemoves(t *testing.T) {
+	t.Parallel()
+	rt, db, root, admin, _ := backupsWorld(t)
+	seed(t, db, `UPDATE instances SET backup_keep_cold = 2, backup_keep_hot = 0 WHERE id = ?`,
+		seededInstanceID)
+	now := time.Now().UTC()
+	for i, a := range []struct {
+		id         string
+		consistent bool
+	}{
+		{"c-new", true}, {"c-mid", true}, {"c-pin", true}, {"c-old", true}, {"h-new", false},
+	} {
+		seedArchive(t, db, root, a.id, store.TriggerManual, a.consistent,
+			now.Add(-time.Duration(i)*time.Hour))
+	}
+	if err := db.SaveSetup(t.Context(), &store.SavedSetup{
+		ID: "setup-a", InstanceID: seededInstanceID, Name: "Pinned",
+		SnapshotJSON: "{}", BackupID: "c-pin",
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, backupsPath, http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list backups = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	var page struct {
+		Consistent []struct {
+			ID        string `json:"id"`
+			CreatedAt string `json:"created_at"`
+		} `json:"removed_by_next_consistent"`
+		BestEffort []struct {
+			ID string `json:"id"`
+		} `json:"removed_by_next_best_effort"`
+	}
+	decodeInto(t, rec, &page)
+
+	got := make([]string, 0, len(page.Consistent))
+	for _, a := range page.Consistent {
+		got = append(got, a.ID)
+		if a.CreatedAt == "" {
+			t.Errorf("%s names no creation time", a.ID)
+		}
+	}
+	if want := []string{"c-mid", "c-old"}; !slices.Equal(got, want) {
+		t.Errorf("next consistent backup removes %v, want %v (the pinned one stays)", got, want)
+	}
+	if len(page.BestEffort) != 1 || page.BestEffort[0].ID != "c-old" {
+		t.Errorf("next best-effort backup removes %v, want only c-old (hot has no limit)", page.BestEffort)
 	}
 }

@@ -1,11 +1,22 @@
 <script lang="ts">
+	import { Textarea } from '#lib/components/ui/textarea/index.js';
 	import { ApiError } from '#lib/api/errors.js';
-	import { playerLists, type PlayerList, type PlayerListKind } from '#lib/api/players.js';
+	import {
+		playerLists,
+		type PlayerList,
+		type PlayerListKind,
+		type PlayerName,
+		type SeenPlayer
+	} from '#lib/api/players.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
 	import * as Alert from '#lib/components/ui/alert/index.js';
+	import { untrack } from 'svelte';
+	import { latestCall } from '#lib/latest.js';
 	import { unsaved } from '#lib/state/dirty.svelte.js';
 	import Problem from '#lib/components/problem.svelte';
+	import SaveFooter from '#lib/components/save-footer.svelte';
+	import PlayerNames from '#lib/components/player-names.svelte';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	let {
@@ -13,7 +24,9 @@
 		kind,
 		title,
 		description,
-		hintId
+		hintId,
+		players = [],
+		revision = 0
 	}: {
 		instanceId: string;
 		kind: PlayerListKind;
@@ -21,6 +34,10 @@
 		description: string;
 		/** The id of the shared hint that describes the field. */
 		hintId: string;
+		/** The accounts the server has seen, for the names shown beside each id. */
+		players?: SeenPlayer[];
+		/** Bumped when the list was changed from elsewhere on the page; reloads a clean field. */
+		revision?: number;
 	} = $props();
 
 	let text = $state('');
@@ -39,8 +56,23 @@
 	);
 
 	$effect(() => {
-		void load();
+		void revision;
+		if (untrack(() => !changed)) void load();
 	});
+
+	// Keyed by the full id and by the part after the platform prefix, so a bare SteamID64 line
+	// finds the account the server printed as Steam_<id>.
+	const namesByID = $derived.by(() => {
+		const byID: Record<string, PlayerName[]> = Object.create(null);
+		for (const p of players) {
+			byID[p.platform_id] = p.names;
+			byID[p.platform_id.slice(p.platform_id.indexOf('_') + 1)] ??= p.names;
+		}
+		return byID;
+	});
+	const entries = $derived(
+		[...new Set(asIDs(text).map((line) => line.trim()))].filter((id) => id !== '')
+	);
 
 	function asText(ids: string[]): string {
 		return ids.join('\n');
@@ -58,15 +90,18 @@
 		failure = null;
 	}
 
+	const begin = latestCall();
+
 	async function load() {
 		loading = true;
+		const current = begin();
 		try {
 			const loaded = await playerLists.get(instanceId, kind);
-			adopt(loaded.data, loaded.etag);
+			if (current()) adopt(loaded.data, loaded.etag);
 		} catch (err) {
-			failure = err;
+			if (current()) failure = err;
 		} finally {
-			loading = false;
+			if (current()) loading = false;
 		}
 	}
 
@@ -111,15 +146,31 @@
 		{:else}
 			<label class="grid gap-2">
 				<span class="text-sm font-medium">Player IDs</span>
-				<textarea
+				<Textarea
 					bind:value={text}
-					rows="7"
+					rows={7}
 					spellcheck="false"
-					class="min-h-32 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20"
+					class="min-h-32 font-mono"
 					aria-invalid={fieldErrors.length > 0}
 					aria-describedby={fieldErrors.length > 0 ? `${hintId} ${kind}-errors` : hintId}
-				></textarea>
+				></Textarea>
 			</label>
+
+			{#if entries.length > 0 && players.length > 0}
+				<ul class="grid max-h-40 gap-1 overflow-auto" aria-label="{title}: names">
+					{#each entries as id (id)}
+						{@const names = namesByID[id] ?? []}
+						<li class="flex flex-wrap items-baseline gap-2">
+							<span class="font-mono text-xs break-all">{id}</span>
+							{#if names.length > 0}
+								<PlayerNames {names} />
+							{:else}
+								<span class="text-xs text-muted-foreground">not seen on this server</span>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			{/if}
 
 			{#if fieldErrors.length > 0}
 				<ul id={`${kind}-errors`} class="grid gap-1 text-sm text-destructive">
@@ -155,23 +206,17 @@
 				</Alert.Root>
 			{/if}
 
-			<div class="flex items-center justify-end gap-2">
-				<Button
-					variant="ghost"
-					size="sm"
-					disabled={!changed || saving}
-					onclick={() => (text = baseline)}
-				>
-					Discard changes
-				</Button>
-				<Button
-					size="sm"
-					disabled={!changed || saving || conflict !== null}
-					onclick={() => void save()}
-				>
-					{saving ? 'Saving…' : 'Save list'}
-				</Button>
-			</div>
+			<SaveFooter
+				saveLabel="Save list"
+				{changed}
+				busy={saving}
+				invalid={conflict !== null}
+				ondiscard={() => {
+					text = baseline;
+					void load();
+				}}
+				onsave={() => void save()}
+			/>
 		{/if}
 	</Card.Content>
 </Card.Root>

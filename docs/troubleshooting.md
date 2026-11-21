@@ -16,6 +16,8 @@ what the sections below ask you to check by hand:
 - When Steam last reported a build.
 - Whether the external URL lets a browser store the panel's session cookies.
 - Whether each running server publishes the UDP ports it was allocated.
+- Whether a game server can reach a cloud provider's metadata service, or an address on
+  your LAN that you name.
 
 The server table includes the last reported free space, container restart count, and
 last exit code, including out-of-memory termination. A server whose container runs another
@@ -37,9 +39,33 @@ probe waits at most five seconds, so a Docker engine or registry that hangs show
 rather than stalling the page. An entry marked
 `unknown` was never measured. Read it as a missing answer, not as a pass.
 
-**Run deep checks** repeats the host data path, game network, and Steam checks. Each starts
-a temporary container, so it runs as a job instead of during a page load. The job succeeds
-even when a check fails, so no failed-job alert fires; the result is on this page.
+**Run deep checks** repeats the host data path, game network, and Steam checks, looks up a
+public name and tries two addresses from the game network. Each starts a temporary container, so it runs as a job
+instead of during a page load. The job succeeds even when a check fails, so no failed-job
+alert fires; the result is on this page.
+
+The two address checks open a TCP connection from a temporary game container, waiting up
+to three seconds:
+
+- **Cloud metadata from game servers** tries `169.254.169.254:80`, where cloud providers
+  hand a machine its credentials.
+- **LAN from game servers** tries the address in
+  [`VALMIN_GAME_LAN_PROBE_ADDRESS`](configuration.md#daemon-settings), such as your router's
+  IP and port 80. Without one it reads **not checked**, never as safe.
+
+A connection that opens, or one the address refuses, is a warning: a refusal still means a
+packet got there. Its entry links to
+[keep game servers off your LAN](advanced-network-setup.md#keep-game-servers-off-your-lan).
+No answer within three seconds passes, but it is not proof that the address is blocked:
+nothing may be listening there. Outside a cloud, the metadata check usually gets no answer.
+A firewall rule that rejects rather than drops looks like a refusal. Any other answer, such
+as a network that reports no route to the address, reads as unknown with the message shown
+beneath it.
+
+**Name lookups from game servers** resolves `api.steampowered.com` from a temporary game
+container set up as a game server is. A failure is a warning: crossplay and mods that look up
+names fail too. Under a [sandboxed runtime](sandboxed-game-servers.md#dns), check
+`VALMIN_GAME_DNS` and that a firewall on the game network lets those resolvers through.
 
 Published ports are not proof that players can connect. The page compares the ports a
 server was allocated against the ports Docker publishes for it, inside this host. It cannot
@@ -187,9 +213,14 @@ SteamCMD and checks the mod registries from the panel's own container.
 ## The mod catalogue is empty or out of date
 
 The panel searches its own copy of each registry's index and refreshes it on the
-interval set by `VALMIN_THUNDERSTORE_SYNC_INTERVAL`, one hour by default. A fresh
+interval set by `VALMIN_THUNDERSTORE_SYNC_INTERVAL`, six hours by default. A fresh
 install has no catalogue until that first refresh finishes, and the **Mods** screen
 says which registry it is still waiting for.
+
+The catalogue is the file `cache/catalogue.db` under the data root. It holds nothing the
+registries cannot send again, so deleting it, with its `-wal` and `-shm` files, while the
+panel is stopped is safe: the panel creates it empty and the startup refresh fills it. With
+`VALMIN_THUNDERSTORE_SYNC_INTERVAL=0` there is no startup refresh, so an admin starts one.
 
 Diagnostics shows the latest refresh result for each registry separately. A run that
 fails for one registry still records the other, and the panel keeps serving the last
@@ -203,6 +234,12 @@ or upstream problem rather than a typo.
 Hexium serves no cache validators, so it re-downloads its whole index on every
 refresh by design. That is expected traffic of a few megabytes per interval and not
 a fault; set `VALMIN_HEXIUM_ENABLED=false` if it is unwanted.
+
+A mod download that fails with "download exceeds size limit: … downloaded N bytes,
+mod_versions declared M" is not a size cap: the registry now serves different bytes under
+that version than the catalogue recorded, because Hexium republishes versions in place. An
+admin can refresh the catalogue with the button beside **Catalogue updated** on **Browse
+mods**; otherwise the next scheduled refresh fixes it. Then try again.
 
 ## A profile code is not found
 
@@ -306,6 +343,17 @@ docker compose logs --tail=80 valmind
 
 Use the newest token. Once setup is complete, restarting does not reopen it.
 
+## Sign-ins are blocked for an account
+
+The panel refuses an account's sign-ins for a short while after too many failed attempts for
+it from any address: 30 in a minute. The sign-in page then says to try again shortly, and
+anyone who signed in to the account from the same browser before can still sign in there. The
+audit log records **Sign-ins blocked** with the address of the first refused attempt, and an
+administrator can have the **Sign-ins blocked** event sent to a destination from the
+administration page. If the attempts are not yours, change the account's password; if they are
+a person who forgot it, wait a minute and use the right one, or
+[reset the password](#reset-an-account-password).
+
 ## Reset an account password
 
 While you are signed in, change your own password from the account menu instead; see
@@ -353,6 +401,15 @@ For both key errors, restore the `secret.key` backed up with this `panel.db`. If
 key is lost for good, see
 [Recover from a lost master key](operations.md#recover-from-a-lost-master-key).
 
+## Panel does not start with a sandboxed runtime
+
+`startup gate: game network self-check: could not run a probe container under runtime ...`
+means Docker cannot run `VALMIN_GAME_RUNTIME`. `unknown or invalid runtime name` says the
+runtime is not registered: compare `docker info --format '{{json .Runtimes}}'` with the
+setting, and see [sandboxed game servers](sandboxed-game-servers.md). Any other message is
+the runtime failing to start a container; for Kata, check that `/dev/kvm` exists. To start
+the panel meanwhile, remove the setting and run `docker compose up -d`.
+
 ## The data disk is full
 
 When the data root has less free space than `data.free_space_floor_bytes` (2 GiB by
@@ -377,6 +434,15 @@ server's console and look at the log around the time of the backup:
 
 If every new backup is flagged, the world on disk is still damaged: restore before the next
 backup runs.
+
+## A container is not claimed by any server
+
+The server list names a container Valmin created but has no record of, for example after
+restoring an older `panel.db`. Choose **Review and recover**. If its image was removed (for
+example by `docker rmi -f`) or its files are gone from the data directory, the page says so and
+offers **Remove container** instead; see
+[Recover an unclaimed server](usage.md#recover-an-unclaimed-server). Until it is recovered or
+removed, it keeps its UDP ports.
 
 ## A game server does not start or mods do not load
 

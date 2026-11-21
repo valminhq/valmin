@@ -48,6 +48,12 @@ const (
 	HostRootKey    = "diag_host_data_root"
 	DataRootKey    = "diag_data_root"
 	GameNetworkKey = "diag_game_network"
+	// MetadataEgressKey and LANEgressKey hold the deep job's reachability probes, which record
+	// their own Status.
+	MetadataEgressKey = "diag_egress_metadata"
+	LANEgressKey      = "diag_egress_lan"
+	// NameLookupKey holds the deep job's name lookup from the game network.
+	NameLookupKey = "diag_name_lookup"
 )
 
 // Check identifiers. They are stable: the SPA groups on them and a bundle is compared
@@ -55,6 +61,7 @@ const (
 const (
 	CheckDockerPing      = "docker.ping"
 	CheckDockerAPI       = "docker.api_version"
+	CheckGameRuntime     = "docker.game_runtime"
 	CheckGameImage       = "docker.game_image"
 	CheckSteamCMDImage   = "docker.steamcmd_image"
 	CheckFreeSpace       = "storage.free_space"
@@ -63,6 +70,9 @@ const (
 	CheckIdentity        = "storage.identity"
 	CheckHostRoot        = "storage.host_data_root"
 	CheckGameNetwork     = "network.game_network"
+	CheckMetadataEgress  = "network.metadata_egress"
+	CheckLANEgress       = "network.lan_egress"
+	CheckNameLookup      = "network.name_lookup"
 	CheckThunderstore    = "network.thunderstore"
 	CheckHexium          = "network.hexium"
 	CheckSteam           = "network.steam"
@@ -91,7 +101,9 @@ type Check struct {
 	// paths and hostnames, so the support bundle omits it; the page shows it.
 	Diagnostic string `json:"diagnostic,omitempty"`
 	// Remedy is what to do about it, and is empty on a passing check.
-	Remedy               string     `json:"remedy,omitempty"`
+	Remedy string `json:"remedy,omitempty"`
+	// Docs links to the guide that explains the remedy, where there is one.
+	Docs                 string     `json:"docs,omitempty"`
 	MeasuredAt           *time.Time `json:"measured_at,omitempty"`
 	LastSuccessfulSyncAt *time.Time `json:"last_successful_sync_at,omitempty"`
 }
@@ -103,6 +115,11 @@ type Observation struct {
 	CheckedAt time.Time `json:"checked_at"`
 	// Source is who recorded it; empty reads as SourceStartup.
 	Source Source `json:"source,omitempty"`
+	// Status is set by a probe that grades its own outcome, with Detail as its finding,
+	// Diagnostic as verbatim output, and Target as the address it probed.
+	Status     Status `json:"status,omitempty"`
+	Diagnostic string `json:"diagnostic,omitempty"`
+	Target     string `json:"target,omitempty"`
 }
 
 // Instance is one server's diagnosable state. Nothing here is console content: those
@@ -138,6 +155,9 @@ type Instance struct {
 	// ImageIssue says the container runs another image than game.image, empty when they agree
 	// or the container was not inspected.
 	ImageIssue string `json:"image_issue,omitempty"`
+	// RuntimeIssue says the container runs under another OCI runtime than game.runtime, empty
+	// when they agree or the container was not inspected.
+	RuntimeIssue string `json:"runtime_issue,omitempty"`
 }
 
 // Report is one diagnostics run.
@@ -272,6 +292,7 @@ func (in *Input) docker(ctx context.Context) []Check {
 			c.unknown("No connection to the container engine.")
 			out = append(out, c.Check)
 		}
+		out = append(out, in.gameRuntime())
 		return out
 	}
 
@@ -288,7 +309,7 @@ func (in *Input) docker(ctx context.Context) []Check {
 	api := in.check(CheckDockerAPI, "Docker", "API version", SourceConfig)
 	api.ok(in.Runtime.APIVersion())
 
-	checks := []Check{ping.Check, api.Check}
+	checks := []Check{ping.Check, api.Check, in.gameRuntime()}
 	// The game image is also proven at every boot: the host_data_root self-check runs a
 	// throwaway from it (10 §1.2). The SteamCMD image is not, so it is the one that first
 	// fails inside a provision.
@@ -327,6 +348,35 @@ func (in *Input) docker(ctx context.Context) []Check {
 		checks = append(checks, c.Check)
 	}
 	return checks
+}
+
+// gameRuntime reports the OCI runtime game containers run under. The startup gate has already
+// run a container under a configured runtime on game.network, or the panel would not be up.
+func (in *Input) gameRuntime() Check {
+	g := in.Config.Game
+	c := in.check(CheckGameRuntime, "Docker", "Game server runtime", SourceConfig)
+	switch {
+	case g.Runtime == "":
+		c.ok("Docker's default runtime. Under runc, game servers share the host's kernel.")
+	case g.Network == "":
+		c.unknown(g.Runtime + ". Not checked at startup, since game.network is empty.")
+	default:
+		c.ok(g.Runtime + ". A container ran under it on " + g.Network + " when the panel started.")
+	}
+	return c.Check
+}
+
+// LookupTarget names what the name lookup probe depends on, so a recorded answer goes stale
+// when game.runtime or game.dns changes.
+func LookupTarget(cfg *config.Config) string {
+	name, resolvers := cfg.Game.Runtime, "Docker's DNS"
+	if name == "" {
+		name = "the default runtime"
+	}
+	if len(cfg.Game.DNS) > 0 {
+		resolvers = strings.Join(cfg.Game.DNS, ",")
+	}
+	return name + " with " + resolvers
 }
 
 // storage reports the data root's headroom, filesystem and owning identity, and replays
@@ -392,7 +442,20 @@ func (in *Input) network(ctx context.Context) []Check {
 		wg.Go(func() { registries[i] = in.registry(ctx, &in.Registries[i]) })
 	}
 	wg.Wait()
-	checks := []Check{gameNetwork.Check, steam.Check}
+	metadata := in.probed(CheckMetadataEgress, "Network", "Cloud metadata from game servers", "")
+	lookup := in.probed(CheckNameLookup, "Network", "Name lookups from game servers", LookupTarget(in.Config))
+	if lookup.Status == StatusWarn {
+		lookup.Remedy = "Set game.dns to resolvers game servers can reach, and let them through any firewall " +
+			"on the game network."
+		lookup.Docs = sandboxDocs
+	}
+	lan := in.probed(CheckLANEgress, "Network", "LAN from game servers", in.Config.Game.LANProbeAddress)
+	if in.Config.Game.LANProbeAddress == "" {
+		lan = in.check(CheckLANEgress, "Network", "LAN from game servers", SourceConfig)
+		lan.unknown("Not checked. Set game.lan_probe_address to an address on your LAN, such as " +
+			"the router's IP and port 80, to test it.")
+	}
+	checks := []Check{gameNetwork.Check, lookup.Check, metadata.Check, lan.Check, steam.Check}
 	for _, r := range registries {
 		checks = append(checks, r...)
 	}
@@ -538,6 +601,34 @@ func (in *Input) recorded(id, group, title, remedy string) *builder {
 	return c
 }
 
+// isolationDocs is the guide to firewalling game servers off private addresses.
+const isolationDocs = "https://github.com/valminhq/valmin/blob/main/docs/advanced-network-setup.md" +
+	"#keep-game-servers-off-your-lan"
+
+// sandboxDocs is the guide to running game servers under a sandboxed runtime.
+const sandboxDocs = "https://github.com/valminhq/valmin/blob/main/docs/sandboxed-game-servers.md"
+
+// probed renders a reachability probe the diagnose job graded itself. A non-empty target must
+// match the address that was probed, so changing the setting does not keep an old answer. A
+// reachable address links to the firewall guide.
+func (in *Input) probed(id, group, title, target string) *builder {
+	c := in.check(id, group, title, SourceJob)
+	obs, found := in.Recorded[id]
+	if !found || obs.Status == "" || (target != "" && obs.Target != target) {
+		c.unknown("Not recorded yet.")
+		c.Remedy = "Run the deep checks."
+		return c
+	}
+	c.at(obs.CheckedAt)
+	c.Status, c.Detail = obs.Status, obs.Detail
+	c.verbatim(obs.Diagnostic)
+	if obs.Status == StatusWarn {
+		c.Remedy = "Firewall game servers off private addresses, or accept that mods can reach it."
+		c.Docs = isolationDocs
+	}
+	return c
+}
+
 // builder accumulates one Check so each probe reads as a verdict rather than a struct
 // literal.
 type builder struct{ Check }
@@ -587,7 +678,7 @@ func (i *Instance) status() Status {
 	switch {
 	case i.PortIssue != "", i.State == "error":
 		return StatusFail
-	case i.ImageIssue != "", i.ModsError != "", i.OOMKilled != nil && *i.OOMKilled,
+	case i.ImageIssue != "", i.RuntimeIssue != "", i.ModsError != "", i.OOMKilled != nil && *i.OOMKilled,
 		i.Running && !i.LogReaderAttached:
 		return StatusWarn
 	case i.InspectionError != "":

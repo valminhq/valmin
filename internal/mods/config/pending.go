@@ -26,15 +26,37 @@ func SettlePending(root *os.Root) error {
 	}
 	var errs []error
 	for _, e := range entries {
-		name := e.Name()
-		if !e.Type().IsRegular() || !strings.HasSuffix(name, ".cfg"+PendingSuffix) {
-			continue
-		}
-		if err := settleOne(root, name); err != nil {
-			errs = append(errs, err)
+		if isPending(e) {
+			errs = append(errs, settleOne(root, e.Name()))
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// maxPendingDepth bounds how many directories below root SettlePendingTree looks.
+const maxPendingDepth = 8
+
+// SettlePendingTree is SettlePending over root and its subdirectories, at most maxPendingDepth
+// deep. Symlinked directories are not followed.
+func SettlePendingTree(root *os.Root) error {
+	var errs []error
+	err := fs.WalkDir(root.FS(), ".", func(p string, d fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			errs = append(errs, err)
+		case d.IsDir() && strings.Count(p, "/") >= maxPendingDepth:
+			return fs.SkipDir
+		case isPending(d):
+			errs = append(errs, settleOne(root, p))
+		}
+		return nil
+	})
+	return errors.Join(append(errs, err)...)
+}
+
+// isPending reports whether e is a regular file holding the pending copy of a .cfg.
+func isPending(e fs.DirEntry) bool {
+	return e.Type().IsRegular() && strings.HasSuffix(e.Name(), ".cfg"+PendingSuffix)
 }
 
 // DropPending removes the pending copy of name, if there is one. A writer that replaces a

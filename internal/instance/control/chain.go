@@ -58,6 +58,36 @@ type ChainPayload struct {
 	Steps []ChainStep `json:"steps"`
 }
 
+// PlayerWarning is the line said to players when steps wait up to left for them to leave.
+func PlayerWarning(steps []ChainStep, left time.Duration) string {
+	action := "goes down for maintenance"
+	if len(steps) == 1 {
+		switch steps[0].Type {
+		case StepRestart:
+			action = "restarts"
+		case StepBackup:
+			action = "restarts for a backup"
+		case StepStop:
+			action = "stops"
+		}
+	}
+	return fmt.Sprintf("The server %s when all players have left, or in %s at the latest.",
+		action, SpokenDuration(left))
+}
+
+// SpokenDuration is d rounded up to whole minutes, or whole hours when it is a multiple of one,
+// as players read it.
+func SpokenDuration(d time.Duration) string {
+	n, unit := int((d+time.Minute-1)/time.Minute), "minute"
+	if n%60 == 0 {
+		n, unit = n/60, "hour"
+	}
+	if n != 1 {
+		unit += "s"
+	}
+	return fmt.Sprintf("%d %s", n, unit)
+}
+
 // ParseChainPayload reads the steps out of a chain schedule's stored payload.
 func ParseChainPayload(raw string) ([]ChainStep, error) {
 	var p ChainPayload
@@ -248,6 +278,18 @@ func (c *Chainer) Submit(ctx context.Context, in *ChainSubmission) (*store.Job, 
 // own and no further step runs.
 func ChainCancelPolicy(string) (cancellable bool, phase string) { return true, "" }
 
+// chainMessage is a finished chain's progress line, naming the steps it skipped.
+func chainMessage(skipped, steps int) string {
+	switch skipped {
+	case 0:
+		return "All steps done"
+	case 1:
+		return fmt.Sprintf("Done, 1 of %d steps skipped", steps)
+	default:
+		return fmt.Sprintf("Done, %d of %d steps skipped", skipped, steps)
+	}
+}
+
 // Run is the chain job.
 func (c *Chainer) Run(in *ChainSubmission) jobs.Runner {
 	steps := in.Steps
@@ -255,6 +297,7 @@ func (c *Chainer) Run(in *ChainSubmission) jobs.Runner {
 		if err := c.requireState(ctx, in.Instance.ID, in.From); err != nil {
 			return jobs.Failed(errcode.InvalidState, err)
 		}
+		skipped := 0
 		for i, step := range steps {
 			if jh.CancelRequested(ctx) {
 				return jobs.Outcome{Status: jobs.StatusCancelled}
@@ -264,6 +307,9 @@ func (c *Chainer) Run(in *ChainSubmission) jobs.Runner {
 			switch {
 			case err == nil:
 				jh.Log(fmt.Sprintf("step %d done", i+1))
+			case errors.Is(err, errStepSkipped):
+				skipped++
+				jh.Log(fmt.Sprintf("step %d %s", i+1, err))
 			case errors.Is(err, jobs.ErrCancelRequested):
 				return jobs.Outcome{Status: jobs.StatusCancelled}
 			case ctx.Err() != nil, errors.Is(err, jobs.ErrShuttingDown):
@@ -275,7 +321,7 @@ func (c *Chainer) Run(in *ChainSubmission) jobs.Runner {
 				}
 			}
 		}
-		jh.Progress(ctx, 100, "all steps done")
+		jh.Progress(ctx, 100, chainMessage(skipped, len(steps)))
 		return jobs.Outcome{Status: jobs.StatusSucceeded}
 	}
 }

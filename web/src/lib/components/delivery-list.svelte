@@ -49,8 +49,11 @@
 		alert_resolved: 'Alert cleared',
 		instance_auto_stopped: 'Server stopped: no players',
 		power_cut_soon: 'Power cut soon',
+		sign_ins_blocked: 'Sign-ins blocked',
 		server_started: 'Server started',
 		server_stopped: 'Server stopped',
+		game_updated: 'Server updated',
+		update_test_finished: 'Update test finished',
 		...Object.fromEntries(GAME_EVENTS.map((e) => [e.kind, e.headline]))
 	};
 

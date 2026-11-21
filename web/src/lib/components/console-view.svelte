@@ -66,6 +66,12 @@
 	const ROW_HEIGHT = 20;
 
 	let scroller = $state<HTMLElement | null>(null);
+	// Whether the log has shown output. The box takes its full height from then on, so a
+	// reconnect that briefly empties the buffer does not shrink the page.
+	let filled = $state(false);
+	$effect(() => {
+		if (buffer.rows.length > 0) filled = true;
+	});
 	let list = $state<VirtualList | null>(null);
 	let following = $state(true);
 
@@ -175,9 +181,24 @@
 		selected = inside ? selection.toString() : '';
 	}
 
-	function time(ts: string): string {
-		const d = new Date(ts);
-		return Number.isNaN(d.valueOf()) ? '' : formatInstant(d, { timeStyle: 'medium' });
+	const day = (ts: string | undefined) => (ts ? formatInstant(ts, { dateStyle: 'medium' }) : '');
+	const tsAt = (index: number) => {
+		const row = buffer.rows[index];
+		return row?.kind === 'line' ? row.ts : undefined;
+	};
+
+	/** A row's time, with its date when the day differs from the row above, so a log spanning
+	 * days says where each one starts. */
+	function stamp(index: number): string {
+		const ts = tsAt(index);
+		const d = new Date(ts ?? '');
+		if (Number.isNaN(d.valueOf())) return '';
+		const time = formatInstant(d, { timeStyle: 'medium' });
+		const before = tsAt(index - 1);
+		// Lines in the same minute share a day in every zone, which spares the date for most rows.
+		if (before && (before.slice(0, 16) === ts?.slice(0, 16) || day(before) === day(ts)))
+			return time;
+		return `${day(ts)} ${time}`;
 	}
 </script>
 
@@ -265,7 +286,10 @@
 		<div
 			bind:this={scroller}
 			{onscroll}
-			class="h-[28rem] overflow-auto rounded-md border bg-muted/30 font-mono text-xs"
+			class={[
+				'overflow-auto rounded-md border bg-muted/30 font-mono text-xs',
+				filled && 'h-[28rem]'
+			]}
 			role="log"
 			aria-label="Server console"
 		>
@@ -302,7 +326,7 @@
 								</span>
 							{:else}
 								<span class="px-2 whitespace-pre">
-									<span class="text-muted-foreground">{time(row.ts)}</span>
+									<span class="text-muted-foreground">{stamp(item.index)}</span>
 									<span class={row.stream === 'stderr' ? 'text-destructive' : ''}
 										>{@render highlighted(row.text, item.index === activeRow)}</span
 									>

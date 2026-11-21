@@ -2,6 +2,7 @@ package instance
 
 import (
 	"math"
+	"strconv"
 	"testing"
 	"time"
 
@@ -74,6 +75,73 @@ func TestCountersGoingBackwardsAreNotAPercentage(t *testing.T) {
 	}
 }
 
+// Network rates are deltas of cumulative counters over the time between samples: unknown
+// without a predecessor and across a restart that reset the counters, zero when idle.
+func TestNetworkRatesAreDeltasOverTime(t *testing.T) {
+	start := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	steps := []struct {
+		name           string
+		rx, tx         uint64
+		after          time.Duration
+		wantRx, wantTx *float64
+	}{
+		{name: "first sample has no predecessor", rx: 10_000, tx: 4_000},
+		{
+			name:   "steady traffic",
+			rx:     30_000,
+			tx:     5_000,
+			after:  2 * time.Second,
+			wantRx: ptr(10_000.0),
+			wantTx: ptr(500.0),
+		},
+		{name: "idle is zero", rx: 30_000, tx: 5_000, after: 2 * time.Second, wantRx: ptr(0.0), wantTx: ptr(0.0)},
+		{name: "restart reset the counters", rx: 1_000, tx: 200, after: 2 * time.Second},
+		{
+			name:   "rates resume after the reset",
+			rx:     5_000,
+			tx:     1_200,
+			after:  4 * time.Second,
+			wantRx: ptr(1_000.0),
+			wantTx: ptr(250.0),
+		},
+		{name: "no time passed", rx: 6_000, tx: 1_300},
+	}
+	s := newSampler()
+	at := start
+	for _, step := range steps {
+		at = at.Add(step.after)
+		got := s.sample(runtime.Stats{RxBytes: step.rx, TxBytes: step.tx}, at)
+		if !sameRate(got.RxBytesPerSecond, step.wantRx) || !sameRate(got.TxBytesPerSecond, step.wantTx) {
+			t.Errorf(
+				"%s: rates = %s, %s, want %s, %s",
+				step.name,
+				rateText(
+					got.RxBytesPerSecond,
+				),
+				rateText(got.TxBytesPerSecond),
+				rateText(step.wantRx),
+				rateText(step.wantTx),
+			)
+		}
+	}
+}
+
+func ptr(v float64) *float64 { return &v }
+
+func sameRate(got, want *float64) bool {
+	if got == nil || want == nil {
+		return got == want
+	}
+	return math.Abs(*got-*want) < 1e-9
+}
+
+func rateText(v *float64) string {
+	if v == nil {
+		return "nil"
+	}
+	return strconv.FormatFloat(*v, 'f', -1, 64)
+}
+
 // TestMemoryPercentageIsAgainstTheContainersLimit is E11. The runtime adapter has already
 // done Q24's inactive_file subtraction; what is decided here is the denominator.
 func TestMemoryPercentageIsAgainstTheContainersLimit(t *testing.T) {
@@ -142,6 +210,88 @@ func TestSamplerPublishesToSubscribers(t *testing.T) {
 		}
 	case <-time.After(SampleInterval * 3):
 		t.Fatal("no sample arrived")
+	}
+}
+
+// TestSamplerIdlesWithoutSubscribers asserts that the short interval lasts only while
+// someone is subscribed.
+func TestSamplerIdlesWithoutSubscribers(t *testing.T) {
+	s := newSampler()
+	if got := s.interval(); got != idleSampleInterval {
+		t.Fatalf("interval() with no subscriber = %v, want %v", got, idleSampleInterval)
+	}
+	cancel := s.Subscribe(func(Sample) {})
+	if got := s.interval(); got != SampleInterval {
+		t.Errorf("interval() with a subscriber = %v, want %v", got, SampleInterval)
+	}
+	cancel()
+	if got := s.interval(); got != idleSampleInterval {
+		t.Errorf("interval() after cancel = %v, want %v", got, idleSampleInterval)
+	}
+}
+
+// TestASubscriberWakesAnIdleSampler asserts that a new subscriber gets a sample
+// SampleInterval after the last one rather than after the idle interval.
+func TestASubscriberWakesAnIdleSampler(t *testing.T) {
+	fake := runtime.NewFake()
+	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{User: containerUser})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.Start(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	fake.Get(id).Stats = runtime.Stats{MemBytes: 1 << 20, MemLimit: 1 << 30}
+	streams := NewStreams(fake, DefaultPatterns, StreamHooks{})
+	defer streams.Shutdown()
+	streams.Open("inst-a", id)
+	sampler := streams.Sampler("inst-a")
+	waitFor(t, func() bool { _, ok := sampler.Latest(); return ok })
+
+	samples := make(chan Sample, 1)
+	cancel := sampler.Subscribe(func(s Sample) {
+		select {
+		case samples <- s:
+		default:
+		}
+	})
+	defer cancel()
+
+	select {
+	case <-samples:
+	case <-time.After(2 * SampleInterval):
+		t.Fatalf("no sample within %v of subscribing to an idle sampler", 2*SampleInterval)
+	}
+}
+
+// TestASubscriberBeforeStartGetsOneFirstSample asserts that a subscriber's wake never brings
+// a sample closer than SampleInterval to the one before it.
+func TestASubscriberBeforeStartGetsOneFirstSample(t *testing.T) {
+	fake := runtime.NewFake()
+	id, err := fake.Create(t.Context(), &runtime.ContainerSpec{User: containerUser})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fake.Start(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	streams := NewStreams(fake, DefaultPatterns, StreamHooks{})
+	defer streams.Shutdown()
+	_, sampler := streams.Attach("inst-a")
+	samples := make(chan Sample, 4)
+	cancel := sampler.Subscribe(func(s Sample) { samples <- s })
+	defer cancel()
+
+	streams.Open("inst-a", id)
+	select {
+	case <-samples:
+	case <-time.After(SampleInterval):
+		t.Fatal("no first sample")
+	}
+	select {
+	case <-samples:
+		t.Fatal("a second sample followed the first at once")
+	case <-time.After(SampleInterval / 2):
 	}
 }
 

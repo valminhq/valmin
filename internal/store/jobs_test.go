@@ -47,6 +47,33 @@ func TestClaimJobRejectsSecondHolder(t *testing.T) {
 	}
 }
 
+// TestClaimJobMarksAScheduledJob asserts the claimed job reads as scheduled exactly when it
+// carries a schedule, as its stored row does.
+func TestClaimJobMarksAScheduledJob(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	scheduleID := NewID()
+	exec(t, db.Writer, `INSERT INTO scheduled_jobs (id, kind, cron) VALUES (?, 'backup', '0 3 * * *')`, scheduleID)
+	until := time.Now().Add(30 * time.Second)
+
+	scheduled := newJob(NewID(), "backup", "instance:a")
+	scheduled.ScheduleID = &scheduleID
+	byHand := newJob(NewID(), "backup", "instance:b")
+	for _, j := range []*Job{scheduled, byHand} {
+		if err := db.ClaimJob(t.Context(), j, "panel:boot-a", until, nil); err != nil {
+			t.Fatal(err)
+		}
+		stored, err := db.JobByID(t.Context(), j.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if j.Scheduled != (j.ScheduleID != nil) || stored.Scheduled != j.Scheduled {
+			t.Errorf("job %s: claimed scheduled = %v, stored %v, want both %v",
+				j.ID, j.Scheduled, stored.Scheduled, j.ScheduleID != nil)
+		}
+	}
+}
+
 // TestClaimJobOnClaimRunsInTheSameTransaction proves the seam a state flip needs: a write
 // made by onClaim commits atomically with the lock and job row, and rolls back with them if
 // onClaim fails — a side effect like an instance's transient state must never land only
@@ -318,13 +345,19 @@ func TestLastJobForInstanceReturnsTheMostRecent(t *testing.T) {
 	}
 }
 
-// TestSweepTerminalJobsKeepsMostRecent500PerInstance is 12 §7's retention sweep.
-func TestSweepTerminalJobsKeepsMostRecent500PerInstance(t *testing.T) {
+// TestSweepTerminalJobsKeepsMostRecent500PerKind asserts the count cap applies per instance and
+// kind, so 600 starts never evict an older backup of the same server.
+func TestSweepTerminalJobsKeepsMostRecent500PerKind(t *testing.T) {
 	t.Parallel()
 	db := open(t)
 	instanceID := seedInstance(t, db, NewID(), 2461)
 
 	now := time.Now()
+	backup := NewID()
+	exec(t, db.Writer, `
+		INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name, payload, created_at, finished_at)
+		VALUES (?, 'backup', 'succeeded', ?, ?, 'test', '{}', ?, ?)`,
+		backup, "instance:"+backup, instanceID, FormatTime(now.Add(-time.Second)), FormatTime(now))
 	for i := 0; i < 600; i++ {
 		id := NewID()
 		exec(t, db.Writer, `
@@ -346,8 +379,11 @@ func TestSweepTerminalJobsKeepsMostRecent500PerInstance(t *testing.T) {
 		`SELECT COUNT(*) FROM job_runs WHERE instance_id = ?`, instanceID).Scan(&remaining); err != nil {
 		t.Fatal(err)
 	}
-	if remaining != 500 {
-		t.Errorf("remaining = %d, want 500", remaining)
+	if remaining != 501 {
+		t.Errorf("remaining = %d, want 500 starts and the backup", remaining)
+	}
+	if got, err := db.JobByID(t.Context(), backup); err != nil || got == nil {
+		t.Errorf("the older backup was swept: %+v, err %v", got, err)
 	}
 }
 
@@ -410,7 +446,7 @@ func TestListJobsForInstancePagesNewestFirst(t *testing.T) {
 		VALUES (?, 'start', 'succeeded', ?, ?, 'test', '{}', ?)`,
 		other, "instance:"+other, theirs, FormatTime(now))
 
-	first, err := db.ListJobsForInstance(t.Context(), mine, "", "", 3, false)
+	first, err := db.ListJobsForInstance(t.Context(), mine, "", "", 3, JobFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -422,7 +458,7 @@ func TestListJobsForInstancePagesNewestFirst(t *testing.T) {
 	}
 
 	last := first[len(first)-1]
-	second, err := db.ListJobsForInstance(t.Context(), mine, FormatTime(last.CreatedAt), last.ID, 3, false)
+	second, err := db.ListJobsForInstance(t.Context(), mine, FormatTime(last.CreatedAt), last.ID, 3, JobFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,7 +482,7 @@ func TestListJobsForInstancePagesNewestFirst(t *testing.T) {
 		t.Errorf("saw %d distinct jobs across both pages, want 5", len(seen))
 	}
 
-	if rows, err := db.ListJobsForInstance(t.Context(), NewID(), "", "", 10, false); err != nil {
+	if rows, err := db.ListJobsForInstance(t.Context(), NewID(), "", "", 10, JobFilter{}); err != nil {
 		t.Fatal(err)
 	} else if len(rows) != 0 {
 		t.Errorf("an instance with no jobs = %d rows, want 0", len(rows))
@@ -476,7 +512,7 @@ func TestListJobsForInstanceScheduledOnly(t *testing.T) {
 			id, "instance:"+id, mine, sched, sched != nil, FormatTime(now.Add(time.Duration(i)*time.Second)))
 	}
 
-	first, err := db.ListJobsForInstance(t.Context(), mine, "", "", 2, true)
+	first, err := db.ListJobsForInstance(t.Context(), mine, "", "", 2, JobFilter{ScheduledOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +520,14 @@ func TestListJobsForInstanceScheduledOnly(t *testing.T) {
 		t.Fatalf("first page = %d rows, want 2", len(first))
 	}
 	last := first[1]
-	second, err := db.ListJobsForInstance(t.Context(), mine, FormatTime(last.CreatedAt), last.ID, 2, true)
+	second, err := db.ListJobsForInstance(
+		t.Context(),
+		mine,
+		FormatTime(last.CreatedAt),
+		last.ID,
+		2,
+		JobFilter{ScheduledOnly: true},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +559,7 @@ func TestScheduledRunOutlivesItsSchedule(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rows, err := db.ListJobsForInstance(t.Context(), mine, "", "", 10, true)
+	rows, err := db.ListJobsForInstance(t.Context(), mine, "", "", 10, JobFilter{ScheduledOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -551,5 +594,91 @@ func TestUsernamesByID(t *testing.T) {
 				t.Errorf("UsernamesByID(%v) = %v, want %v", tc.ids, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestJobListsLeaveTheLogOut asserts the history and running lists read no log, while one job's
+// detail and the stale sweep, which writes the log back, still read it.
+func TestJobListsLeaveTheLogOut(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	ctx := t.Context()
+	instanceID := seedInstance(t, db, NewID(), 2491)
+	id := NewID()
+	exec(t, db.Writer, `
+		INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name, payload,
+			lease_owner, log, created_at, started_at)
+		VALUES (?, 'start', 'running', ?, ?, 'test', '{}', 'gone:boot', 'line one', ?, ?)`,
+		id, "instance:"+id, instanceID, Now(), Now())
+
+	listed, err := db.ListJobsForInstance(ctx, instanceID, "", "", 10, JobFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, err := db.RunningJobs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, jobs := range map[string][]Job{"history": listed, "running": running} {
+		if len(jobs) != 1 || jobs[0].ID != id || jobs[0].Log != nil {
+			t.Errorf("%s = %+v, want the one job without its log", name, jobs)
+		}
+	}
+
+	detail, err := db.JobByID(ctx, id)
+	if err != nil || detail == nil || detail.Log == nil || *detail.Log != "line one" {
+		t.Errorf("JobByID = %+v, %v; want the log", detail, err)
+	}
+	stale, err := db.StaleJobs(ctx, "this:boot")
+	if err != nil || len(stale) != 1 || stale[0].Log == nil {
+		t.Errorf("StaleJobs = %+v, %v; want the job with its log", stale, err)
+	}
+}
+
+// TestLatestJobsPickTheNewestPerGroup asserts the terminal read returns the newest terminal job
+// of each instance and kind, global jobs grouped by kind, and the clean read the newest job per
+// instance that recorded a clean flag.
+func TestLatestJobsPickTheNewestPerGroup(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	ctx := t.Context()
+	instanceID := seedInstance(t, db, NewID(), 2496)
+	base := time.Now().Add(-time.Hour)
+	insert := func(kind, status string, instance *string, clean *bool, age time.Duration) string {
+		t.Helper()
+		id := NewID()
+		exec(t, db.Writer, `
+			INSERT INTO job_runs (id, kind, status, lock_key, instance_id, instance_name, payload,
+				clean, created_at)
+			VALUES (?, ?, ?, ?, ?, 'test', '{}', ?, ?)`,
+			id, kind, status, "lock:"+id, instance, clean, FormatTime(base.Add(-age)))
+		return id
+	}
+	yes, no := true, false
+	insert("stop", "succeeded", &instanceID, &yes, 3*time.Minute)
+	newestStop := insert("stop", "failed", &instanceID, &no, 2*time.Minute)
+	backup := insert("backup", "succeeded", &instanceID, nil, time.Minute)
+	insert("update_check", "failed", nil, nil, 2*time.Minute)
+	newestCheck := insert("update_check", "succeeded", nil, nil, time.Minute)
+	insert("stop", "running", &instanceID, nil, 0)
+
+	terminal, err := db.LatestTerminalJobPerInstanceKind(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, j := range terminal {
+		got[j.ID] = true
+	}
+	if len(terminal) != 3 || !got[newestStop] || !got[backup] || !got[newestCheck] {
+		t.Errorf("latest terminal jobs = %v, want the newest stop, the backup and the newest check", got)
+	}
+
+	clean, err := db.LatestCleanSignalPerInstance(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(clean) != 1 || clean[0].ID != newestStop || clean[0].Clean == nil || *clean[0].Clean {
+		t.Errorf("latest clean signals = %+v, want the newest stop with clean=false", clean)
 	}
 }

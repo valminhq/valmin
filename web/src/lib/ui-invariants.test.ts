@@ -386,8 +386,10 @@ describe('the backups panel', () => {
 });
 
 describe('the schedules editor', () => {
-	// The expression is the daemon's to validate: it answers an invalid one with the field and
-	// its own help. A second parser here would drift from the one that actually runs.
+	// The expression is the daemon's to validate and interpret: it answers an invalid one with the
+	// field and its own help. The editor reads an expression back only through readCron, which
+	// accepts nothing the builder could not have produced, so no second parser can drift from the
+	// one that runs.
 	it('the cron expression is not parsed in the SPA', () => {
 		expect(
 			readFileSync(join('src', 'lib', 'components', 'schedules-editor.svelte'), 'utf8'),
@@ -512,7 +514,9 @@ describe('every page says which page it is', () => {
 			join('src', 'routes', 'instances', '[id]', '+layout.svelte'),
 			'utf8'
 		);
-		expect(serverLayout).toMatch(/<h1 class="[^"]*">\{instance\?\.name \?\? 'Server'\}<\/h1>/);
+		expect(serverLayout).toMatch(
+			/<h1 class="[^"]*">\s*\{instance\?\.name \?\? 'Server'\}\s*<\/h1>/
+		);
 		expect(serverLayout, 'a deep link never ran the dashboard load').toContain(
 			'instanceList.ensure()'
 		);
@@ -589,5 +593,50 @@ describe('the mod registry switch', () => {
 			expect(text, `${name} colours the version`).toContain('sourceText[');
 			expect(text, `${name} also names the registry`).toContain('sourceLabel[');
 		}
+	});
+});
+
+describe('warning and success colours', () => {
+	// The theme has no warning or success token, so the palette classes are written once:
+	// in the Badge variants and in `lib/tone.ts`. The console's search highlight and the
+	// public status page's dot are fills, not statuses of text, and keep their own.
+	it('come from the Badge variants or lib/tone.ts', () => {
+		const exempt = [
+			join('src', 'lib', 'tone.ts'),
+			join('src', 'lib', 'components', 'console-view.svelte'),
+			join('src', 'routes', 'status', '[id]', '+page.svelte')
+		];
+		for (const [path, text] of sources()) {
+			if (exempt.includes(path)) continue;
+			expect(text, `${path} spells out a status colour`).not.toMatch(
+				/\b(?:bg|text|border)-(?:amber|emerald|green|yellow|orange)-\d{2,3}\b/
+			);
+		}
+	});
+});
+
+describe('confirming a destructive action', () => {
+	// The browser's own dialog cannot say what is lost in the panel's words or style. The
+	// unsaved-changes guard is the exception: it has to answer before navigation continues.
+	it('uses the panel dialog, never the browser one, outside the navigation guard', () => {
+		const guard = join('src', 'routes', '+layout.svelte');
+		const offenders = sources()
+			.filter(([path, text]) => path !== guard && /(?<!function )\bconfirm\(/.test(text))
+			.map(([path]) => path);
+		expect(offenders).toEqual([]);
+	});
+});
+
+describe('saving edits', () => {
+	// The bar pinned to the bottom of a full-page editor is one component, so its look and its
+	// Discard and Save wording cannot drift between pages.
+	it('pins the unsaved-changes bar only through SaveBar', () => {
+		const bar = join('src', 'lib', 'components', 'save-bar.svelte');
+		const offenders = sources()
+			.filter(
+				([path, text]) => path !== bar && /sticky bottom-0/.test(text) && /changed/.test(text)
+			)
+			.map(([path]) => path);
+		expect(offenders, 'use <SaveBar> instead').toEqual([]);
 	});
 });

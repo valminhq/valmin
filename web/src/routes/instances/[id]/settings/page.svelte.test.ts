@@ -49,6 +49,22 @@ afterEach(() => {
 });
 
 describe('the server settings screen', () => {
+	// A refused read is a problem to retry, not proof that the server is gone.
+	it('explains a throttled read without calling the server missing', async () => {
+		daemon.on('GET', '/instances/inst-a', () => {
+			const response = envelope(429, 'rate_limited', 'Too many requests. Try again shortly.');
+			response.headers.set('Retry-After', '60');
+			return response;
+		});
+		daemon.on('GET', '/game/options', () => Response.json(gameOptions()));
+		session.permissions = permissions('inst-a', [actions.settings]);
+		render(Page);
+
+		await screen.findByText('Too many requests. Try again shortly.');
+		expect(screen.getByText('You can try again in 60 s.')).toBeTruthy();
+		expect(screen.queryByText('This server is not here.')).toBeNull();
+	});
+
 	// PATCH semantics (`11 §1.1`): absent means unchanged. A form that sent every field would
 	// re-encrypt an untouched password on every save and rewrite settings nobody edited.
 	it('sends only the fields the operator changed', async () => {
@@ -57,7 +73,10 @@ describe('the server settings screen', () => {
 			Response.json(instance({ server_name: 'Renamed' }))
 		);
 
-		expect((saveButton() as HTMLButtonElement).disabled, 'nothing changed yet').toBe(true);
+		expect(
+			screen.queryByRole('button', { name: 'Discard changes' }),
+			'nothing changed yet'
+		).toBeNull();
 		await type('Server name', '  Renamed  ');
 		await click(saveButton());
 
@@ -83,7 +102,7 @@ describe('the server settings screen', () => {
 				'Normalised By Daemon'
 			)
 		);
-		expect(screen.getByText('Nothing to save.')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Discard changes' })).toBeNull();
 	});
 
 	// A new password locks every player out until someone tells them, and the panel
@@ -164,7 +183,7 @@ describe('the server settings screen', () => {
 		await open([actions.view]);
 
 		expect(screen.getByText('You can see these settings but not change them.')).toBeTruthy();
-		expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Discard changes' })).toBeNull();
 		for (const label of ['Server name', 'Server password', 'Memory limit (MB)']) {
 			expect((screen.getByLabelText(label) as HTMLInputElement).disabled, label).toBe(true);
 		}
@@ -192,7 +211,10 @@ describe('the server settings screen', () => {
 	// A saved launch edit applies on the next start, and the screen says so whenever the
 	// daemon reports the running server is behind.
 	it('shows the restart notice only when the daemon says a restart is needed', async () => {
-		await open([actions.settings], instance({ restart_required: true }));
+		await open(
+			[actions.settings, actions.restart],
+			instance({ state: 'running', restart_required: true })
+		);
 		expect(screen.getByText('Restart to apply settings')).toBeTruthy();
 	});
 
@@ -248,10 +270,69 @@ describe('the server settings screen', () => {
 			status_notice: '',
 			status_connect_info: 'Join play.example\nAsk for the password.'
 		});
-		await vi.waitFor(() => expect(screen.getByText('Nothing to save.')).toBeTruthy());
+		await vi.waitFor(() =>
+			expect(screen.queryByRole('button', { name: 'Discard changes' })).toBeNull()
+		);
 		expect((screen.getByLabelText('How to join') as HTMLTextAreaElement).value).toBe(
 			'Join play.example\nAsk for the password.'
 		);
+	});
+
+	it('turns on how to join and the profile code for the status page', async () => {
+		await open([actions.settings], instance({ status_published: true }));
+		daemon.on('PATCH', '/instances/inst-a', () =>
+			Response.json(
+				instance({ status_published: true, status_show_join: true, status_show_modpack: true })
+			)
+		);
+
+		await click(screen.getByRole('switch', { name: 'Show how to join' }));
+		expect(screen.getByText(/Set a join address under Connections/)).toBeTruthy();
+		await click(screen.getByRole('switch', { name: 'Show the profile code' }));
+		await click(saveButton());
+
+		await vi.waitFor(() => expect(patches()).toHaveLength(1));
+		expect(patches()[0].body).toEqual({ status_show_join: true, status_show_modpack: true });
+	});
+
+	it('edits the join address, sending it trimmed', async () => {
+		await open([actions.settings]);
+		daemon.on('PATCH', '/instances/inst-a', () =>
+			Response.json(
+				instance({ join_host: 'play.example.com', join_address: 'play.example.com:2456' })
+			)
+		);
+
+		await type('Join address', '  play.example.com  ');
+		await click(saveButton());
+
+		await vi.waitFor(() => expect(patches()).toHaveLength(1));
+		expect(patches()[0].body).toEqual({ join_host: 'play.example.com' });
+		await vi.waitFor(() =>
+			expect(screen.queryByRole('button', { name: 'Discard changes' })).toBeNull()
+		);
+		expect((screen.getByLabelText('Join address') as HTMLInputElement).value).toBe(
+			'play.example.com'
+		);
+	});
+
+	it('renders a rejected join address beside its field', async () => {
+		await open([actions.settings]);
+		daemon.on('PATCH', '/instances/inst-a', () =>
+			envelope(422, 'validation_failed', 'Some settings are invalid.', [
+				{
+					field: 'join_host',
+					code: 'invalid',
+					message: 'Enter a host name or IP address without a port, such as play.example.com.'
+				}
+			])
+		);
+
+		await type('Join address', 'play.example.com:2456');
+		await click(saveButton());
+
+		const input = screen.getByLabelText('Join address');
+		await vi.waitFor(() => expect(input.getAttribute('aria-invalid')).toBe('true'));
 	});
 
 	it('renders a rejected status text beside its field, and locks it for a viewer', async () => {

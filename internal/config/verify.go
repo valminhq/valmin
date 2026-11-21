@@ -126,7 +126,9 @@ func hostRootMismatch(cfg *Config, code int, got, stderr string) error {
 // reads the answer: a refusal proves the route, since nothing is listening; a timeout is a
 // dropped packet, which is what a daemon on some other network gets (ADR-190).
 //
-// An empty game.network leaves containers on Docker's default bridge and skips the check.
+// The probe runs under game.runtime with the game resolv.conf mounted, so a runtime Docker does
+// not know or cannot start fails here. An empty game.network leaves containers on Docker's
+// default bridge and skips the check.
 func VerifyGameNetwork(ctx context.Context, rt runtime.Runtime, cfg *Config, probePort int) error {
 	if cfg.Game.Network == "" {
 		return nil
@@ -145,7 +147,9 @@ func VerifyGameNetwork(ctx context.Context, rt runtime.Runtime, cfg *Config, pro
 		Labels: map[string]string{
 			runtime.LabelThrowaway: gameNetworkCheckPurpose, runtime.LabelThrowawayRoot: cfg.Data.HostRoot,
 		},
-		Network: cfg.Game.Network,
+		Network:    cfg.Game.Network,
+		OCIRuntime: cfg.Game.Runtime,
+		Binds:      cfg.GameResolvBinds(),
 	})
 	if err != nil {
 		return gameNetworkProbeFailed(cfg, err)
@@ -187,10 +191,16 @@ func VerifyGameNetwork(ctx context.Context, rt runtime.Runtime, cfg *Config, pro
 	return gameNetworkUnreachable(cfg, address, err)
 }
 
-// gameNetworkProbeFailed reports a probe that never got as far as a dial. Every one of those
-// is the same operator question — does this network exist and can the panel use it — so they
-// carry one message, whichever Docker call reported it.
+// gameNetworkProbeFailed reports a probe that never got as far as a dial: the network or, when
+// game.runtime is set, the runtime is missing or unusable.
 func gameNetworkProbeFailed(cfg *Config, err error) error {
+	if cfg.Game.Runtime != "" {
+		return fmt.Errorf(
+			"game network self-check: could not run a probe container under runtime %q on %q: %w\n"+
+				"the runtime must be registered with the Docker daemon (`docker info` lists its "+
+				"runtimes) and the network created by the deployment, never by the panel",
+			cfg.Game.Runtime, cfg.Game.Network, err)
+	}
 	return fmt.Errorf(
 		"game network self-check: could not run a probe container on %q: %w\n"+
 			"the network is created by the deployment, never by the panel: "+

@@ -349,7 +349,7 @@
 								>
 									<input
 										type="checkbox"
-										class="accent-primary"
+										class="size-4 accent-primary"
 										checked={draft.channels.includes(c.id)}
 										onchange={(ev) =>
 											(draft.channels = toggled(draft.channels, c.id, ev.currentTarget.checked))}

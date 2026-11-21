@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"os"
+	"path"
 	"path/filepath"
 
 	"github.com/valminhq/valmin/internal/command"
@@ -46,6 +48,10 @@ func (i *Installer) commitInstall(
 				fmt.Errorf("back up what %s replaces: %w", p.fullName, err))
 		}
 	}
+	before, modWrote, err := trackConfigs(ctx, i.DB, inst, replacedConfigs(pkgs), backupDir)
+	if err != nil {
+		return jobs.Failed(errcode.Internal, fmt.Errorf("record the config files the install replaces: %w", err))
+	}
 	if err := writePrevRows(payload.StagingDir, pkgs); err != nil {
 		return jobs.Failed(errcode.Internal, err)
 	}
@@ -83,22 +89,66 @@ func (i *Installer) commitInstall(
 		return i.rollbackInstall(ctx, inst, payload, pkgs, err)
 	}
 
-	h.Progress(ctx, 100, fmt.Sprintf("installed %d packages", len(pkgs)))
-	return jobs.Outcome{
+	dropReplacedPending(ctx, h, serverRoot, pkgs)
+	revs, err := installedConfigRevisions(inst.ID, pkgs, before, modWrote)
+	if err != nil {
+		h.Log(fmt.Sprintf("warning: the new config files are not in their history: %v", err))
+	}
+
+	h.Progress(ctx, 100, "Installed "+packageCount(len(pkgs)))
+	out := jobs.Outcome{
 		Status:   jobs.StatusSucceeded,
 		OnFinish: finishInstall(inst.ID, i.installedBepInEx(ctx, inst, pkgs), removedNames(pkgs)),
-		// The console key is flipped only after the install commits. It is in no manifest,
-		// because an install never overwrites an existing config, so a crash between the
-		// edit and the commit would undo every file and leave the edit standing.
+		// The console key is flipped only after the install commits. The edit is in no manifest,
+		// so a crash between it and the commit would undo every file and leave the edit standing.
 		AfterFinish: func(ctx context.Context) {
 			i.ensureConsoleLogging(ctx, serverRoot, pkgs)
 			i.ensureRCON(ctx, inst, pkgs)
 		},
 	}
+	return out.PrependFinish(recordInstalledConfigs(revs))
 }
 
+// dropReplacedPending removes the pending copy of every config file the install overwrote, so
+// the next settle cannot lay an older panel edit over the mod's new version. A copy it cannot
+// remove is a warning in the job log.
+func dropReplacedPending(ctx context.Context, h *jobs.Handle, serverRoot string, pkgs []*stagedPackage) {
+	root, err := os.OpenRoot(serverRoot)
+	if err != nil {
+		h.Log(fmt.Sprintf("warning: pending config edits not cleared: %v", err))
+		return
+	}
+	defer func() { _ = root.Close() }()
+	for _, p := range pkgs {
+		for _, c := range p.changes {
+			if c.Action != installer.ActionOverwrite || !installer.UserConfig(c.Dest) {
+				continue
+			}
+			if err := modconfig.DropPending(root, filepath.FromSlash(c.Dest)); err != nil {
+				h.Log(fmt.Sprintf("warning: pending config edit not cleared: %v", err))
+				slog.WarnContext(ctx, "pending config edit not cleared after a mod update",
+					slog.String("path", c.Dest), slog.Any("error", err))
+			}
+		}
+	}
+}
+
+// wrote reports whether the install writes dest, in any package.
+func wrote(pkgs []*stagedPackage, dest string) bool {
+	for _, p := range pkgs {
+		for _, c := range p.changes {
+			if c.Dest == dest && c.Action != installer.ActionSkip {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ensureRCON configures the RCON plugin when this install placed it or wrote its config file.
 func (i *Installer) ensureRCON(ctx context.Context, inst *store.Instance, pkgs []*stagedPackage) {
-	if i.Commands == nil || versionOf(pkgs, command.ValheimRCONPackage) == "" {
+	placed := versionOf(pkgs, command.ValheimRCONPackage) != ""
+	if i.Commands == nil || !placed && !wrote(pkgs, path.Join(instance.ConfigDir, command.ConfigFile)) {
 		return
 	}
 	if err := i.Commands.Configure(ctx, inst.ID, inst.DataDir); err != nil {
@@ -124,23 +174,23 @@ func (i *Installer) installedBepInEx(ctx context.Context, inst *store.Instance, 
 	return version
 }
 
-// ensureConsoleLogging turns BepInEx's console logging on, only when this install placed
-// the framework package. A file it cannot change is a warning, never a failure: the server
-// runs fine, the panel just cannot read its plugin lines.
+// ensureConsoleLogging turns BepInEx's console logging on when this install placed the
+// framework package or wrote its config file. A file it cannot change is a warning, never a
+// failure: the server runs fine, the panel just cannot read its plugin lines.
 func (i *Installer) ensureConsoleLogging(ctx context.Context, serverRoot string, pkgs []*stagedPackage) {
-	if versionOf(pkgs, BepInExPack) == "" {
+	if versionOf(pkgs, BepInExPack) == "" && !wrote(pkgs, bepinexConfig) {
 		return
 	}
-	path := filepath.Join(serverRoot, filepath.FromSlash(bepinexConfig))
-	changed, err := modconfig.EnsureConsoleLogging(path)
+	file := filepath.Join(serverRoot, filepath.FromSlash(bepinexConfig))
+	changed, err := modconfig.EnsureConsoleLogging(file)
 	switch {
 	case err != nil:
 		slog.WarnContext(ctx, "bepinex console logging unconfirmed; this server may load its "+
 			"plugins without the panel being able to see it",
-			slog.String("path", path), slog.Any("error", err))
+			slog.String("path", file), slog.Any("error", err))
 	case changed:
 		slog.InfoContext(ctx, "turned on BepInEx console logging so plugin loading is visible",
-			slog.String("path", path))
+			slog.String("path", file))
 	}
 }
 
@@ -206,4 +256,12 @@ func (i *Installer) writeManifests(ctx context.Context, instanceID string, pkgs 
 		return fmt.Errorf("record the file manifests: %w", err)
 	}
 	return nil
+}
+
+// packageCount is n packages in words, singular for one.
+func packageCount(n int) string {
+	if n == 1 {
+		return "1 package"
+	}
+	return fmt.Sprintf("%d packages", n)
 }

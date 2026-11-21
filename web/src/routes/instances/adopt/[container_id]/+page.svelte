@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { unsaved } from '#lib/state/dirty.svelte.js';
+	import PageHeader from '#lib/components/page-header.svelte';
+	import { pageNarrow } from '#lib/layout.js';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
@@ -21,9 +24,9 @@
 	import { Label } from '#lib/components/ui/label/index.js';
 	import { Switch } from '#lib/components/ui/switch/index.js';
 	import Problem from '#lib/components/problem.svelte';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import WorldModifiers from '#lib/components/world-modifiers.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import ShieldCheck from '@lucide/svelte/icons/shield-check';
 
 	const containerID = $derived(page.params.container_id ?? '');
@@ -34,6 +37,10 @@
 	let failure = $state<unknown>(null);
 	let busy = $state(false);
 	let job = $state<Job | null>(null);
+	// The preview failed, so there is nothing to confirm; an unrecoverable one can be removed.
+	let previewFailed = $state(false);
+	let unrecoverable = $state(false);
+	let confirmRemove = $state(false);
 
 	let name = $state('');
 	let serverName = $state('');
@@ -89,8 +96,26 @@
 				options = gameOptions;
 				if (!name) name = found.instance_id;
 			})
-			.catch((err) => (failure = err));
+			.catch((err) => {
+				failure = err;
+				previewFailed = true;
+				unrecoverable =
+					err instanceof ApiError &&
+					(err.details.reason === 'image_missing' || err.details.reason === 'data_missing');
+			});
 	});
+
+	async function remove() {
+		busy = true;
+		try {
+			await adoption.remove(containerID);
+			await goto(resolve('/'));
+		} catch (err) {
+			failure = err;
+		} finally {
+			busy = false;
+		}
+	}
 
 	async function submit(event: SubmitEvent) {
 		event.preventDefault();
@@ -122,6 +147,9 @@
 		}
 	}
 
+	// The fields the form needs typed; the rest start from the container or a default.
+	unsaved(() => job === null && (serverName !== '' || worldName !== '' || password !== ''));
+
 	async function finished(result: Job) {
 		if (result.status !== 'succeeded' || !result.instance_id) return;
 		await Promise.all([instanceList.load(), session.refreshPermissions()]);
@@ -129,12 +157,8 @@
 	}
 </script>
 
-<main class="mx-auto grid max-w-2xl gap-4 p-6">
-	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
-		<ArrowLeft /> Servers
-	</Button>
-
-	<h1 class="text-2xl font-semibold tracking-tight">Recover an existing server</h1>
+<main class={pageNarrow}>
+	<PageHeader title="Recover an existing server" />
 	<Problem error={failure} />
 
 	{#if !canAdopt}
@@ -284,7 +308,24 @@
 				</form>
 			</Card.Content>
 		</Card.Root>
-	{:else}
+	{:else if unrecoverable}
+		<div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-4">
+			<p class="text-sm text-muted-foreground">
+				Removing the container frees its ports. Its files in the data directory, if any, stay where
+				they are.
+			</p>
+			<Button variant="destructive" disabled={busy} onclick={() => (confirmRemove = true)}>
+				Remove container
+			</Button>
+		</div>
+		<DestructiveConfirm
+			bind:open={confirmRemove}
+			title="Remove this container?"
+			description="The container is deleted for good. Files on disk are not touched."
+			confirmLabel="Remove container"
+			onconfirm={remove}
+		/>
+	{:else if !previewFailed}
 		<p class="text-sm text-muted-foreground">Checking the container…</p>
 	{/if}
 </main>

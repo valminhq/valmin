@@ -45,6 +45,22 @@ func TestStartingAnUpdateTestNeedsSomethingToTest(t *testing.T) {
 	}
 }
 
+// TestAnUpdateTestOfNothingPendingIsRefused keeps a full copy of the server from being built
+// and booted to test updates that do not exist.
+func TestAnUpdateTestOfNothingPendingIsRefused(t *testing.T) {
+	t.Parallel()
+	w := newBackupWorld(t, "stopped")
+
+	rec := sendUpdateTest(t, w.rt, w.admin, http.MethodPost, updateTestPath(), `{"mods":true}`)
+
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "nothing to test") {
+		t.Fatalf("update test with no mod update = %d %s, want 409 saying there is nothing to test", rec.Code, rec.Body)
+	}
+	if n := len(jobsOfKind(t, w.db, "update_test")); n != 0 {
+		t.Errorf("%d update_test rows were created by a refused request, want 0", n)
+	}
+}
+
 func TestAnUpdateTestIsRefusedWhenTheHostHasNoMemoryForTheCopy(t *testing.T) {
 	t.Parallel()
 	w := newBackupWorld(t, "stopped")
@@ -69,7 +85,7 @@ func TestAServerHasOneUpdateTestCopyAtATime(t *testing.T) {
 	w.rt.instances.ctl.UpdateTester.AvailableMemoryMB = func() (int, error) { return 1 << 20, nil }
 	seedTestCopy(t, w.db, "stopped")
 
-	rec := sendUpdateTest(t, w.rt, w.admin, http.MethodPost, updateTestPath(), `{"mods":true}`)
+	rec := sendUpdateTest(t, w.rt, w.admin, http.MethodPost, updateTestPath(), `{"game":true}`)
 
 	if rec.Code != http.StatusConflict || errCode(t, rec) != "invalid_state" {
 		t.Fatalf("second update test = %d %s, want 409 invalid_state", rec.Code, rec.Body)

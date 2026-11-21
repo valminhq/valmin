@@ -108,6 +108,37 @@ func TestTheGateChecksAreReportedFromTheirRecordedOutcome(t *testing.T) {
 	}
 }
 
+// TestAReachabilityProbeIsReportedWithItsOwnGrade asserts the deep job's metadata probe
+// keeps the status it recorded and links to the firewall guide, and that the LAN probe reads
+// as not checked while no address is configured.
+func TestAReachabilityProbeIsReportedWithItsOwnGrade(t *testing.T) {
+	t.Parallel()
+
+	rt, db, admin := bootstrappedRouter(t)
+	obs := diag.Observation{
+		Status: diag.StatusWarn, Detail: "A game server opened a connection.",
+		CheckedAt: time.Now().UTC(), Source: diag.SourceJob,
+	}
+	if err := db.KVSet(t.Context(), diag.MetadataEgressKey, obs); err != nil {
+		t.Fatalf("record metadata probe: %v", err)
+	}
+
+	report := readDiagnostics(t, rt, admin)
+	metadata := checkByID(t, report, diag.CheckMetadataEgress)
+	if metadata.Status != diag.StatusWarn || metadata.Detail != obs.Detail || metadata.Docs == "" {
+		t.Errorf("metadata = %s %q docs %q, want the recorded warning with a docs link",
+			metadata.Status, metadata.Detail, metadata.Docs)
+	}
+	if lan := checkByID(
+		t,
+		report,
+		diag.CheckLANEgress,
+	); lan.Status != diag.StatusUnknown ||
+		lan.Source != diag.SourceConfig {
+		t.Errorf("lan = %s from %s, want unknown from config with no address set", lan.Status, lan.Source)
+	}
+}
+
 // TestTheBundleDownloadsAsAZipAndIsAudited asserts the operator gets a file and the panel
 // records who took a copy of its state.
 func TestTheBundleDownloadsAsAZipAndIsAudited(t *testing.T) {
@@ -292,6 +323,50 @@ func TestAnUnreadableDataRootIsAFailingRowNotAnError(t *testing.T) {
 	}
 }
 
+// TestAServerReportsARuntimeOtherThanTheGameRuntime asserts a container created under Docker's
+// default runtime is flagged once game.runtime names another.
+func TestAServerReportsARuntimeOtherThanTheGameRuntime(t *testing.T) {
+	t.Parallel()
+	rt, db, _ := bootstrappedRouter(t)
+	inst := seedStoppedInstance(t, db, "Unsandboxed")
+	id := "container-id"
+	inst.ContainerID = &id
+	h := rt.diagnostics.Instances
+	h.Cfg.Game.Runtime = "runsc"
+	h.Runtime = &diagnosticRuntime{
+		Runtime:   h.Runtime,
+		container: runtime.Container{Spec: runtime.ContainerSpec{Image: h.Cfg.Game.Image}},
+	}
+
+	row := rt.diagnostics.summarise(t.Context(), []store.Instance{*inst})[0]
+	if !strings.Contains(row.RuntimeIssue, "Docker's default") || !strings.Contains(row.RuntimeIssue, "runsc") {
+		t.Errorf("runtime issue = %q, want it to name both runtimes", row.RuntimeIssue)
+	}
+	if row.ImageIssue != "" {
+		t.Errorf("image issue = %q, want none for the configured image", row.ImageIssue)
+	}
+}
+
+// TestAServerOnTheDaemonsDefaultRuntimeHasNoIssue asserts that, with no game.runtime, a
+// container reading back the daemon's default under another name than runc is not flagged.
+func TestAServerOnTheDaemonsDefaultRuntimeHasNoIssue(t *testing.T) {
+	t.Parallel()
+	rt, db, _ := bootstrappedRouter(t)
+	inst := seedStoppedInstance(t, db, "GPU host")
+	id := "container-id"
+	inst.ContainerID = &id
+	h := rt.diagnostics.Instances
+	h.Runtime = &diagnosticRuntime{
+		Runtime:   h.Runtime,
+		container: runtime.Container{Spec: runtime.ContainerSpec{Image: h.Cfg.Game.Image, OCIRuntime: "nvidia"}},
+	}
+
+	row := rt.diagnostics.summarise(t.Context(), []store.Instance{*inst})[0]
+	if row.RuntimeIssue != "" {
+		t.Errorf("runtime issue = %q, want none without game.runtime", row.RuntimeIssue)
+	}
+}
+
 // TestAServerReportsTheImageItsContainerRuns asserts a container built from another image
 // than game.image is reported with its own image and an issue.
 func TestAServerReportsTheImageItsContainerRuns(t *testing.T) {
@@ -326,7 +401,7 @@ func TestEachRegistryProbeSendsItsOwnETag(t *testing.T) {
 	t.Parallel()
 	rt, db, _ := bootstrappedRouter(t)
 	for src, etag := range map[source.Source]string{source.Thunderstore: `"ts-1"`, source.Hexium: `"hx-1"`} {
-		if err := db.KVSet(t.Context(), manager.ETagKey(src), etag); err != nil {
+		if err := db.CatalogueStateSet(t.Context(), manager.ETagKey(src), etag); err != nil {
 			t.Fatal(err)
 		}
 	}

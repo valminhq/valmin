@@ -116,6 +116,16 @@ func Observe(state State, r Reality) Verdict {
 // keeps every row from having to remember it.
 func (r Reality) up() bool { return r.Found && r.Running }
 
+// ReasonUnresponsive is the reason the watchdog gives for a running server that has stopped
+// logging its periodic status line and is left running.
+const ReasonUnresponsive = "the server stopped logging its periodic status line and is probably hung"
+
+// ReasonUnresponsiveRestarting is ReasonUnresponsive for a server the watchdog is restarting.
+const ReasonUnresponsiveRestarting = ReasonUnresponsive + "; the watchdog is restarting it"
+
+// ReasonOOMKilled is the reason the observer gives for a server the kernel killed for memory.
+const ReasonOOMKilled = "container was killed by the out-of-memory killer; the world may be damaged"
+
 // observeRunning is 08 §6.1 step 3's second bullet plus 08 §6's two guards.
 //
 // A non-zero exit that is neither an OOM-kill nor a crash loop still lands in `stopped`, per
@@ -130,7 +140,7 @@ func observeRunning(r Reality) Verdict {
 		return Verdict{
 			To:     StateError,
 			Stop:   true,
-			Reason: "container was killed by the out-of-memory killer; the world may be damaged",
+			Reason: ReasonOOMKilled,
 		}
 	}
 	if r.CrashLooping {

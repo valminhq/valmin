@@ -1,6 +1,7 @@
 package instance
 
 import (
+	"encoding/json"
 	"errors"
 	"maps"
 	"slices"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/runtime"
 )
 
@@ -401,5 +403,144 @@ func TestValidateAdoptionLaunchNamesANetworkMismatch(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "valmin-games") {
 		t.Errorf("refusal does not name the network this panel uses:\n%v", err)
+	}
+}
+
+// A sandbox puts the container under its runtime with the game resolv.conf mounted read-only,
+// and either change moves the spec hash, so the next start rebuilds the container.
+func TestBuildSpecCarriesTheSandbox(t *testing.T) {
+	plain, err := BuildSpec(validSpec(), "valmin/valheim:dev", "valmin-games", 120*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := validSpec()
+	s.Sandbox = Sandbox{Runtime: "runsc", ResolvConf: "/srv/valmin/" + config.GameResolvFile}
+	sandboxed, err := BuildSpec(s, "valmin/valheim:dev", "valmin-games", 120*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if sandboxed.OCIRuntime != "runsc" {
+		t.Errorf("OCIRuntime = %q, want runsc", sandboxed.OCIRuntime)
+	}
+	resolv := runtime.Bind{
+		HostPath: "/srv/valmin/" + config.GameResolvFile, ContainerPath: "/etc/resolv.conf", ReadOnly: true,
+	}
+	if !slices.Contains(sandboxed.Binds, resolv) {
+		t.Errorf("Binds = %+v, want the read-only resolv.conf %+v", sandboxed.Binds, resolv)
+	}
+	if slices.ContainsFunc(plain.Binds, func(b runtime.Bind) bool { return b.ContainerPath == "/etc/resolv.conf" }) {
+		t.Errorf("Binds = %+v, want no resolv.conf without a sandbox", plain.Binds)
+	}
+	if plain.Labels[LabelSpecHash] == sandboxed.Labels[LabelSpecHash] {
+		t.Error("a sandboxed spec hashes like a plain one, so moving to a runtime would never rebuild")
+	}
+}
+
+// The default runtime leaves no trace in the hashed JSON, so containers created before a
+// runtime could be named keep their hash.
+func TestDefaultRuntimeStaysOutOfTheSpecHash(t *testing.T) {
+	spec, err := BuildSpec(validSpec(), "valmin/valheim:dev", "valmin-games", 120*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "OCIRuntime") {
+		t.Errorf("the hashed spec names a default runtime:\n%s", raw)
+	}
+}
+
+// An orphan on another runtime fails adoption with a refusal naming both runtimes.
+func TestValidateAdoptionLaunchNamesARuntimeMismatch(t *testing.T) {
+	spec, err := BuildSpec(validSpec(), "valmin/valheim:dev", "valmin-games", 120*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphan := &runtime.Container{
+		ID: "c1", Name: spec.Name, Image: spec.Image, Labels: spec.Labels,
+		Spec: *spec,
+		Security: runtime.ContainerSecurity{
+			CapDrop:     []string{"ALL"},
+			SecurityOpt: []string{"no-new-privileges"},
+			MemorySwap:  spec.MemoryBytes,
+		},
+		ImageDefaults: &runtime.ContainerImageDefaults{},
+	}
+
+	launch := validSpec()
+	launch.Sandbox = Sandbox{Runtime: "runsc"}
+	err = ValidateAdoptionLaunch(orphan, launch, "valmin/valheim:dev", "valmin-games", 120*time.Second)
+	if err == nil {
+		t.Fatal("a container on the default runtime was adopted by a panel that runs runsc")
+	}
+	if !strings.Contains(err.Error(), "Docker's default") || !strings.Contains(err.Error(), `"runsc"`) {
+		t.Errorf("refusal does not name both runtimes:\n%v", err)
+	}
+}
+
+// A daemon whose default runtime is not runc reads that name back on a container created
+// without one; it matches a panel that names no runtime, and not one that names another.
+func TestAdoptionComparesTheRuntimeOnlyWhenOneIsNamed(t *testing.T) {
+	spec, err := BuildSpec(validSpec(), "valmin/valheim:dev", "valmin-games", 120*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := *spec
+	observed.OCIRuntime = "nvidia"
+	defaults := &runtime.ContainerImageDefaults{}
+
+	if !adoptionSpecsEqual(spec, &observed, defaults) {
+		t.Error("a container on the daemon's default runtime differs from a spec naming none")
+	}
+	named := *spec
+	named.OCIRuntime = "runsc"
+	if adoptionSpecsEqual(&named, &observed, defaults) {
+		t.Error("a container on nvidia matches a spec naming runsc")
+	}
+}
+
+// The spec hash of a plain game container is pinned, so a field added to every spec, which
+// would recreate every existing container on its next start, fails here first.
+func TestThePlainSpecHashIsStable(t *testing.T) {
+	spec, err := BuildSpec(validSpec(), "valmin/valheim:dev", "valmin-games", 120*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = "67de2196a0858607031574003cd5e1668187daee1a3c4dadc8b0e25b0bb24e96"
+	if got := spec.Labels[LabelSpecHash]; got != want {
+		t.Errorf("plain spec hash = %s, want %s", got, want)
+	}
+}
+
+// A panel that names no runtime adopts an orphan whose daemon reports its default runtime
+// under another name than runc.
+func TestValidateAdoptionLaunchAcceptsTheDaemonsDefaultRuntime(t *testing.T) {
+	spec, err := BuildSpec(validSpec(), "valmin/valheim:dev", "valmin-games", 120*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphan := &runtime.Container{
+		ID: "c1", Name: spec.Name, Image: spec.Image, Labels: spec.Labels,
+		Spec: *spec,
+		Security: runtime.ContainerSecurity{
+			CapDrop:     []string{"ALL"},
+			SecurityOpt: []string{"no-new-privileges"},
+			MemorySwap:  spec.MemoryBytes,
+		},
+		ImageDefaults: &runtime.ContainerImageDefaults{},
+	}
+	orphan.Spec.OCIRuntime = "nvidia"
+
+	if err := ValidateAdoptionLaunch(
+		orphan,
+		validSpec(),
+		"valmin/valheim:dev",
+		"valmin-games",
+		120*time.Second,
+	); err != nil {
+		t.Errorf("ValidateAdoptionLaunch = %v, want the orphan adopted", err)
 	}
 }

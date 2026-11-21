@@ -3,9 +3,11 @@
 	import AppHeader from '#lib/components/app-header.svelte';
 	import { ModeWatcher } from 'mode-watcher';
 	import { beforeNavigate, goto } from '$app/navigation';
-	import { page, updated } from '$app/state';
+	import { navigating, page, updated } from '$app/state';
 	import { resolve } from '$app/paths';
 	import ReloadNotice from '#lib/components/reload-notice.svelte';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
+	import { loading, navigationStarted } from '#lib/state/busy.svelte.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { instanceList } from '#lib/state/instances.svelte.js';
 	import { socket } from '#lib/socket/index.svelte.js';
@@ -56,6 +58,7 @@
 		'/admin/rclone-callback': 'Remote backups',
 		'/admin/diagnostics': 'Diagnostics',
 		'/account/password': 'Change password',
+		'/account/sessions': 'Signed-in devices',
 		'/account/date-time': 'Date and time'
 	};
 
@@ -73,8 +76,9 @@
 			page.url.pathname.startsWith('/redeem/')
 	);
 
+	// The public status page is for anonymous visitors and never asks who is signed in.
 	$effect(() => {
-		void session.load();
+		if (!isStatus) void session.load();
 	});
 
 	// The socket exists exactly while somebody is signed in. Opening one before that would
@@ -98,6 +102,14 @@
 			void goto(loginWithReturn('/login', page.url));
 			return;
 		}
+		if (
+			session.user?.password_change_required &&
+			!isPublic &&
+			page.url.pathname !== '/account/password'
+		) {
+			void goto(resolve('account/password'), { replaceState: true });
+			return;
+		}
 		if (session.user && isPublic) {
 			// A path that matches no route is refused by goto and opened with a full page load.
 			const path = returnPath(page.url);
@@ -112,14 +124,29 @@
 	// is still running the current build.
 	$effect(() => socket.onConnected(() => void updated.check()));
 
-	// Guards every editor holding unsaved work. The prompt is the browser's own because
-	// beforeNavigate is synchronous and the unload path can show nothing else. Once a newer
-	// build exists, a link or goto to another page becomes a full page load so it lands on that
-	// build. Back and Forward stay client-side, because cancelling one makes Kit step history
-	// back again; so do query-only changes, which callers make with replace and keep focus for.
+	// Where a link or goto was headed when unsaved work stopped it, while the panel asks.
+	let leaving = $state<URL | null>(null);
+	// A link to the page already open replaces it, as Kit itself would.
+	let leavingSamePage = false;
+	let confirmLeave = $state(false);
+
+	// Guards every editor holding unsaved work. A link or goto inside the panel is held and the
+	// panel's own dialog asks; leaving the page, and Back or Forward, use the browser's prompt,
+	// since beforeNavigate is synchronous there and cancelling Back makes Kit step history again.
+	// Once a newer build exists, a link or goto to another page becomes a full page load so it
+	// lands on that build. Back and Forward stay client-side; so do query-only changes, which
+	// callers make with replace and keep focus for.
 	beforeNavigate((nav) => {
+		if (!nav.shallow) navigationStarted();
 		if (nav.shallow && nav.type === 'goto') return;
 		if (hasUnsaved()) {
+			if (!nav.willUnload && nav.type !== 'popstate' && nav.to) {
+				nav.cancel();
+				leaving = nav.to.url;
+				leavingSamePage = nav.to.url.href === nav.from?.url.href;
+				confirmLeave = true;
+				return;
+			}
 			if (!confirm('Leave without saving? The changes on this page will be lost.')) {
 				nav.cancel();
 				return;
@@ -158,10 +185,66 @@
 	Skip to content
 </a>
 
+{#if loading.count > 0 || navigating.to}
+	<div class="loading-bar" role="progressbar" aria-label="Loading the page"></div>
+{/if}
 {#if session.user && !isPublic && !isStatus}
 	<AppHeader />
 {/if}
 <ReloadNotice />
+<DestructiveConfirm
+	bind:open={confirmLeave}
+	title="Leave without saving?"
+	description="The changes on this page will be lost."
+	confirmLabel="Leave"
+	cancelLabel="Stay"
+	onconfirm={() => {
+		const to = leaving;
+		leaving = null;
+		discardUnsaved();
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
+		if (to) void goto(to.pathname + to.search + to.hash, { replaceState: leavingSamePage });
+	}}
+/>
 <div id="main" tabindex="-1">
 	{@render children()}
 </div>
+
+<style>
+	/* Shows only for a load that outlasts the delay, so a fast page never flashes it. */
+	.loading-bar {
+		position: fixed;
+		top: env(safe-area-inset-top, 0px);
+		left: 0;
+		z-index: 60;
+		height: 2px;
+		width: 100%;
+		background: var(--primary);
+		opacity: 0;
+		transform-origin: left;
+		animation:
+			loading-show 0s linear 300ms forwards,
+			loading-slide 1.4s ease-in-out 300ms infinite;
+	}
+
+	@keyframes loading-show {
+		to {
+			opacity: 1;
+		}
+	}
+
+	@keyframes loading-slide {
+		0% {
+			transform: translateX(-100%) scaleX(0.3);
+		}
+		100% {
+			transform: translateX(100%) scaleX(0.3);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.loading-bar {
+			animation: loading-show 0s linear 300ms forwards;
+		}
+	}
+</style>

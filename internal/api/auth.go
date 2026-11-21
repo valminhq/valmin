@@ -1,10 +1,12 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/api/middleware"
@@ -33,7 +35,10 @@ type Auth struct {
 	// LogoutURL is where the browser goes after sign-out when a reverse proxy owns the
 	// sign-in. Empty sends it to the panel's own sign-in page.
 	LogoutURL string
+	// Alerts is told when an account's sign-ins are blocked. Nil sends nothing.
+	Alerts signInAlerter
 
+	blockedAlert     *ratelimit.Limiter
 	setupByIP        *ratelimit.Limiter
 	loginByIP        *ratelimit.Limiter
 	loginByUsername  *ratelimit.Limiter
@@ -53,6 +58,7 @@ func NewAuth(
 ) *Auth {
 	return &Auth{
 		Bootstrap: bootstrap, Sessions: sessions, Gate: gate, Keeper: keeper, Devices: devices,
+		blockedAlert:     ratelimit.New(1, time.Hour, 1),
 		setupByIP:        perMinute(setupPerMinute, setupBurst),
 		loginByIP:        perMinute(loginPerMinute, loginBurst),
 		loginByUsername:  perMinute(loginNamePerMinute, loginNameBurst),
@@ -68,6 +74,71 @@ func authRoutes(rt *routeTable, a *Auth) {
 	rt.Handle("POST /api/v1/auth/logout", http.HandlerFunc(a.logout))
 	rt.Handle("GET /api/v1/auth/me", http.HandlerFunc(a.me))
 	rt.Handle("POST /api/v1/me/password", http.HandlerFunc(a.changePassword))
+	rt.Handle("GET /api/v1/me/sessions", http.HandlerFunc(a.listSessions))
+	rt.Handle("DELETE /api/v1/me/sessions/{id}", http.HandlerFunc(a.revokeSession))
+}
+
+// sessionView is one of the caller's sessions, as the list of signed-in devices shows it.
+type sessionView struct {
+	ID         string    `json:"id"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+	IP         string    `json:"ip"`
+	UserAgent  string    `json:"user_agent"`
+	// Current is true for the session making this request.
+	Current bool `json:"current"`
+}
+
+// listSessions is GET /me/sessions: the caller's own live sessions, with the current one marked.
+func (a *Auth) listSessions(w http.ResponseWriter, r *http.Request) {
+	caller := middleware.UserFrom(r.Context())
+	if caller == nil {
+		apierr.Write(w, r, apierr.New(errcode.Unauthenticated))
+		return
+	}
+	sessions, err := a.Sessions.List(r.Context(), caller.ID)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	current := middleware.SessionIDFrom(r.Context())
+	views := make([]sessionView, 0, len(sessions))
+	for i := range sessions {
+		s := &sessions[i]
+		views = append(views, sessionView{
+			ID: s.ID, CreatedAt: s.CreatedAt, LastSeenAt: s.LastSeenAt,
+			IP: s.IP, UserAgent: s.UserAgent, Current: s.ID == current,
+		})
+	}
+	JSON(w, r, http.StatusOK, NewPage(views, nil))
+}
+
+// revokeSession is DELETE /me/sessions/{id}: the caller signs out one of their own devices. A
+// session that is not theirs answers 404 as one that does not exist.
+func (a *Auth) revokeSession(w http.ResponseWriter, r *http.Request) {
+	caller := middleware.UserFrom(r.Context())
+	if caller == nil {
+		apierr.Write(w, r, apierr.New(errcode.Unauthenticated))
+		return
+	}
+	id := r.PathValue("id")
+	detail, err := userAuditDetail(map[string]string{auditTargetUser: caller.ID})
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	err = a.Sessions.Revoke(r.Context(), caller.ID, id, &store.AuditEntry{
+		UserID: caller.ID, Action: "users.session.revoke", Detail: detail,
+		IP: middleware.ClientIPFrom(r.Context()).String(),
+	})
+	switch {
+	case errors.Is(err, store.ErrSessionNotFound):
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+	case err != nil:
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 type setupRequest struct {
@@ -155,6 +226,9 @@ func (a *Auth) login(w http.ResponseWriter, r *http.Request) {
 		limiter, key = a.failedByDevice, device
 	}
 	if ok, retry := limiter.Allow(key); !ok {
+		if limiter == a.failedByUsername {
+			a.reportBlocked(r, body.Username)
+		}
 		middleware.RefuseRateLimited(w, r, retry)
 		return
 	}
@@ -163,6 +237,39 @@ func (a *Auth) login(w http.ResponseWriter, r *http.Request) {
 		limiter.Refund(key)
 	}
 }
+
+// signInAlerter is told that an account's sign-ins are being refused.
+type signInAlerter interface {
+	NotifySignInsBlocked(ctx context.Context, username, address string)
+}
+
+// reportBlocked records that sign-ins to an account are refused after repeated failures from
+// anywhere, and alerts about it. It does so once an hour per name, and only for a name an account
+// has, so a guesser cannot raise alerts by inventing names. The work runs after the request, on a
+// context its client cannot cancel, so neither an abandoned request nor the time it takes shows in
+// the refusal.
+func (a *Auth) reportBlocked(r *http.Request, username string) {
+	if ok, _ := a.blockedAlert.Allow(username); !ok {
+		return
+	}
+	address := middleware.ClientIPFrom(r.Context()).String()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), blockedReportTimeout)
+	go func() {
+		defer cancel()
+		known, err := a.Sessions.RecordBlockedSignIns(ctx, username, address)
+		if err != nil {
+			a.blockedAlert.Refund(username)
+			slog.ErrorContext(ctx, "record blocked sign-ins", slog.Any("error", err))
+			return
+		}
+		if known && a.Alerts != nil {
+			a.Alerts.NotifySignInsBlocked(ctx, username, address)
+		}
+	}()
+}
+
+// blockedReportTimeout bounds the audit write and the alert for one blocked account.
+const blockedReportTimeout = 10 * time.Second
 
 // trustedDevice is the request's trusted-browser token for username, or "" when it carries
 // none that is current.

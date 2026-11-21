@@ -1,7 +1,10 @@
 <script lang="ts">
+	import EmptyState from '#lib/components/empty-state.svelte';
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { Tabs } from 'bits-ui';
 	import { modOffer, catalogueStatus, installedUpdateTarget } from '#lib/mod-catalogue.js';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { ApiError } from '#lib/api/errors.js';
@@ -69,8 +72,25 @@
 
 	const id = $derived(page.params.id ?? '');
 
-	// A q in the address opens the browse tab with that search, as an install hint links it.
-	let activeTab = $derived(page.url.searchParams.get('q') ? 'browse' : 'installed');
+	// The address names the open tab. A q without one opens the browse tab with that search,
+	// as an install hint links it.
+	let activeTab = $derived.by(() => {
+		// A tab opened here lives in the shallow address, which Back restores without page.url.
+		const tab = (page.shallow?.url ?? page.url).searchParams.get('tab');
+		if (tab === 'installed' || tab === 'browse' || tab === 'players') return tab;
+		return page.url.searchParams.get('q') ? 'browse' : 'installed';
+	});
+
+	/** Opens a tab and writes it to the address, so a reload or a shared link lands on it. */
+	function showTab(tab: string) {
+		activeTab = tab;
+		const rest = query ? '&q=' + encodeURIComponent(query) : '';
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
+		void goto(`${resolve('/instances/[id]/mods', { id })}?tab=${tab}${rest}`, {
+			shallow: true,
+			replace: true
+		});
+	}
 	let instance = $state<Instance | null>(null);
 	let installed = $state<InstalledMod[]>([]);
 	/** Installs waiting for the server to stop. */
@@ -627,7 +647,8 @@
 	 * searched for the text every file name starts with, which keeps all of them. */
 	function configHref(files: string[]): string {
 		const [only] = files;
-		if (files.length === 1) return resolve('/instances/[id]/configs/[file]', { id, file: only });
+		if (files.length === 1)
+			return resolve('/instances/[id]/configs/[file]', { id, file: encodeURIComponent(only) });
 		const q = sharedPrefix(files);
 		return q
 			? resolve(`/instances/[id]/configs?q=${encodeURIComponent(q)}`, { id })
@@ -643,9 +664,7 @@
 	function when(timestamp: string | null): string {
 		if (!timestamp) return '';
 		const date = new Date(timestamp);
-		return Number.isNaN(date.getTime())
-			? ''
-			: formatInstant(date, { dateStyle: 'medium', timeStyle: 'short' });
+		return Number.isNaN(date.getTime()) ? '' : formatInstant(date);
 	}
 
 	function hideBrokenIcon(event: Event) {
@@ -654,16 +673,9 @@
 </script>
 
 <div class="grid gap-6">
-	<header class="grid gap-3">
-		<div class="flex flex-wrap items-center justify-between gap-3">
-			<div class="grid gap-1">
-				<h2 class="text-2xl font-semibold tracking-tight">Mods</h2>
-				<p class="text-sm text-muted-foreground">
-					What this server loads, and the catalogue to add from.
-				</p>
-			</div>
-		</div>
-	</header>
+	<PageHeader title="Mods" level={2}>
+		What this server loads, and the catalogue to add from.
+	</PageHeader>
 
 	<Problem error={failure} />
 	{#if detail}
@@ -735,7 +747,7 @@
 		<!-- ADR-012: the mods on disk and the mods in memory have diverged, and only a restart
 		     closes that. Said here as well as on the server page because this is the screen
 		     that just caused it. -->
-		<RestartNotice {instance} />
+		<RestartNotice {instance} canRestart={session.allowed(id).includes(actions.restart)} />
 	{/if}
 
 	{#if jobId}
@@ -793,22 +805,22 @@
 			</ul>
 		</section>
 	{/if}
-	<Tabs.Root bind:value={activeTab} class="grid gap-5">
+	<Tabs.Root value={activeTab} onValueChange={showTab} class="grid gap-5">
 		<Tabs.List aria-label="Mod tasks" class="flex w-fit flex-wrap gap-1 rounded-lg bg-muted p-1">
 			<Tabs.Trigger
 				value="installed"
-				class="rounded-md px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+				class="rounded-md px-2 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm sm:px-4"
 				>Installed {#if !loading}<span class="ml-1 tabular-nums">{installed.length}</span
 					>{/if}</Tabs.Trigger
 			>
 			<Tabs.Trigger
 				value="browse"
-				class="rounded-md px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+				class="rounded-md px-2 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm sm:px-4"
 				>Browse mods</Tabs.Trigger
 			>
 			<Tabs.Trigger
 				value="players"
-				class="rounded-md px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+				class="rounded-md px-2 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm sm:px-4"
 				>Player modpack</Tabs.Trigger
 			>
 		</Tabs.List>
@@ -845,17 +857,12 @@
 				{#if loading}
 					<p class="text-sm text-muted-foreground">Loading…</p>
 				{:else if installed.length === 0}
-					<div class="grid gap-1 rounded-lg border border-dashed p-6 text-center">
-						<p class="font-medium">No mods yet</p>
-						<p class="text-sm text-muted-foreground">
-							Browse the catalogue to find mods for this server.
-						</p>
-						<Button
-							variant="outline"
-							class="mt-2 justify-self-center"
-							onclick={() => (activeTab = 'browse')}>Browse mods</Button
-						>
-					</div>
+					<EmptyState title="No mods yet">
+						Browse the catalogue to find mods for this server.
+						{#snippet actions()}
+							<Button variant="outline" onclick={() => showTab('browse')}>Browse mods</Button>
+						{/snippet}
+					</EmptyState>
 				{:else}
 					<ul class="divide-y rounded-lg border">
 						{#each chosen as mod (mod.full_name)}
@@ -881,7 +888,8 @@
 											class="size-4 transition-transform group-open:rotate-90 motion-reduce:transition-none"
 										/>
 										{dependencies.length}
-										{dependencies.length === 1 ? 'dependency' : 'dependencies'} came with them
+										{dependencies.length === 1 ? 'dependency' : 'dependencies'} came with
+										{chosen.length === 1 ? 'it' : 'them'}
 									</summary>
 									<ul class="divide-y border-t">
 										{#each dependencies as mod (mod.full_name)}
@@ -986,7 +994,7 @@
 								<span
 									class="grid size-10 shrink-0 place-items-center rounded-md border bg-muted text-sm font-medium text-muted-foreground"
 								>
-									{mod.name.slice(0, 1).toUpperCase()}
+									<span class="col-start-1 row-start-1">{mod.name.slice(0, 1).toUpperCase()}</span>
 									{#if mod.icon_url}
 										<img
 											src={mod.icon_url}
@@ -1001,8 +1009,10 @@
 
 								<div class="grid min-w-0 flex-1 gap-1">
 									<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-										<span class="font-medium">{mod.name}</span>
-										<span class="text-sm text-muted-foreground">by {mod.namespace}</span>
+										<span class="font-medium wrap-anywhere">{mod.name}</span>
+										<span class="text-sm wrap-anywhere text-muted-foreground"
+											>by {mod.namespace}</span
+										>
 										<Badge variant="outline" class={sourceBadge[mod.source]}>
 											{sourceLabel[mod.source] ?? mod.source}
 										</Badge>
@@ -1018,7 +1028,9 @@
 										{/if}
 									</div>
 									{#if mod.description}
-										<p class="max-w-prose text-sm text-muted-foreground">{mod.description}</p>
+										<p class="max-w-prose text-sm wrap-anywhere text-muted-foreground">
+											{mod.description}
+										</p>
 									{/if}
 									<p class="text-xs text-muted-foreground tabular-nums">
 										<span class={sourceText[mod.source]}>{mod.latest_version}</span>
@@ -1203,11 +1215,11 @@
 
 {#snippet installedRow(mod: InstalledMod)}
 	{@const newer = installedUpdateTarget(mod)}
-	<div class="grid min-w-0 flex-1 gap-1">
+	<div class="grid min-w-0 flex-[1_1_16rem] gap-1">
 		<div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
 			<span
 				class={[
-					'font-medium',
+					'font-medium wrap-anywhere',
 					mod.load_status === 'failed' && 'text-destructive',
 					!mod.enabled && 'text-muted-foreground'
 				]}
@@ -1215,7 +1227,7 @@
 				{mod.name || mod.full_name}
 			</span>
 			{#if mod.namespace}
-				<span class="text-sm text-muted-foreground">by {mod.namespace}</span>
+				<span class="text-sm wrap-anywhere text-muted-foreground">by {mod.namespace}</span>
 			{/if}
 			<span class={['text-sm tabular-nums', sourceText[mod.source] ?? 'text-muted-foreground']}>
 				{mod.version}
@@ -1260,12 +1272,14 @@
 					<CircleCheck class="size-3" />
 					loaded
 				</span>
+			{:else if mod.load_status === 'pending'}
+				<span class="text-xs text-muted-foreground">loads on next start</span>
 			{/if}
 		</div>
 		{#if mod.load_status === 'failed' && mod.load_error}
 			<!-- The loader's own line, verbatim: it names the missing dependency or the
 			     exception, which is the next thing the operator has to go and look up. -->
-			<p class="text-sm break-words text-destructive">{mod.load_error}</p>
+			<p class="text-sm wrap-anywhere text-destructive">{mod.load_error}</p>
 		{/if}
 		{#if mod.not_indexed}
 			<p class="text-sm text-muted-foreground">
@@ -1291,7 +1305,9 @@
 	</div>
 	{#if canManage}
 		<div class="grid shrink-0 gap-1">
-			<Label class="sr-only" for={`side-${mod.full_name}`}>Client requirement</Label>
+			<Label class="text-xs font-normal text-muted-foreground" for={`side-${mod.full_name}`}
+				>Client requirement</Label
+			>
 			<Select.Root
 				type="single"
 				value={mod.side}
@@ -1454,23 +1470,25 @@
 				{#each pending.nodes as node (`${node.full_name}:${node.source}`)}
 					{@const replaces =
 						!node.no_op && node.from_version !== '' && node.from_version !== node.version}
-					<li class="flex flex-wrap items-center gap-2">
-						<span class="font-medium">{node.full_name}</span>
-						<span class={['tabular-nums', sourceText[node.source] ?? 'text-muted-foreground']}>
-							{replaces ? `${node.from_version} → ` : ''}{node.version}
+					<li class="flex flex-wrap items-center gap-x-2 gap-y-1">
+						<span class="font-medium wrap-anywhere">{node.full_name}</span>
+						<span class="inline-flex flex-wrap items-center gap-2">
+							<span class={['tabular-nums', sourceText[node.source] ?? 'text-muted-foreground']}>
+								{replaces ? `${node.from_version} → ` : ''}{node.version}
+							</span>
+							<Badge variant="outline" class={sourceBadge[node.source]}>
+								{sourceLabel[node.source] ?? node.source}
+							</Badge>
+							{#if node.no_op}
+								<Badge variant="secondary">already installed</Badge>
+							{:else if node.change === 'downgrade'}
+								<Badge variant="destructive">downgrade</Badge>
+							{:else if replaces}
+								<Badge variant="outline">update</Badge>
+							{:else if node.transitive}
+								<Badge variant="outline">dependency</Badge>
+							{/if}
 						</span>
-						<Badge variant="outline" class={sourceBadge[node.source]}>
-							{sourceLabel[node.source] ?? node.source}
-						</Badge>
-						{#if node.no_op}
-							<Badge variant="secondary">already installed</Badge>
-						{:else if node.change === 'downgrade'}
-							<Badge variant="destructive">downgrade</Badge>
-						{:else if replaces}
-							<Badge variant="outline">update</Badge>
-						{:else if node.transitive}
-							<Badge variant="outline">dependency</Badge>
-						{/if}
 						{#if replaces && node.change !== 'downgrade'}
 							<div class="basis-full">
 								<ChangelogToggle

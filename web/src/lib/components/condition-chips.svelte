@@ -4,7 +4,7 @@
 	import {
 		CONDITION_LABEL,
 		CONDITION_SENTENCE,
-		conditionAge,
+		conditionAgeWords,
 		conditionDetail
 	} from '#lib/conditions.js';
 	import { Badge } from '#lib/components/ui/badge/index.js';
@@ -44,12 +44,7 @@
 			class="flex cursor-pointer flex-wrap items-center gap-2 rounded-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
 		>
 			{#each items as item (item.kind)}
-				<Badge
-					variant={item.severity === 'critical' ? 'destructive' : 'outline'}
-					class={item.severity === 'critical'
-						? undefined
-						: 'border-amber-300 text-amber-800 dark:border-amber-800 dark:text-amber-300'}
-				>
+				<Badge variant={item.severity === 'critical' ? 'destructive' : 'warning-outline'}>
 					{#if item.severity === 'critical'}
 						<TriangleAlert aria-hidden="true" />
 					{/if}
@@ -71,7 +66,7 @@
 						>{CONDITION_SENTENCE[item.kind]}{#if detail}{' · ' + detail}{/if}</span
 					>
 					<span class="text-xs text-muted-foreground">
-						open {conditionAge(item)}
+						open {conditionAgeWords(item)}
 						{#if link}
 							·
 							<!-- Already resolved by destination(), which the rule cannot see through. -->

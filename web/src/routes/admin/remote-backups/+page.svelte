@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { NativeSelect } from '#lib/components/ui/native-select/index.js';
+	import PageHeader from '#lib/components/page-header.svelte';
+	import { pageNarrow } from '#lib/layout.js';
 	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
@@ -17,6 +20,7 @@
 	import { Label } from '#lib/components/ui/label/index.js';
 	import { Switch } from '#lib/components/ui/switch/index.js';
 	import Problem from '#lib/components/problem.svelte';
+	import SaveFooter from '#lib/components/save-footer.svelte';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import RcloneConnectionDialog from '#lib/components/rclone-connection-dialog.svelte';
 
@@ -135,17 +139,18 @@
 	const when = (value: string | null | undefined) => (value ? formatInstant(value) : 'Never');
 </script>
 
-<main class="mx-auto grid w-full max-w-3xl gap-6 p-4 sm:p-6">
-	<h1 class="text-2xl font-semibold">Remote backups</h1>
+<main class={pageNarrow}>
+	<PageHeader title="Remote backups">
+		Keep world archives on another host. Configure one destination, then enable automatic uploads on
+		each server’s Backups page.
+	</PageHeader>
 	{#if !allowed}
-		<p>You do not have permission to manage remote storage.</p>
-	{:else}
 		<p class="text-sm text-muted-foreground">
-			Keep world archives on another host. Configure one destination, then enable automatic uploads
-			on each server’s Backups page.
+			You do not have permission to manage remote storage.
 		</p>
+	{:else}
 		<Problem error={failure} />
-		{#if loading}<p>Loading remote storage…</p>
+		{#if loading}<p class="text-sm text-muted-foreground">Loading remote storage…</p>
 		{:else}
 			<Card.Root>
 				<Card.Header><Card.Title>Destination</Card.Title></Card.Header>
@@ -159,13 +164,9 @@
 					>
 						<div class="grid gap-2">
 							<Label for="remote-kind">Storage connection</Label>
-							<select
-								id="remote-kind"
-								bind:value={kind}
-								class="h-10 rounded-md border bg-background px-3"
-							>
+							<NativeSelect id="remote-kind" bind:value={kind}>
 								<option value="webdav">WebDAV</option><option value="rclone">rclone</option>
-							</select>
+							</NativeSelect>
 						</div>
 						{#if kind === 'webdav'}
 							<div class="grid gap-2">
@@ -243,13 +244,18 @@
 							password again when changing the URL, username, or folder. Pending copies are
 							cancelled; previous remote files stay untouched. Active transfers must finish first.
 						</p>
-						<div class="flex flex-wrap gap-2">
-							<Button type="submit" disabled={saving || testing}
-								>{saving ? 'Saving…' : 'Save destination'}</Button
-							>
+						<SaveFooter
+							saveLabel="Save destination"
+							changed={fields !== baseline || password !== ''}
+							creating={!destination}
+							busy={saving}
+							invalid={testing}
+							ondiscard={() => fill(destination)}
+						>
 							<Button
 								type="button"
 								variant="outline"
+								size="sm"
 								disabled={!destination ||
 									saving ||
 									testing ||
@@ -257,7 +263,7 @@
 									password !== ''}
 								onclick={test}>Test connection</Button
 							>
-						</div>
+						</SaveFooter>
 					</form>
 				</Card.Content>
 			</Card.Root>

@@ -57,6 +57,15 @@ func TestImageCarriesCat(t *testing.T) {
 	}
 }
 
+// TestImageCarriesBashAndTimeout guards the deep reachability probe, which runs
+// `timeout` around bash's /dev/tcp in this image.
+func TestImageCarriesBashAndTimeout(t *testing.T) {
+	out := docker(t, "run", "--rm", "--entrypoint", "/usr/bin/timeout", image, "3", "/bin/bash", "-c", "echo ready")
+	if strings.TrimSpace(out) != "ready" {
+		t.Errorf("timeout + bash printed %q, want ready", out)
+	}
+}
+
 // fakeServerDir builds a server/ bind the entrypoint can actually exec into: a stand-in
 // game binary that prints the environment it was launched with. The image carries no game
 // files by design (08 §4), so this is the only way to exercise the entrypoint end to end.

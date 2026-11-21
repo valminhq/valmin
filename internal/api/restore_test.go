@@ -173,6 +173,30 @@ func TestRestoreSnapshotsTheWorldItReplaces(t *testing.T) {
 	}
 }
 
+// TestRestoreOverAnEmptySaveDirectoryArchivesNothing keeps an empty archive out of the backup
+// list: one with no world in it looks restorable and would restore nothing.
+func TestRestoreOverAnEmptySaveDirectoryArchivesNothing(t *testing.T) {
+	t.Parallel()
+	w := newBackupWorld(t, "stopped")
+	rt, db, admin := w.rt, w.db, w.admin
+
+	backupID := takeBackup(t, rt, admin)
+	dir := filepath.Join(worldsDirOf(t, db), "worlds_local")
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o775); err != nil {
+		t.Fatal(err)
+	}
+
+	if final := runRestoreJob(t, rt, admin, backupID); final.Status != "succeeded" {
+		t.Fatalf("restore job = %+v", final)
+	}
+	if snaps := backupsWithTrigger(t, rt, admin, store.TriggerPreRestore); len(snaps) != 0 {
+		t.Errorf("catalogue holds %d pre_restore archives of an empty save directory, want none", len(snaps))
+	}
+}
+
 // seedUnrestorableArchive writes an archive that verifies — the pair is in it, at a plausible
 // size — but carries no world under worlds_local/, so it fails at staging rather than at the
 // check. That is the failure that has to happen after the snapshot has been taken.

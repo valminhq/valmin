@@ -46,7 +46,7 @@ const labels: Record<string, string> = {
 	cpu_limit: 'CPU limit (cores)',
 	backup_keep_cold: 'Consistent backups to keep',
 	backup_keep_hot: 'Best-effort backups to keep',
-	backup_on_restart: 'Back up when this server restarts'
+	backup_on_restart: 'Back up on restarts and automatic stops'
 };
 
 function display(value: unknown): string {

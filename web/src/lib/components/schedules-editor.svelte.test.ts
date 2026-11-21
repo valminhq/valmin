@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { actions } from '#lib/api/instances.js';
-import type { Schedule } from '#lib/api/schedules.js';
+import { kindLabel, type Schedule } from '#lib/api/schedules.js';
+import { hasUnsaved } from '#lib/state/dirty.svelte.js';
 import { session } from '#lib/state/session.svelte.js';
 import { FakeDaemon, envelope, instance, permissions } from '#lib/testing/daemon.js';
 import { choose, click, text } from '#lib/testing/interact.js';
@@ -39,6 +40,7 @@ function schedule(overrides: Partial<Schedule> = {}): Schedule {
 		deferred_until: null,
 		upcoming_runs: [],
 		steps: null,
+		apply: null,
 		...overrides
 	};
 }
@@ -266,10 +268,11 @@ describe('the schedules editor', () => {
 			rows: [schedule({ timezone: 'UTC', last_run_at: '2026-09-24T01:15:00Z' })]
 		});
 
-		const line = text(await screen.findByText(/schedule uses UTC/));
-		expect(line).toMatch(/next [^·]*\b0?9:00\b/);
+		// The plain time leads; the cron and its zone are the detail under it.
+		const line = text(await screen.findByText(/times shown in Asia\/Kolkata/));
+		expect(text(screen.getByText(/^next /))).toMatch(/next [^·]*\b0?9:00\b/);
 		expect(line).toMatch(/last [^·]*\b0?6:45\b/);
-		expect(line).toContain('shown in Asia/Kolkata');
+		expect(line).toContain('in UTC');
 		expect(screen.getByText('30 3 * * *')).toBeTruthy();
 	});
 
@@ -288,6 +291,322 @@ describe('the schedules editor', () => {
 		await click(await screen.findByRole('switch', { name: 'Enable Back up this server schedule' }));
 		await vi.waitFor(() => expect(daemon.requests('PATCH', '/schedules/sch-1')).toHaveLength(1));
 		expect(daemon.requests('PATCH', '/schedules/sch-1')[0].body).toEqual({ enabled: false });
+	});
+
+	describe('schedules in another zone than the viewer\u2019s', () => {
+		const rows = () => [
+			schedule({ id: 'sch-1', cron: '0 4 * * *', timezone: 'UTC' }),
+			schedule({ id: 'sch-2', kind: 'restart', cron: '30 5 * * 1', timezone: 'Asia/Kolkata' }),
+			schedule({ id: 'sch-3', cron: '0 6 * * *', timezone: 'UTC' })
+		];
+
+		it('says each in words, with its zone when it is not the viewer\u2019s', async () => {
+			await open([actions.backupsCreate, actions.restart], { rows: rows() });
+
+			const words = (await screen.findAllByTestId('schedule-words')).map(text);
+			expect(words).toEqual([
+				'Every day at 04:00 (UTC)',
+				'Every Monday at 05:30',
+				'Every day at 06:00 (UTC)'
+			]);
+		});
+
+		it('offers to move only those, after a confirmation, keeping their clock times', async () => {
+			await open([actions.backupsCreate, actions.restart], { rows: rows() });
+			for (const id of ['sch-1', 'sch-2', 'sch-3'])
+				daemon.on('PATCH', `/schedules/${id}`, () => Response.json(schedule()));
+
+			expect(await screen.findByText(/2 schedules run in another time zone/)).toBeTruthy();
+			await click(screen.getByRole('button', { name: 'Move to Asia/Kolkata' }));
+			expect(
+				daemon.requests('PATCH', '/schedules/sch-1'),
+				'nothing before the answer'
+			).toHaveLength(0);
+
+			const dialog = await screen.findByRole('dialog');
+			await click(within(dialog).getByRole('button', { name: 'Move to Asia/Kolkata' }));
+
+			await vi.waitFor(() => expect(daemon.requests('PATCH', '/schedules/sch-3')).toHaveLength(1));
+			expect(daemon.requests('PATCH', '/schedules/sch-1')[0].body).toEqual({
+				cron: '00 04 * * *',
+				timezone: 'Asia/Kolkata'
+			});
+			expect(daemon.requests('PATCH', '/schedules/sch-2')).toHaveLength(0);
+		});
+
+		it('offers nothing when every schedule already runs in the viewer\u2019s zone', async () => {
+			await open([actions.backupsCreate], {
+				rows: [schedule({ cron: '0 4 * * *', timezone: 'Asia/Kolkata' })]
+			});
+			await screen.findByTestId('schedule-words');
+			expect(screen.queryByText(/run in another time zone/)).toBeNull();
+		});
+	});
+
+	describe('editing a schedule', () => {
+		const patched = () => daemon.requests('PATCH', '/schedules/sch-1');
+		const save = () => screen.getByRole('button', { name: 'Save changes' }) as HTMLButtonElement;
+
+		async function editRow(row: Schedule, held: string[]) {
+			await open(held, { rows: [row] });
+			daemon.on('PATCH', '/schedules/sch-1', () => Response.json(row));
+			await click(
+				await screen.findByRole('button', { name: `Edit the ${kindLabel(row.kind)} schedule` })
+			);
+		}
+
+		it('fills the form with the time and sends only what changed', async () => {
+			await editRow(schedule({ cron: '30 03 * * *', timezone: 'Asia/Kolkata' }), [
+				actions.backupsCreate
+			]);
+			expect(screen.getByRole('heading', { name: 'Edit “Back up this server”' })).toBeTruthy();
+			expect(text(document.body)).toContain('Every day at 03:30 · 30 03 * * *');
+			expect(save().disabled, 'nothing changed yet').toBe(true);
+
+			await fireEvent.input(screen.getByLabelText('Time of day'), { target: { value: '04:15' } });
+			await click(save());
+
+			await vi.waitFor(() => expect(patched()).toHaveLength(1));
+			expect(patched()[0].body).toEqual({ cron: '15 04 * * *' });
+			expect(created()).toHaveLength(0);
+			await vi.waitFor(() =>
+				expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Add a schedule' }))
+			);
+		});
+
+		it('sends a changed apply choice alone', async () => {
+			await editRow(
+				schedule({
+					kind: 'update_test',
+					apply: true,
+					cron: '30 03 * * *',
+					timezone: 'Asia/Kolkata'
+				}),
+				[actions.gameUpdate]
+			);
+			expect(text(document.body)).toContain('applies the updates when every mod loads');
+			await click(screen.getByLabelText('Apply when every mod loads and nobody is on'));
+			await click(save());
+
+			await vi.waitFor(() => expect(patched()).toHaveLength(1));
+			expect(patched()[0].body).toEqual({ apply: false });
+		});
+
+		it('does not carry an edited apply choice into a new schedule', async () => {
+			await editRow(schedule({ kind: 'update_test', apply: true }), [actions.gameUpdate]);
+			await click(screen.getByRole('button', { name: 'Cancel' }));
+
+			await choose(screen.getByLabelText('What to run'), 'Test updates on a copy');
+			const apply = screen.getByLabelText('Apply when every mod loads and nobody is on');
+			expect(apply.getAttribute('aria-checked')).toBe('false');
+		});
+
+		it('opens an expression the builder did not write as written', async () => {
+			await editRow(schedule({ cron: '30 3 * * 1-5' }), [actions.backupsCreate]);
+			expect((screen.getByLabelText('Cron expression') as HTMLInputElement).value).toBe(
+				'30 3 * * 1-5'
+			);
+			expect(save().disabled).toBe(true);
+		});
+
+		// An old expression without leading zeros opens in the controls, and opening it is not an edit.
+		it('opens an unpadded daily expression in the controls without counting as changed', async () => {
+			await editRow(schedule({ cron: '30 3 * * *' }), [actions.backupsCreate]);
+			expect(text(document.body)).toContain('Every day at 03:30');
+			expect(save().disabled).toBe(true);
+			expect(hasUnsaved()).toBe(false);
+		});
+
+		it('keeps the schedule’s own zone unless asked to move it', async () => {
+			await editRow(schedule({ cron: '30 03 * * *', timezone: 'UTC' }), [actions.backupsCreate]);
+			expect(text(document.body)).toContain(
+				'The times above are in UTC, where this schedule runs.'
+			);
+
+			await click(screen.getByLabelText('Run it in Asia/Kolkata instead'));
+			expect(text(document.body)).toContain('The times above are in Asia/Kolkata');
+			await click(save());
+
+			await vi.waitFor(() => expect(patched()).toHaveLength(1));
+			expect(patched()[0].body).toEqual({ cron: '30 03 * * *', timezone: 'Asia/Kolkata' });
+		});
+
+		it('sends a chain’s steps alone when only they changed', async () => {
+			const steps = [
+				{ type: 'command' as const, command: 'save' },
+				{ type: 'wait_for' as const, seconds: 600, condition: 'empty' as const },
+				{ type: 'stop' as const }
+			];
+			await editRow(
+				schedule({ kind: 'chain', cron: '00 04 * * *', timezone: 'Asia/Kolkata', steps }),
+				[actions.stop, actions.commandsSend]
+			);
+			expect(save().disabled, 'the steps as loaded are no change').toBe(true);
+
+			await fireEvent.input(screen.getByLabelText('Step 1 command'), {
+				target: { value: 'say bye' }
+			});
+			await click(save());
+
+			await vi.waitFor(() => expect(patched()).toHaveLength(1));
+			expect(patched()[0].body).toEqual({
+				steps: [
+					{ type: 'command', command: 'say bye' },
+					{ type: 'wait_for', condition: 'empty', seconds: 600 },
+					{ type: 'stop' }
+				]
+			});
+		});
+
+		it('stops waiting for players once no step stops the server', async () => {
+			await editRow(
+				schedule({
+					kind: 'chain',
+					cron: '00 04 * * *',
+					timezone: 'Asia/Kolkata',
+					wait_for_empty: true,
+					steps: [{ type: 'wait', seconds: 60 }, { type: 'stop' }]
+				}),
+				[actions.stop]
+			);
+			expect(screen.getByLabelText('Wait until no players are connected')).toBeTruthy();
+
+			await click(screen.getByRole('button', { name: 'Remove step 2' }));
+			expect(screen.queryByLabelText('Wait until no players are connected')).toBeNull();
+			await click(save());
+
+			await vi.waitFor(() => expect(patched()).toHaveLength(1));
+			expect(patched()[0].body).toEqual({
+				steps: [{ type: 'wait', seconds: 60 }],
+				wait_for_empty: false
+			});
+		});
+
+		it('sends a changed waiting rule alone', async () => {
+			await editRow(
+				schedule({
+					kind: 'restart',
+					cron: '00 04 * * *',
+					timezone: 'Asia/Kolkata',
+					wait_for_empty: true
+				}),
+				[actions.restart]
+			);
+			await choose(screen.getByLabelText('Wait at most'), '4 hours');
+			await click(save());
+
+			await vi.waitFor(() => expect(patched()).toHaveLength(1));
+			expect(patched()[0].body).toEqual({ max_deferral_seconds: 14400 });
+		});
+
+		it('keeps what is being typed when the list is read again', async () => {
+			await editRow(schedule({ cron: '30 03 * * *', timezone: 'Asia/Kolkata' }), [
+				actions.backupsCreate
+			]);
+			await fireEvent.input(screen.getByLabelText('Time of day'), { target: { value: '04:15' } });
+
+			socket.push('instance.inst-a.state', { type: 'maintenance', instance: 'inst-a' });
+			await vi.waitFor(() => expect(daemon.requests('GET', '/schedules')).toHaveLength(2));
+			expect(text(document.body)).toContain('Every day at 04:15');
+			expect(save().disabled).toBe(false);
+		});
+
+		it('returns the form to adding once the edited schedule is deleted', async () => {
+			await editRow(schedule(), [actions.backupsCreate]);
+			daemon.on('DELETE', '/schedules/sch-1', () => new Response(null, { status: 204 }));
+			daemon.on('GET', '/schedules', () =>
+				Response.json({ items: [], next_cursor: null, timezone: 'Europe/Oslo' })
+			);
+
+			await click(screen.getByRole('button', { name: 'Delete schedule' }));
+			await click(
+				within(await screen.findByRole('dialog')).getByRole('button', { name: 'Delete schedule' })
+			);
+			await vi.waitFor(() =>
+				expect(screen.getByRole('heading', { name: 'Add a schedule' })).toBeTruthy()
+			);
+		});
+
+		it('asks before another schedule replaces unsaved changes', async () => {
+			const rows = [
+				schedule({ cron: '30 03 * * *', timezone: 'Asia/Kolkata' }),
+				schedule({ id: 'sch-2', kind: 'restart', cron: '00 05 * * *', timezone: 'Asia/Kolkata' })
+			];
+			await open([actions.backupsCreate, actions.restart], { rows });
+			await click(
+				await screen.findByRole('button', { name: 'Edit the Back up this server schedule' })
+			);
+			await fireEvent.input(screen.getByLabelText('Time of day'), { target: { value: '04:15' } });
+			const editRestart = () =>
+				click(screen.getByRole('button', { name: 'Edit the Restart this server schedule' }));
+
+			await editRestart();
+			let dialog = await screen.findByRole('dialog');
+			expect(text(dialog)).toContain('Editing “Restart this server” replaces them.');
+			await click(within(dialog).getByRole('button', { name: 'Cancel' }));
+			await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+			expect(text(document.body)).toContain('Every day at 04:15');
+
+			await editRestart();
+			dialog = await screen.findByRole('dialog');
+			await click(within(dialog).getByRole('button', { name: 'Discard changes' }));
+			await vi.waitFor(() =>
+				expect(screen.getByRole('heading', { name: 'Edit “Restart this server”' })).toBeTruthy()
+			);
+			expect(text(document.body)).toContain('Every day at 05:00');
+		});
+
+		it('is not offered for a chain with a step the member cannot run', async () => {
+			const row = schedule({ kind: 'chain', steps: [{ type: 'command', command: 'save' }] });
+			await open([actions.stop], { rows: [row] });
+			await screen.findByTestId('chain-steps');
+			expect(
+				screen.queryByRole('button', { name: 'Edit the Run a sequence of steps schedule' })
+			).toBeNull();
+		});
+
+		it('warns that a run now of the schedule being edited runs it as saved', async () => {
+			await editRow(schedule({ cron: '30 03 * * *', wait_for_empty: true }), [
+				actions.backupsCreate
+			]);
+			await fireEvent.input(screen.getByLabelText('Time of day'), { target: { value: '04:15' } });
+			await click(screen.getByRole('button', { name: 'Run now: Back up this server' }));
+			expect(text(await screen.findByRole('dialog'))).toContain(
+				'It runs now without waiting for players to leave, and its next run stays as it is. It runs as saved, without the changes in the form.'
+			);
+		});
+	});
+
+	it('runs a schedule now once the dialog saying what it does is confirmed', async () => {
+		await open([actions.backupsCreate], { rows: [schedule()] });
+		const ran = () => daemon.requests('POST', '/schedules/sch-1/run');
+		daemon.on('POST', '/schedules/sch-1/run', () =>
+			Response.json({ job_id: 'job-1', kind: 'backup', status: 'queued' }, { status: 202 })
+		);
+
+		await click(await screen.findByRole('button', { name: 'Run now: Back up this server' }));
+		const dialog = await screen.findByRole('dialog');
+		expect(text(dialog)).toContain(
+			'Back up this server. Connected players are disconnected. It runs now, and its next run stays as it is.'
+		);
+		expect(text(dialog), 'nothing is being edited').not.toContain('as saved');
+		expect(ran(), 'not before confirming').toHaveLength(0);
+
+		await click(within(dialog).getByRole('button', { name: 'Run now' }));
+		await vi.waitFor(() => expect(ran()).toHaveLength(1));
+		expect(await screen.findByText(/Started “Back up this server”/)).toBeTruthy();
+	});
+
+	it('offers no run now while a run waits for players', async () => {
+		const row = schedule({
+			kind: 'restart',
+			wait_for_empty: true,
+			deferred_since: '2026-09-25T03:30:00Z',
+			deferred_until: '2026-09-25T05:30:00Z'
+		});
+		await open([actions.restart], { rows: [row] });
+		await screen.findByText('waiting for players');
+		expect(screen.queryByRole('button', { name: 'Run now: Restart this server' })).toBeNull();
 	});
 
 	it('deletes a schedule once the dialog naming it is confirmed', async () => {
@@ -363,6 +682,29 @@ describe('the schedules editor', () => {
 			max_deferral_seconds: 14400,
 			unknown_players: 'run'
 		});
+	});
+
+	it('sends whether an update test schedule applies what it tested', async () => {
+		await open([actions.gameUpdate]);
+		await choose(screen.getByLabelText('What to run'), 'Test updates on a copy');
+		expect(screen.queryByLabelText('Wait until no players are connected')).toBeNull();
+		await click(screen.getByLabelText('Apply when every mod loads and nobody is on'));
+
+		await click(add());
+		await vi.waitFor(() => expect(created()).toHaveLength(1));
+		expect(created()[0].body).toEqual({
+			instance_id: 'inst-a',
+			kind: 'update_test',
+			cron: '00 04 * * *',
+			timezone: 'Asia/Kolkata',
+			apply: true
+		});
+	});
+
+	it('offers no apply choice for other kinds', async () => {
+		await open([actions.gameUpdate]);
+		await choose(screen.getByLabelText('What to run'), 'Update the game');
+		expect(screen.queryByLabelText('Apply when every mod loads and nobody is on')).toBeNull();
 	});
 
 	it('shows a held run and the latest time it starts', async () => {

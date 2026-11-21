@@ -2,10 +2,13 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -138,15 +141,15 @@ func TestSyncRunPopulatesTheIndex(t *testing.T) {
 	}
 
 	var etag string
-	if ok, err := db.KVGet(ctx, manager.ETagKey(source.Thunderstore), &etag); err != nil || !ok {
-		t.Fatalf("kv etag: ok=%v err=%v", ok, err)
+	if ok, err := db.CatalogueStateGet(ctx, manager.ETagKey(source.Thunderstore), &etag); err != nil || !ok {
+		t.Fatalf("catalogue etag: ok=%v err=%v", ok, err)
 	}
 	if etag != `"fixture-etag"` {
 		t.Errorf("stored etag = %q, want %q", etag, `"fixture-etag"`)
 	}
 }
 
-// TestSyncRunSecondPassIsNotModified proves the cached ETag round-trips through kv and is
+// TestSyncRunSecondPassIsNotModified proves the cached ETag round-trips through the catalogue and is
 // actually sent back: syncing twice against the same fixture gets a 304 the second time.
 func TestSyncRunSecondPassIsNotModified(t *testing.T) {
 	t.Parallel()
@@ -170,14 +173,20 @@ func TestSyncNotModifiedStampsSyncedAt(t *testing.T) {
 	if first := submitSync(t, m); first.Status != "succeeded" {
 		t.Fatalf("first sync status = %q", first.Status)
 	}
-	if err := db.KVDelete(ctx, manager.SyncedAtKey(source.Thunderstore)); err != nil {
+	if _, err := db.Catalogue.ExecContext(ctx, `DELETE FROM catalogue_state WHERE key = ?`,
+		manager.SyncedAtKey(source.Thunderstore)); err != nil {
 		t.Fatal(err)
 	}
 	if second := submitSync(t, m); second.Status != "succeeded" {
 		t.Fatalf("second sync status = %q", second.Status)
 	}
 	var stamp string
-	if ok, err := db.KVGet(ctx, manager.SyncedAtKey(source.Thunderstore), &stamp); err != nil || !ok || stamp == "" {
+	if ok, err := db.CatalogueStateGet(
+		ctx,
+		manager.SyncedAtKey(source.Thunderstore),
+		&stamp,
+	); err != nil || !ok ||
+		stamp == "" {
 		t.Errorf("synced_at after a 304: %q ok=%v err=%v, want a timestamp", stamp, ok, err)
 	}
 }
@@ -211,60 +220,100 @@ func TestSyncEndpointRefusesASecondRun(t *testing.T) {
 	}
 }
 
-// TestSyncRecordsWhenACompleteListingStarted asserts the stamp Q39's not_indexed reads: a
-// listing that lands whole records a start no later than any row it wrote, and a 304, which
-// writes no row, leaves it where the last complete listing put it.
-func TestSyncRecordsWhenACompleteListingStarted(t *testing.T) {
+// TestSyncMarksWhatACompleteListingLeftOut asserts the facts not_indexed reads: a listing
+// that lands whole records its completion and marks nothing it carried, a 304 leaves that
+// record alone, and a later listing that omits a package stamps it unlisted.
+func TestSyncMarksWhatACompleteListingLeftOut(t *testing.T) {
 	t.Parallel()
 	body, err := os.ReadFile("../mods/thunderstore/testdata/v1-package-capture.json")
 	if err != nil {
 		t.Fatal(err)
 	}
+	var listing []map[string]any
+	if err := json.Unmarshal(body, &listing); err != nil {
+		t.Fatal(err)
+	}
+	const dropped = "ValheimModding-Jotunn"
+	trimmed, err := json.Marshal(slices.DeleteFunc(slices.Clone(listing), func(p map[string]any) bool {
+		return p["full_name"] == dropped
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var shrunk atomic.Bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("If-None-Match") == `"fixture-etag"` {
+		etag, payload := `"fixture-etag"`, body
+		if shrunk.Load() {
+			etag, payload = `"trimmed-etag"`, trimmed
+		}
+		if r.Header.Get("If-None-Match") == etag {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
-		w.Header().Set("ETag", `"fixture-etag"`)
+		w.Header().Set("ETag", etag)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(body)
+		_, _ = w.Write(payload)
 	}))
 	t.Cleanup(srv.Close)
 	m, db := modsFixture(t, srv.URL)
 	ctx := t.Context()
 
-	started := func() string {
+	completed := func() string {
 		t.Helper()
 		var stamp string
-		if ok, err := db.KVGet(ctx, manager.ListingStartedKey(source.Thunderstore), &stamp); err != nil || !ok {
-			t.Fatalf("listing start: ok=%v err=%v", ok, err)
+		if ok, err := db.CatalogueStateGet(
+			ctx,
+			manager.ListingCompletedKey(source.Thunderstore),
+			&stamp,
+		); err != nil ||
+			!ok {
+			t.Fatalf("listing completion: ok=%v err=%v", ok, err)
 		}
 		return stamp
+	}
+	unlisted := func() []string {
+		t.Helper()
+		rows, err := db.Reader.QueryContext(ctx,
+			`SELECT full_name FROM mod_packages WHERE unlisted_at IS NOT NULL ORDER BY full_name`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		var names []string
+		for rows.Next() {
+			var name string
+			if err := rows.Scan(&name); err != nil {
+				t.Fatal(err)
+			}
+			names = append(names, name)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return names
 	}
 
 	if final := submitSync(t, m); final.Status != "succeeded" {
 		t.Fatalf("first sync = %q", final.Status)
 	}
-	first := started()
-	var oldest string
-	if err := db.Reader.QueryRowContext(ctx,
-		`SELECT MIN(synced_at) FROM mod_packages WHERE source = 'thunderstore'`).Scan(&oldest); err != nil {
-		t.Fatal(err)
-	}
-	start, err := store.ParseTime(first)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if row, err := store.ParseTime(oldest); err != nil || row.Before(start) {
-		t.Fatalf("oldest row %q predates the listing start %q (%v): every row would read as pulled",
-			oldest, first, err)
+	first := completed()
+	if got := unlisted(); len(got) != 0 {
+		t.Errorf("unlisted after a complete listing = %v, want none", got)
 	}
 
 	if final := submitSync(t, m); final.Status != "succeeded" {
 		t.Fatalf("second sync = %q", final.Status)
 	}
-	if again := started(); again != first {
-		t.Errorf("a 304 moved the listing start from %q to %q", first, again)
+	if again := completed(); again != first {
+		t.Errorf("a 304 moved the listing completion from %q to %q", first, again)
+	}
+
+	shrunk.Store(true)
+	if final := submitSync(t, m); final.Status != "succeeded" {
+		t.Fatalf("third sync = %q", final.Status)
+	}
+	if got := unlisted(); len(got) != 1 || got[0] != dropped {
+		t.Errorf("unlisted after a listing without %s = %v, want only it", dropped, got)
 	}
 }
 
@@ -475,7 +524,7 @@ func TestRegistryRefreshRecordsPartialFailureAndRecovery(t *testing.T) {
 	}
 	for _, src := range source.All() {
 		var result diag.RegistrySync
-		found, err := db.KVGet(t.Context(), manager.SyncResultKey(src), &result)
+		found, err := db.CatalogueStateGet(t.Context(), manager.SyncResultKey(src), &result)
 		if err != nil || !found || result.CheckedAt.IsZero() {
 			t.Fatalf("%s result: %+v, %v", src, result, err)
 		}
@@ -491,7 +540,7 @@ func TestRegistryRefreshRecordsPartialFailureAndRecovery(t *testing.T) {
 		t.Fatalf("recovery = %s", j.Status)
 	}
 	var result diag.RegistrySync
-	if found, err := db.KVGet(
+	if found, err := db.CatalogueStateGet(
 		t.Context(),
 		manager.SyncResultKey(source.Hexium),
 		&result,

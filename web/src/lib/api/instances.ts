@@ -43,6 +43,9 @@ export interface StatsReading {
 	mem_pct: number | null;
 	/** Always null (E7, Q7). Render "unknown", never 0. */
 	players: number | null;
+	/** Network traffic since the previous sample; null until there is one, and after a restart. */
+	rx_bytes_per_second: number | null;
+	tx_bytes_per_second: number | null;
 }
 
 export interface CommandCapabilities {
@@ -126,6 +129,8 @@ export interface Instance {
 	backup_on_restart: boolean;
 	/** Minutes with no players after which the running server is stopped; 0 is off. */
 	auto_stop_minutes: number;
+	/** What happens to a running server whose log has gone quiet: nothing, an alert, or a restart. */
+	watchdog: WatchdogMode;
 	remote_backup_enabled?: boolean;
 	remote_keep_cold?: number;
 	remote_keep_hot?: number;
@@ -138,6 +143,17 @@ export interface Instance {
 	 * when unset. */
 	status_notice?: string;
 	status_connect_info?: string;
+	/** Whether the status page shows how to join, and the current profile code. */
+	status_show_join: boolean;
+	status_show_modpack: boolean;
+	/** The host name or IP address players connect to, without a port. Empty when unset. */
+	join_host: string;
+	/** The join host with the game port, ready to paste into the game. Null when no join host
+	 * is set. */
+	join_address: string | null;
+	/** Starts the game through Steam and connects it to `join_address`. Null without a join
+	 * address, for an IPv6 address, or with crossplay on. */
+	steam_join_url: string | null;
 	/** The server this one is an update-test copy of. Absent on an ordinary server. */
 	test_of?: string;
 	created_at: string;
@@ -272,8 +288,14 @@ export interface PatchInstance {
 	/** The status page's text, at most `STATUS_TEXT_MAX` characters each. Empty clears it. */
 	status_notice?: string;
 	status_connect_info?: string;
+	status_show_join?: boolean;
+	status_show_modpack?: boolean;
+	/** A host name or IP address without a port. Empty clears it. */
+	join_host?: string;
 	/** 0 turns auto-stop off; otherwise `AUTO_STOP_MIN` to `AUTO_STOP_MAX` minutes. */
 	auto_stop_minutes?: number;
+	/** `restart` needs the right to restart the server as well as to change its settings. */
+	watchdog?: WatchdogMode;
 	/** The branch the next game update installs. Sent with the password for a password branch;
 	 * a branch sent without one clears the stored password. */
 	game_branch?: string;
@@ -283,6 +305,9 @@ export interface PatchInstance {
 /** The range of rolling backups the game may be told to keep. */
 export const GAME_BACKUPS_MIN = 1;
 export const GAME_BACKUPS_MAX = 50;
+
+/** What the daemon does about a running server whose log has gone quiet. */
+export type WatchdogMode = 'off' | 'alert' | 'restart';
 
 /** The range of idle minutes auto-stop accepts when it is on. */
 export const AUTO_STOP_MIN = 5;
@@ -357,6 +382,8 @@ export interface UpdateTest {
 		declared: number | null;
 		loaded: number;
 		failed: number;
+		/** Whether the loader logged that it finished; until then the counts are partial. */
+		complete: boolean;
 	} | null;
 }
 
@@ -398,7 +425,9 @@ export const adoption = {
 	preview: (containerID: string) =>
 		api.get<AdoptionPreview>(`/orphans/${encodeURIComponent(containerID)}`),
 	adopt: (containerID: string, body: AdoptInstance) =>
-		api.post<Job>(`/orphans/${encodeURIComponent(containerID)}`, body)
+		api.post<Job>(`/orphans/${encodeURIComponent(containerID)}`, body),
+	/** Removes an orphan container that cannot be recovered; its files stay on disk. */
+	remove: (containerID: string) => api.del<void>(`/orphans/${encodeURIComponent(containerID)}`)
 };
 
 interface Page<T> {
@@ -440,11 +469,19 @@ export const instances = {
 		api
 			.get<Page<Job>>(`/instances/${id}/jobs?limit=${limit}${scheduled ? '&scheduled=true' : ''}`)
 			.then((p) => p.items),
-	/** One page of this instance's job history with the cursor for the next, newest first. */
-	jobPage: (id: string, limit: number, cursor?: string | null) =>
-		api.get<Page<Job>>(
-			`/instances/${id}/jobs?limit=${limit}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
-		),
+	/** One page of this instance's job history with the cursor for the next, newest first.
+	 * `window` keeps jobs that finished from `since` (inclusive) to `until` (exclusive), or
+	 * were created then while unfinished. */
+	jobPage: (
+		id: string,
+		limit: number,
+		cursor?: string | null,
+		window?: { since: string; until: string }
+	) => {
+		const params = new URLSearchParams({ limit: String(limit), ...window });
+		if (cursor) params.set('cursor', cursor);
+		return api.get<Page<Job>>(`/instances/${id}/jobs?${params}`);
+	},
 
 	// Every one of these returns a job, never the resource (ADR-028, `11 §3`). The job holds its
 	// lock, so a second click is `409 job_in_progress` rather than a second run.

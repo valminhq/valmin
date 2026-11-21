@@ -50,14 +50,14 @@ Opening a server shows its tabs. A tab appears only when your access reaches it.
 
 | Tab               | What it holds                                                                |
 | ----------------- | ---------------------------------------------------------------------------- |
-| **Overview**      | Connection details, controls, alerts, resources, recent operations, console. |
+| **Overview**      | Connection details, alerts, resources, recent operations, console.           |
 | **Mods**          | Installed mods, the catalogue, and the list of mods players need.            |
 | **Mod config**    | BepInEx and plugin configuration files.                                      |
 | **Players**       | Player activity, accounts seen on the server, and the player lists.          |
 | **Notifications** | The server's own channels and the rules that post about it.                  |
 | **Backups**       | World backups, retention, world import, and the worlds on disk.              |
 | **Saved setups**  | Named snapshots of mods, configuration and settings.                         |
-| **Maintenance**   | Schedules, auto-stop, upcoming or skipped runs, and world tools.             |
+| **Maintenance**   | Schedules, auto-stop, watchdog, upcoming or skipped runs, and world tools.   |
 | **Panel access**  | Who can use this server and what they can do.                                |
 | **Settings**      | Names, password, connections, status page, gameplay, limits, and management. |
 
@@ -81,10 +81,11 @@ The **Administration** menu groups its pages under four headings:
 | **Advanced**     | [Export installation](operations.md#move-to-a-new-host), [Encryption keys](operations.md#rotate-encryption-keys)                                                 |
 
 Each page is shown only to accounts that may use it, and a heading appears only when
-the account can see something under it.
+the account can see something under it. Opening one of these pages by its address without
+access shows **Page not found**.
 
 The account menu, named after your username, shows who you are signed in as, then
-**Change password**, **Date and time**, **Report an issue** and **Sign out**.
+**Change password**, **Signed-in devices**, **Date and time**, **Report an issue** and **Sign out**.
 **Report an issue** opens a new issue on the project's GitHub page in a new tab.
 **Sign out** opens the sign-in page. When the panel
 [signs in through a reverse proxy](#sign-in-with-single-sign-on), it opens the SSO gateway's
@@ -95,6 +96,15 @@ logout page if the operator set one, and otherwise the gateway signs you straigh
 A tab that was already open shows **Valmin was updated** at the top of the page. Choose
 **Reload** to use the new version. Until you do, the next link you follow loads the new
 version in full. A form with unsaved changes still asks before you leave.
+
+### How saving works
+
+Full-page editors, such as server settings, mod configuration and the Discord bot, show a
+bar at the bottom of the page while something differs, with **Discard changes** and a save
+button. A card that holds its own settings, such as auto-stop, the watchdog, backup
+settings or a player list, keeps its save button at the card's foot. Once something
+differs, **Unsaved changes** and **Discard changes** appear beside it. Switches that act
+at once, such as pausing a schedule, have no save button.
 
 ## Create a server
 
@@ -108,6 +118,7 @@ version in full. A form with unsaved changes still asks before you leave.
 5. Submit the form and follow the progress. The first server downloads the dedicated
    server through SteamCMD; later servers reuse that download and copy it, which on
    most filesystems is still a copy of about 1 GB.
+   When setup finishes, the panel opens the new server.
 6. Start the server if you did not turn on **Start server after setup**. Wait for
    the panel to report it ready before connecting.
 
@@ -160,8 +171,8 @@ the server first starts, which matters for mods that shape world generation.
 ### Start from an existing world
 
 Open **Start from an existing world** and choose the world folder under
-`worlds_local`, a ZIP of that folder, or both the `.db` and `.fwl` files of an older
-save. Keep the page open until provisioning and import finish. The imported files
+`worlds_local`, a ZIP of that folder, a world backup `.tar.gz` downloaded from a Valmin
+server, or both the `.db` and `.fwl` files of an older save. Keep the page open until provisioning and import finish. The imported files
 are renamed to the world name you entered. The server stays stopped during the import
 and starts after it when **Start server after setup** is on. See
 [import a world](#import-a-world) for the rules.
@@ -178,8 +189,8 @@ Administrators can copy an existing server. Stop the source server, open its
 **Settings**, and choose **Clone** under **Manage server**. Enter a panel name for
 the copy and choose **Clone server**.
 
-The copy gets the world, the installed game build, mods, configuration files, launch
-settings and the server password. It gets its own ports, identity and data
+The copy gets the world, the installed game build, mods, configuration files with their
+history, launch settings and the server password. It gets its own ports, identity and data
 directories, and stays stopped when it is ready. Users, access grants and the source
 server's backups are not copied. After cloning, the two servers are independent.
 
@@ -198,18 +209,31 @@ server name, world name, password and other launch settings exactly as the conta
 was created. Valmin checks them against the container and refuses values that do not
 match. Recovery never stops, recreates, copies or changes the container or its files.
 
+A container can't be recovered when the image it was created from has been removed, or when
+its server's files are gone from the data directory. The page then says which, and offers
+**Remove container**. Removing it deletes the container and frees its ports; any files left
+in the data directory stay where they are. A running container is refused, since removing it
+would skip the world save: stop it on the host first with `docker stop --time 120 <name>`.
+
 ## Run a server
 
 ### Start, stop and restart
 
-Use **Start**, **Stop** and **Restart** on the overview or the server list. A stop asks
-the game to shut down and waits up to two minutes for it to save the world, so a stop
-can take a while on a large world. Each action runs as an operation that you can follow
-on the overview.
+Use **Start**, **Stop** and **Restart** beside the server's name, which stays at the top of
+every one of its pages, or on the server list. Only the buttons that apply are shown: **Start**
+on a stopped server, **Stop** and **Restart** on a running one. Stop and Restart ask you to
+confirm, because both disconnect whoever is playing. A stop asks the game to shut down and
+waits up to two minutes for it to save the world, so a stop can take a while on a large
+world. Each action runs as an operation that you can follow on the overview.
 
-If **Back up when this server restarts** is on under [backup settings](operations.md#backup-settings),
+While a job runs on the server, such as a backup, a mod install or an update, its name shows
+beside the server's name on every page and links to the overview. The panel checks every few
+seconds, so a job can take a moment to appear. **Start** waits while a new server's setup is
+unfinished; the overview shows how to resume it.
+
+If **Back up on restarts and automatic stops** is on under [backup settings](operations.md#backup-settings),
 every restart, including a scheduled one, makes a consistent backup between the stop
-and the start.
+and the start. Auto-stops and stops a schedule runs back up too; a stop you make by hand does not.
 
 ### Restart notices
 
@@ -222,19 +246,44 @@ two different badges:
 - **pending restart**: saved mod configuration, mod changes or a restored setup are
   waiting for the next start. This one is informational and never raises an alert.
 
+**pending restart** shows only on a running server, since a stopped one starts with the saved
+changes. The matching notice on the overview, Mods, Mod config and Settings pages shows only on a
+running server, and only to someone who may restart it.
+
 ### The overview
 
-The connection card at the top shows the port pair, join code for a
-crossplay server, and the server password behind **Show**. On a running server,
-**Check reachability** tests whether players outside your network can find the server (see
+The **Join this server** card at the top lists what a player does to join, in order:
+
+1. **Install the mods**, on a server with mods labelled for players (see
+   [tell players which mods they need](#tell-players-which-mods-they-need)). Players install
+   Gale or r2modman, create a Valheim profile, and import a profile code. The card shows the
+   last code created for the server, with its date, for as long as the server's player mods
+   still match it. Otherwise **Create profile code** uploads the list and shows the new code
+   with a copy button; nothing is uploaded until someone selects it. **Create a new code**
+   replaces a code a player cannot import. If the modpack has a conflict, the step links to
+   the **Player modpack** tab instead. Each person can create five codes a minute.
+2. **Connect**, with the [join address](#connections) and a copy button. **Join with Steam**
+   starts the game through Steam and connects it to that address; players still type the
+   password. It works only while the game is closed; with the game already running, it does
+   nothing. There is no Steam link for an IPv6 address. A crossplay server shows its join code instead. Without a join address, the card
+   shows the port pair and says that no address is set.
+3. **Enter the password**, behind **Show password**.
+
+Under the steps are the world name and, for a listed server, the name it has in the
+community browser. On a running server, **Check reachability** tests whether players outside
+your network can find the server (see
 [check that friends can connect](#check-that-friends-can-connect)).
+
+Everyone who can see a server sees its card, and nobody sees the card of a server they
+have no access to.
 
 ### Check that friends can connect
 
 **Check reachability** on the connection card answers "my friends can't connect". It looks up
 the host's public IP address, asks Steam whether a server is registered there, and sends the
-server a query on its public address from the panel host. A server answers these queries, and
-is listed by Steam, only while public listing is on, so the last two steps run only then. It
+server a query on its public address from the panel host. A server answers these queries only
+while public listing is on and crossplay is off, and Steam lists it only while public listing is
+on, so the last two steps run only then. It
 usually takes a few seconds and at most about twelve, and each person can run it five times a
 minute. The card then shows one
 of these:
@@ -268,7 +317,11 @@ the host allows them, and a Steam listing only shows that the server registered,
 players can connect. Joining from a connection outside your network is the final test.
 
 **Resources** shows CPU and memory, sampled every two seconds, and the current player
-count while the server runs. Disk use is always shown, split into world, server files
+count while the server runs. **Network** shows the traffic the server received and sent
+per second, summed over its network interfaces; it reads **unknown** on the first sample
+and after a restart. Steady upload while nobody plays can mean a mod is sending data
+somewhere; [see where a game server sends traffic](advanced-network-setup.md#see-where-a-game-server-sends-traffic).
+Disk use is always shown, split into world, server files
 and backups, with the free space left on the host. When free space drops below the
 alarm level, the card says so in red: the game stops saving the world when the disk
 fills and does not report it, so free space before playing further.
@@ -315,6 +368,9 @@ did not finish, the unconfirmed-stop alert waits.
 
 ### Search and copy the console log
 
+Each console line starts with its time. The first line, and the first line of each new day,
+also shows the date, so a log that spans several days says where each day begins.
+
 The console has a search box above the log. It matches case-insensitively, as plain
 text, among the lines the browser holds: at most 5,000 rows, which include the startup
 segment of up to 500 rows that the browser never trims. The counter counts matching
@@ -355,8 +411,8 @@ With the same mod, Valmin also warns players in chat before a
 
 ## Change server settings
 
-Open **Settings**. Changes collect in a bar at the bottom of the page, which counts
-them; **Save changes** stores them and **Discard changes** drops them. Saved settings
+Open **Settings**. Once you change something, a bar appears at the bottom of the page and
+counts the changes; **Save changes** stores them and **Discard changes** drops them. Saved settings
 reach the server on its next start. Accounts without permission to change settings
 see them read-only.
 
@@ -378,6 +434,12 @@ connected, and the running server keeps the old password until it restarts.
 
 ### Connections
 
+**Join address** is the host name or IP address players type to join, without the port,
+for example `play.example.com`. The overview shows it with the server's port, as
+`play.example.com:2456`, and builds the Steam link from it. Each server has its own, and
+leaving it empty hides the address. Valmin does not check that the address reaches the
+server; [check that friends can connect](#check-that-friends-can-connect) does.
+
 **List publicly** shows the server in the in-game community browser. **Crossplay**
 lets players on other platforms find and join it; they join with the join code that
 appears on the overview and the server list once the server has registered. Some
@@ -394,8 +456,18 @@ open without signing in. The link appears under the switch and has the form
 The page shows the server's name, whether it is up or under maintenance, and how many
 players are on it, with the time the count was observed. Two optional texts appear on
 it: **Status page notice**, for example `Down for the update until 20:00`, and **How
-to join**, for the address, where to get the password, and the mods players need. Both
-are plain text.
+to join**, for example where to get the password. Both are plain text.
+
+Two switches add details that stay correct by themselves, each off until you turn it on:
+
+- **Show how to join** adds the [join address](#connections) with its **Join with Steam**
+  link, or the join code of a crossplay server once the server has logged it.
+- **Show the profile code** adds the last profile code created for the server, from the
+  overview or the **Player modpack** tab, while the server's player mods still match it.
+  After a mod change the page shows no code until someone creates a new one; the page itself
+  never uploads anything.
+
+Anyone with the link sees what these switches add. The password never appears on the page.
 
 Visitors can refresh the page or turn on automatic refresh, which checks again every
 30 seconds while the tab is open. Public listing in the game and the status page are
@@ -425,9 +497,10 @@ Administrators find **Delete this server** under **Manage server** at the bottom
 Deleting removes the container, the game installation with its mods and
 configuration, the logs, and the server's settings in the panel. The world files under
 `instances/<id>/worlds/` and the backup archives under `backups/<id>/` stay in the data
-root. No server lists them again, and they cannot be attached to another server. Copy out
-what you want to keep, for example to [import a world](#import-a-world) into another
-server, and delete the folders when you no longer need them.
+root. Administrators can still bring a world back from those backups through
+[Import from a backup](#import-a-world) on any server, under **Deleted servers**. The
+world folders are not listed anywhere; copy out what you want to keep and delete the
+folders when you no longer need them.
 
 ## Update the game
 
@@ -442,10 +515,11 @@ you can check it before starting. The world itself is not touched by the update.
 On a modded server, the update puts every installed mod and your configs back onto the new
 build. Files a mod wrote under `BepInEx` while it ran, outside its own package files and
 configs, are not carried over; the update's log lists them. A new game build can still break
-a mod, and the panel cannot check that in advance. For
-that reason nothing updates a modded server on its own: a
-[scheduled game update](operations.md#schedule-maintenance) skips it and records the
-skip.
+a mod, and this update does not check that in advance. For
+that reason a [scheduled game update](operations.md#schedule-maintenance) skips a modded
+server and records the skip. To update one on a schedule,
+[test the updates on a copy](operations.md#test-updates-on-a-schedule), which checks the mods
+first.
 
 Rebuilding the game runtime image does not download a new game build; only this action
 does.
@@ -462,7 +536,8 @@ list, and keeps the answer for an hour.
 On a modded server, **Test an update on a copy** on the overview shows what an update would
 do before anything on the server changes. It needs permission to clone, update and manage
 mods, which administrators have. Choose whether to try the new game build, the pending mod
-updates, or both, and choose **Test on a copy**.
+updates, or both, and choose **Test on a copy**. When the chosen parts have nothing to try,
+the test is refused instead of copying the server for nothing.
 
 Valmin then:
 
@@ -471,7 +546,8 @@ Valmin then:
    the game's last save, so it can lag behind by up to the save interval, 30 minutes by
    default.
 2. Installs the new game build and the pending mod updates on the copy.
-3. Starts the copy and reads what the mod loader said.
+3. Starts the copy, waits up to 3 minutes for its world to load, and reads what the mod
+   loader said.
 
 The copy is an ordinary server in the server list, named after the original with
 **update test** added, and a number after that when another server already has the name.
@@ -486,7 +562,9 @@ The card then shows the copy's state, the game build before and after, and each 
 that moved to another version, with a **Changelog** under it (see
 [Read what changed in a mod](#read-what-changed-in-a-mod)). Mods the loader said it could
 not load are listed in red with the loader's own line. A copy whose loader wrote no log is
-reported as not checked rather than as a success.
+reported as not checked rather than as a success, and one whose loader had not finished
+when it was read is reported with the count so far. The test job's last line says the
+same, and also names enabled mods the loader said nothing about.
 
 - **Apply to the server** stops the original with its world saved if it is running,
   backs up the world, installs the game build and mod versions the copy runs, starts the
@@ -506,7 +584,10 @@ reported as not checked rather than as a success.
 - **Discard the copy** deletes it with its world and backups. The original is not touched.
   A running copy has to be stopped first.
 
-A copy cannot itself be tested.
+A copy cannot itself be tested. To run the test on a schedule, and optionally apply it when
+every mod loads and nobody is on, see
+[Test updates on a schedule](operations.md#test-updates-on-a-schedule). An alert rule for
+**Update test finished** reports each test's result.
 
 ### Change the game version
 
@@ -535,8 +616,10 @@ Bring a save from a single-player game or another server, either on the
 [creation form](#start-from-an-existing-world) or, for an existing stopped server,
 under **Import world** on **Backups**.
 
-Choose the world folder under `worlds_local`, a ZIP of that folder, or both the `.db`
-and `.fwl` files of an older save. Keep the complete folder for saves that include
+Choose the world folder under `worlds_local`, a ZIP of that folder, a world backup
+`.tar.gz` downloaded from a Valmin server, or both the `.db` and `.fwl` files of an
+older save. A backup that holds several worlds is refused; import one world at a time.
+Keep the complete folder for saves that include
 chunk files. The files are checked before anything is written and renamed to the
 server's world name. On an existing server, the current world is backed up first, so
 an import can be undone from the backups list. Type the world's name to confirm.
@@ -545,13 +628,22 @@ The game keeps its own older saves, such as `.old` files. The importer refuses t
 unless you turn on **Import an older game backup**, which restores the world to that
 earlier save.
 
+**Import from a backup**, below the upload, takes the world from a backup that is
+already on this host, with no download. Choose a server and one of its backups; servers
+appear when you can download their backups. Administrators also see **Deleted
+servers**: the backups a deleted server left behind. If the backup holds more than one
+world, choose which one to import. The backup itself is not changed, and the rest works
+as an upload does: the world is checked, renamed to this server's world name, and the
+current world is backed up first.
+
 ### Worlds on disk
 
-Under the backup history, **Worlds on disk** lists every world in the server's save
-directory with its size. The world the server loads is marked, and a world missing its
-header or data file is marked incomplete. If the world the server is set to load is
-not there, the page says so: backups refuse until the server creates it or you import
-one under that name.
+In its own card under the backup history, **Worlds on disk** lists every world in the
+server's save directory with its size. The world the server loads is marked, and a world
+missing its header or data file is marked incomplete. An empty save directory, as on a server
+that has never started, is simply described as empty. If other worlds are there but not the
+one the server is set to load, the page warns: backups refuse until the server creates it or
+you import one under that name.
 
 **Load this one instead** replaces the loaded world with another world from the list.
 The game's own rolling saves are listed separately under **Game backups**, newest first,
@@ -575,7 +667,8 @@ imports, deletions and restores fail without changing the world. Stop it and ret
 
 Open **Mods**. The **Installed** tab lists what the server loads, **Browse mods**
 searches the catalogue, and **Player modpack** lists the mods players need on their
-own computers.
+own computers. The address names the open tab, so a reload or a shared link opens the
+same one.
 
 Search the catalogue, choose **Install**, review the dependency plan, and apply it.
 Mods change only on a stopped server, but you can install one while the server runs.
@@ -599,6 +692,22 @@ operation result after each change.
 
 A mod the author has marked deprecated says so on its row. It may not work on the
 current game build.
+
+### What a mod can reach
+
+A mod runs its own code inside the game server, with full access to that server. It can
+read and change the server's files, world and mod configuration, including the console
+password the panel uses for that server, and it writes to the server log the panel reads. It runs as the server's unprivileged user,
+without Linux capabilities, and cannot see the host's files, other servers' files,
+world backups, Docker or the panel's database.
+
+Its network is not restricted: a mod can open connections to the internet, to other
+devices on your LAN, to the host, to other game servers on this panel, and on a cloud VPS
+to the provider's metadata service. To block all but the internet, see
+[keep game servers off your LAN](advanced-network-setup.md#keep-game-servers-off-your-lan).
+A mod shares the host's kernel with every other process; to put a second kernel boundary in
+its way, see [sandboxed game servers](sandboxed-game-servers.md).
+Install mods only from authors you trust.
 
 ### Choosing a registry
 
@@ -637,8 +746,10 @@ anything changes, Valmin shows every package that would be installed, updated,
 downgraded, or removed. If the change would break another installed mod, for example a
 downgrade below what that mod needs, Valmin names the mod and will not apply the change.
 
-A downgrade changes mod files only. It does not restore the world or the config files,
-and a world or setting that a newer version changed may not work with the older one. On a
+A downgrade puts back the older version's files, including the config files it ships (see
+[Config files a mod ships](#config-files-a-mod-ships)). It does not restore the world or the
+settings a mod writes itself, and a world or setting that a newer version changed may not
+work with the older one. On a
 server with a world, Valmin backs up the world first, so restore that backup if you need
 to go back completely.
 
@@ -685,6 +796,22 @@ world, then the whole set. An install queued ahead of them runs first, on its ow
 A mod marked **not in the index** is one its registry no longer lists, usually because
 the author or the registry removed it. Valmin cannot offer updates for it and leaves it
 out of **Update all mods**. It keeps working as installed.
+
+### Config files a mod ships
+
+Some mods ship config files in `BepInEx/config`, such as a modpack's `.cfg` files or a mod's
+YAML and JSON data. Installing a mod writes such a file only where none exists yet, and two
+mods may ship the same file. When an update or a downgrade ships a different version of a
+file than the installed version did, Valmin replaces the file on the server with the mod's
+version, even if you edited it, so the mod gets the settings it expects. Your version stays
+in the file's history (see [Compare with an earlier version](#compare-with-an-earlier-version)). A file the change
+ships unchanged is left as you have it. The job log counts the config files it updated. A
+`.cfg` file a mod creates on the server when it starts is not shipped, so updates never touch
+it.
+
+A mod installed by an earlier Valmin release over a config file that was already on the
+server has no record of shipping it. Its next update keeps that file, and updates after that
+follow the mod.
 
 ### Read what changed in a mod
 
@@ -754,7 +881,8 @@ If the loader says it could not load a mod, that mod's row turns red and shows t
 loader's message, such as a missing dependency or an error from the mod's own
 code. The alert at the top of the page names every mod that failed. **Not loading**
 means the loader did not mention the mod at all. Check the loader log for that
-mod's name.
+mod's name. A mod installed after the server's last start is not judged by that start's
+report; its row says **loads on next start** until the server starts again.
 
 ### Tell players which mods they need
 
@@ -766,7 +894,8 @@ The **Player modpack** tab then lists every mod labelled for clients, with the
 dependencies they need, pinned to the versions the server runs. Unlabelled mods are
 left out and named, so nothing is guessed. If a client mod needs one labelled
 **Server only**, or one that is no longer in the catalogue, the tab names the conflict
-and the list cannot be exported until it is fixed.
+and the list cannot be exported until it is fixed. A list with no mods labelled for clients
+cannot be exported or uploaded either.
 
 **Download client list** saves a profile file that r2modman, Gale and Thunderstore
 Mod Manager can import. It carries package names and versions only. Those managers
@@ -775,15 +904,22 @@ nowhere else may not be found on import. Players can still install it by hand fr
 the registry's own page.
 
 **Create profile code** uploads the same list to Thunderstore, or to Hexium when a mod
-exists only there, and shows a code with a **Copy code** button. Players paste it into
+exists only there, and shows a code with a **Copy code** button. The newest code is kept as
+the server's current one for the overview and the status page. Players paste it into
 r2modman or Gale instead of importing a file. Hexium codes work in Gale only. Uploading
 publishes the package names and versions to the registry, and a registry may stop serving
-a code after a while, so create a new one when a player cannot import it.
+a code after a while, so create a new one when a player cannot import it. The same button is
+on the [overview](#the-overview), where players who can see the server can create a code
+themselves.
 
 ## Edit mod configuration
 
 Open **Mod config**. The list shows the server's BepInEx and plugin configuration
-files. Its search box keeps the files whose name or plugin name contains what you
+files, including those in subfolders of `BepInEx/config`, such as Expand World Data's
+`expand_world/*.yaml` or WackysDatabase's `wackysDatabase/**/*.yml`. It lists `.cfg`, `.yaml`,
+`.yml`, `.json` and `.txt` files at most 8 folders deep, YAML, JSON and text files only up to
+1 MiB, and leaves out hidden folders; a note under the list says when one of these limits left a file out. Files
+other than `.cfg` are marked **Edited as text**. Its search box keeps the files whose name or plugin name contains what you
 type, ignoring case, and shows how many files match, for example `3 of 12 files`.
 Adding `?q=` and some text to the page address opens the list already filtered.
 
@@ -805,22 +941,46 @@ changed from its default offers **Reset to default**.
 
 When you are done, choose **Review changes**. The dialog lists every changed setting
 with its old and new value, and nothing is written until you confirm. The rest of the
-file is left as it was, comments included, and the version before the save is kept.
+file is left as it was, comments included, and the version before the save is kept in the
+file's history.
 If a value is invalid, nothing is written and the form marks the setting.
 
 ### Compare with an earlier version
 
-Above the form, **Compare with** picks a kept version of the file: **the original**,
-as the mod first wrote it, or **before the last save**. The panel then lists the
-settings that differ, marks each changed field, and offers to load one value or all
-of them back into the form. **Compare as text** opens the same comparison line by
-line.
+Valmin keeps a history of each config file: the file as the panel first found it, every save
+from the panel with who made it, each version a mod install or update wrote, each version a
+setup restore or a definition import wrote, and changes made outside the panel, by the game,
+a mod or by hand, noticed the next time the panel writes the file. The newest 20 versions are
+kept, plus the one template codes measure your changes against. A version the same as the one
+before it is not kept twice, and a save that changes nothing writes nothing. The RCON plugin's
+config file has no history, since it holds the console password the panel sets.
+
+Above the form, **Compare with** picks one of these versions, or **the mod's defaults**, the
+default each setting's description declares. The panel then lists the settings that differ,
+marks each changed field, and offers to load one value or all of them back into the form,
+where the usual review applies. Loading skips settings the file no longer has, so loading an
+old version after a mod update keeps the settings the update added. A version from before the
+newest mod update says so. **Compare as text** opens the same comparison line by line; for a
+YAML, JSON or text file, loading a version from before a mod update replaces the whole file,
+which the mod may no longer read.
+
+A file a mod update replaced while it held your edits is marked **Replaced by** the mod and
+version in the list, until it is saved again. Its history holds your version.
 
 ### Edit as raw text
 
+YAML, JSON and text files have no settings form and open straight in the raw editor, with
+the same conflict check, history and line-by-line comparison. Saving a `.json` or
+`.yaml` file that would no longer parse is refused with the parser's message and line, and
+nothing is written. This holds even for a file that did not parse before: JSON with comments,
+which some mods accept, has to lose its comments to be saved from the panel. Many such mods reload these files as soon as they change, so a save to a
+running server often takes effect at once.
+
 The **Raw text** tab edits the whole file as text, for changes the form cannot show,
-such as comments or settings the mod does not describe. It has no validation. It
-compares line by line against the chosen version. Save or discard form changes before
+such as comments or settings the mod does not describe. Saving refuses a line that is not
+a `Key = value` setting, a `[Section]` header or a `#` comment, and names the line. A file
+that already held such lines is a mod's own format and is saved unchecked. A file with
+Windows line endings keeps them. It compares line by line against the chosen version. Save or discard form changes before
 switching to it. Raw editing needs its own permission, `config.raw`.
 
 If the file changed after you opened it, for example because the mod rewrote it,
@@ -832,7 +992,9 @@ overwrite the file with them.
 You can edit configuration on a stopped or a running server. Edits to a running
 server take effect when it restarts, so restart it once you have saved everything;
 some mods pick changes up sooner. If a mod writes its old settings back when the
-server stops, Valmin puts your saved values back before the next start.
+server stops, Valmin puts your saved values back before the next start. This applies to
+`.cfg` files only: a YAML, JSON or text file stays as written, including any change the mod
+makes to it later.
 
 Leaving a page with unsaved edits asks you to confirm first, so a mistyped link
 does not discard them. Saving clears the prompt.
@@ -856,17 +1018,45 @@ panel could measure. Gaps marked **not observed** are excluded from the summarie
 they do not mean that the server was empty. The panel retains 30 days of observations,
 so a period without a retained starting count begins with unknown coverage.
 
-The live period refreshes while the page is visible. **Now** comes from the live stats
-feed and shows **unknown** when its reading is missing or stale. The count history
-does not identify individual players or prove how long any one person played.
+While the page is visible, the live period refreshes when the player count changes
+and every five minutes. **Now** comes from the live stats feed and shows **unknown**
+when its reading is missing or stale. The count history does not identify individual
+players or prove how long any one person played.
 
 ### Seen on this server
 
 Operators and administrators also see the accounts the server named in its log, with
 each account's name, platform ID and when it was last seen. Seen means the account
-reached the server, not that it played or was let in. **Copy ID** copies the ID for
-the lists below. The server prints the same names and IDs in its log, so anyone who
-can read the console can see them there.
+reached the server, not that it played or was let in. The server prints the same names
+and IDs in its log, so anyone who can read the console can see them there.
+
+Each account has these actions:
+
+| Action         | Does                                            |
+| -------------- | ----------------------------------------------- |
+| **Ban**        | Adds the ID to **Banned**.                      |
+| **Make admin** | Adds the ID to **Admins**.                      |
+| **Allow**      | Adds the ID to **Allowlist**.                   |
+| **Kick**       | Sends `kick` with the ID to the running server. |
+| **Copy ID**    | Copies the ID.                                  |
+
+Every action except **Copy ID** asks first. Ban, Make admin and Allow save the list
+the same way the editor below does. If someone changed the list in the meantime, the
+panel reads it once more and adds the ID to that version; a second change in that
+moment shows as an error. An ID already on the list, bare or with its prefix, is left
+as it is.
+An editor with no unsaved edits shows the change at once. If you have unsaved edits,
+saving them shows the conflict described under [Player lists](#player-lists).
+Allowing someone on an empty allowlist turns it on, so only players on it may join.
+
+**Kick** appears while the server runs, when it has the RCON mod and you may send
+`kick` (see [Send server commands](#send-server-commands)). It asks the server to
+disconnect the account if it is connected; it can join again unless it is banned. On a
+crossplay server the panel sends the ID as shown, and on a server without crossplay the
+SteamID without its `Steam_` prefix, which is how each names a connection. That is
+worked out from the game's and the mod's code and has not yet been confirmed on a live
+server. The answer, shown under the account, says `Kicked` whether or not the account
+was connected, so check the player count afterwards.
 
 When the server refused an account's latest attempt because of a wrong password, the
 account shows **Refused: wrong password** with the time. The mark clears on the
@@ -894,8 +1084,16 @@ those servers only names from the server's history and ValminEye are shown.
 
 Administrators open **Players** in the header's **Administration** menu for every
 account any server has seen, newest first, with its names and the servers it was seen
-on. Search matches an ID or any name. Names and counts are the ones above, summed over
-the servers.
+on. Search matches an ID, any name, or a server's name. Names and counts are the ones
+above, summed over the servers.
+
+**Ban on every server** and **Ban on chosen servers** open a list of every server,
+with all of them ticked or only the ones the account was seen on. **Ban on** _N_
+**servers** adds the ID to each ticked server's **Banned** list, one server after
+another. Each server then shows **Banned**, **Already banned**, or why its list could
+not be saved; one failure does not stop the rest. The dialog stays open until the last
+server is done. Every server keeps its own list, and each save is recorded in the audit
+log.
 
 ### Player lists
 
@@ -908,6 +1106,8 @@ Three lists control who may do what:
 | **Allowlist** | When it has anyone on it, only these players may join. |
 
 Enter one ID per line, bare or with a platform prefix, and choose **Save list**.
+Under the field, each ID shows the names it was [seen](#seen-on-this-server) with on
+this server, or **not seen on this server**. A bare ID matches its prefixed form.
 Comments already in a file are kept but not shown. Saving does not restart the server.
 The game usually picks up the change while running; if it does not, use **Restart
 server** on this page. If someone else changed the list while you edited it, the
@@ -942,7 +1142,10 @@ be deleted while a setup links to it.
 
 A setup keeps launch and backup settings, Valmin-managed mods with their exact
 registries, versions, locks, enabled states, and client labels, plus supported mod
-configuration files: flat `.cfg` files up to 1 MiB each. Valmin keeps the
+configuration files: `.cfg` files directly in `BepInEx/config`, up to 1 MiB each. Files in
+subfolders, YAML, JSON and text files, and server-root files are not carried; **Save current
+setup** lists them under *config files are not included*, and a restore leaves them as they
+are. Valmin keeps the
 required package files, so a restore does not need the registry or its download
 cache. Saving fails if a required package cannot be captured. Game build and world
 name appear in the comparison but do not change on restore. The server password and
@@ -964,14 +1167,17 @@ A template recreates a server's setup on any Valmin panel. Both forms are under
 **Share as a template** on the server's **Settings** page.
 
 **Download template file** saves the launch settings, the mods at their installed
-versions and every config file. It carries no password and no world. A mod's config
-can hold a key or a webhook, so read the file before you share it.
+versions and the `.cfg` files directly in `BepInEx/config`. It carries no password and no
+world. A mod's config can hold a key or a webhook, so read the file before you share it.
+Neither the file nor the code carries config files in subfolders, YAML, JSON or text files,
+or server-root files; the section lists them under *config files are not included*.
 
 A template code is a short text that recreates the server's mod setup. Choose **Create
 template code**, then **Copy code**. Codes start with `valmin1:`.
 
 The code carries launch and backup settings, enabled mods pinned to their versions and
-registries, and the settings changed in the panel's config editor. Dependencies, including a
+registries, and the settings changed in the panel's config editor, measured against the file as
+the panel first found it or as the newest mod install wrote it. Dependencies, including a
 modpack's members, are left out and added again on import. The code excludes the password, the
 world, disabled mods, mods installed outside Valmin, and changes made to config files outside
 the panel. The summary under the code lists what was left out.
@@ -1004,7 +1210,7 @@ are installed on the server too, so check the list in the preview.
 The preview lists the server settings, the pinned mods and the config files. For a code,
 each config file is shown with the settings it changes, and a setting that looks like a
 token or a webhook is marked **looks secret**. A mod no longer in the catalogue is marked,
-and problems that block the template are listed at the top. Choose a panel name and password, then choose **Create server**.
+and problems that block the template are listed at the top. Choose a panel name and password, then choose **Create server**. The name starts as the template's, with a number added when a server already has it. When setup finishes, the panel opens the new server.
 
 Valmin downloads the game, installs each pinned mod in turn, then writes the
 configuration. A code's settings are applied over the config files the mods create; a
@@ -1074,6 +1280,12 @@ says administrators reach every server and need no server access. Resetting a pa
 shows only the new password. Only the owner, the account created at first-run setup, can
 reset the owner's password.
 
+A password you generate or reset is chosen by you, not by the account's owner, so that
+person is sent to **Change password** after signing in with it and has to choose their own
+before the panel opens anything else. The panel's pages enforce this; the API does not refuse
+other requests for it. An account created from an invite, one recovered from the command line,
+and a member signed in by a [trusted proxy](#sign-in-with-single-sign-on) are not asked.
+
 Making someone an administrator, disabling their sign-in and resetting their password each
 ask you to confirm first, and each ends that account's sessions. Changing an administrator
 back to a member, and enabling sign-in again, apply at once.
@@ -1095,7 +1307,7 @@ and is signed in.
 
 **Invite history** lists every invite with who issued it and whether it is pending,
 redeemed, revoked or expired, with a filter for each. **Revoke invite** cancels a
-pending one.
+pending one after you confirm.
 
 ### Sign in with single sign-on
 
@@ -1162,11 +1374,20 @@ minute, whether or not the current password was right. An administrator resettin
 password from **Users** signs you out everywhere, including this browser. If you cannot
 sign in at all, see [reset an account password](troubleshooting.md#reset-an-account-password).
 
+### See where you are signed in
+
+Open the account menu and choose **Signed-in devices**. The page lists each browser or
+device signed in to your account, with its address, its browser as it reported itself, when
+it was last active and when it signed in. This browser is marked. Choose **Sign out** on
+another and confirm: it stops being signed in at once and has to sign in again. By default a session
+lasts up to 30 days, and ends after a day without use. The page is `/account/sessions`.
+
 ### Set your time zone and time format
 
 Open the account menu and choose **Date and time**. Pick a zone from the list, such as
 `Europe/Berlin`, and save. The panel then shows times in that zone, and new schedules run
-in it. Existing schedules keep the zone they were created with. The page is
+in it. Existing schedules keep their zone until you move them on
+[Maintenance](operations.md#schedule-maintenance). The page is
 `/account/date-time`.
 
 Under the zone, **Clock** chooses a 24-hour or 12-hour clock and **Date** chooses day, month,
@@ -1184,6 +1405,12 @@ Schedules follow daylight saving: one set to 04:00 in `Europe/Berlin` runs at 04
 time all year. A run inside the hour a clock change skips is missed that day, and one inside
 the hour it repeats runs twice. The schedule editor warns when the chosen time falls in such
 an hour, which is 02:00 to 03:00 in most of Europe.
+
+### Choose light or dark
+
+The theme button in the header, beside the **Administration** menu, steps through
+**System**, which follows your device, **Light** and **Dark**. The choice is kept in the
+browser, so each browser has its own.
 
 ## Read the audit log
 
@@ -1232,7 +1459,8 @@ Three alerts are built in and need no rule: a server that stops unexpectedly, a 
 backup and a new game build. **Also post built-in alerts** on a channel decides whether they
 reach it. A shared channel gets them for every server, a server's own channel for that
 server, and a new game build reaches shared channels only. A channel that a rule already
-sends the same news to gets it once.
+sends the same news to gets it once. To style the unexpected-stop alert, add a **Stopped
+unexpectedly** rule: the channels it posts to get its message instead of the built-in one.
 
 The switch on the right pauses a channel. A paused channel receives nothing, including
 messages that were still waiting to be sent when you paused it. Deleting a channel removes
@@ -1246,16 +1474,22 @@ Select **Add rule** and choose the event:
 | ---------------------- | ------------------------------------- | -------------------------------------------------------------------- |
 | Server status          | **Server started**                    | Valmin started or restarted a server and its world loaded.           |
 | Server status          | **Server stopped**                    | Valmin stopped a server: by hand, by auto-stop or for a power cut.   |
+| Server status          | **Stopped unexpectedly**              | A server stopped or restarted on its own: a crash, running out of memory or a host reboot. Also a server the [watchdog](operations.md#restart-a-hung-server) found hung. |
+| Server status          | **Server updated**                    | A game update installed a new build, or applying tested updates updated mods. |
 | Server status          | **Power cut soon**                    | A planned power cut is close: players are being warned. Administration page only. |
+| Server status          | **Sign-ins blocked**                  | An account had too many failed sign-ins from anywhere and the panel is refusing it for a short while. At most once an hour per account, and only for an account that exists. Administration page only. |
 | Problems               | **Crash loop**                        | A server is crashing repeatedly.                                     |
 | Problems               | **Server error**                      | A server is in an error state and needs a check.                     |
 | Problems               | **Unclean stop**                      | A server stopped before its world finished saving.                   |
 | Problems               | **Job failed**                        | A job failed and nothing has retried it.                             |
 | Problems               | **Job stuck**                         | A job has been running unusually long.                               |
 | Problems               | **Backup needs a look**               | The [world check](operations.md#world-check) flagged the newest backup. |
+| Problems               | **Mods failed to load**               | The server's last start could not load some of its mods.             |
 | Maintenance            | **Update available**                  | A new game build is available.                                       |
 | Maintenance            | **Restart required**                  | A change is waiting for a restart.                                   |
 | Maintenance            | **Backups stale**                     | Scheduled backups are not producing archives.                        |
+| Maintenance            | **Mod updates**                       | Newer versions of a server's mods are available. Only checked while such a rule exists. |
+| Maintenance            | **Update test finished**              | An [update test on a copy](#test-an-update-on-a-copy) ended: how its mods loaded, and whether the updates are being applied. |
 | Maintenance            | **Low disk**                          | The host is running out of disk space. Administration page only.     |
 | Players, Bosses, Raids | [Game events](#game-events-valmineye) | What happens in the game, reported by ValminEye.                     |
 
@@ -1289,8 +1523,8 @@ Add as many rules as you like, including several for the same event: for example
 rules for the same event gets one message.
 
 Each rule in the list shows where it posts and its settings in brief. Its switch pauses it;
-nothing is deleted. **Deliveries** shows what it has sent, **Duplicate** opens a copy to save
-as a new rule, the pencil edits it, and the bin deletes it.
+nothing is deleted. **Deliveries** shows what it has sent in the last 30 days, **Duplicate**
+opens a copy to save as a new rule, the pencil edits it, and the bin deletes it.
 
 A problem or maintenance event is sent when it starts. When it clears, Valmin edits that same
 Discord message: it turns green and its title reads **Resolved after 23 minutes: …**. If the
@@ -1303,6 +1537,17 @@ it is sent anyway). A server that stops before then is not reported as started. 
 stopped** says why: who stopped it, **No players for N minutes**, or **Planned power cut**.
 A server that stops on its own, or that Docker restarted without Valmin, is reported as
 stopped unexpectedly instead.
+
+**Stopped unexpectedly** and **Server error** name the cause Valmin saw. When the kernel
+stopped the server for running out of memory, they say so and advise raising the server's
+memory limit in its settings, or freeing memory on the host for a server without a limit.
+
+**Mods failed to load** is checked right after each start, and every five minutes,
+from the server's BepInEx log. It names the mods and the loader's reason for the first one,
+and clears on the next start that loads them all. **Mod updates** is sent once when updates
+appear and clears once they are applied; it does not show on the server card. **Server
+updated** reports the new game build after a game update. Applying tested updates that also
+change the game build sends the build and the updated mods as two messages.
 
 **Recent deliveries**, at the bottom of both pages, lists every attempt, newest first, and
 can be filtered by channel and status. On a server's tab it lists only messages about that
@@ -1359,9 +1604,10 @@ in a reconnect loop does not flood the channel.
 
 ## Use the Discord bot
 
-The Discord bot lets people check and start servers from Discord with `/status`
-and `/start`. Everyone in a linked channel can use both commands, so link only
-the servers you are happy for them to start. Bot admins can also plan
+The Discord bot lets people check, join and start servers from Discord with `/status`,
+`/join` and `/start`. Everyone in a linked channel can use these commands, so link only
+the servers you are happy for them to see and start. Bot admins can also restart, stop,
+back up and update the linked servers, and plan
 [power cuts](operations.md#stop-every-server-before-a-power-cut) with `/shutdown`.
 
 1. In the Discord Developer Portal, create an application, add a bot, and copy
@@ -1381,10 +1627,18 @@ last link to a Discord server is removed, the bot takes its commands out of that
 server the next time it connects.
 
 `/status` lists each linked server as online with its player count, starting,
-stopping or offline. A list too long for one Discord message ends with how many
-servers it left out. `/start` starts a stopped server; with several linked
+stopping or offline. A running crossplay server's line adds its join code. A list too
+long for one Discord message ends with how many servers it left out.
+
+`/join` says how to join each linked server, or the one you pick: a crossplay server's
+join code once the server has logged it, otherwise the [join address](#connections) with its
+Steam link, and the profile code while the server's player mods still match it. It is
+what the overview's join card shows, without the password. A server with no join address
+says so.
+
+`/start` starts a stopped server; with several linked
 servers, pick one from the suggestions. The reply changes to say when the server
-is online, or that it failed; the reason stays in the panel's job history. Together with
+is online, or that it failed; the reason stays under Operations on the server's overview in the panel. Together with
 [auto-stop](operations.md#stop-a-server-when-nobody-plays), players can start
 an empty server themselves when they want to play.
 
@@ -1393,16 +1647,48 @@ to be opened.
 
 ### Bot admins
 
-Under **Bot admins**, list the Discord users or roles who may use `/shutdown`, one
+Under **Bot admins**, list the Discord users or roles who may use the admin commands, one
 ID per line: right-click a member or a role and copy its ID. Choose the time zone the
 times they type are read in, then save.
+
+The server commands act on the servers linked to the channel, whether or not the link
+allows `/start`. With several linked servers, pick one from the suggestions.
+
+- `/restart` restarts a running server and `/stop` stops it. Players are first told in game
+  that the server restarts or stops when all of them have left, or in 5 minutes at the
+  latest, and the command waits for that; `wait` sets the minutes, from 0 to 60. The warning
+  needs an RCON mod on the server; without one the wait still applies. With `wait:0` the
+  server restarts or stops at once. The wait shows under Operations in the panel, where you can
+  cancel it.
+- `/backup` backs up the server's world. A stopped server is backed up at once. A running
+  server stops for the backup and starts again, so players are warned and waited for first,
+  as with `/restart`, and `wait` works the same way.
+- `/update test` tries updates on a copy of the server, as
+  [Test an update on a copy](#test-an-update-on-a-copy) does. `what` chooses the game, the
+  mods or both (the default). With `apply:True`, the updates are applied when every mod
+  loaded and nobody is on the server. Once the test ends, the reply says what the copy runs
+  that is newer (the game build and how many mods), whether every mod loaded or which did
+  not, and when nothing is newer, that the copy can be discarded.
+- `/update apply` installs what the copy runs on the server, the same as **Apply to the
+  server**.
+- `/update discard` deletes the copy with its world and backups, stopping it first if it
+  runs.
+
+A reply follows its job for 14 minutes, the longest Discord lets it be edited. A job that runs
+longer finishes in the panel, where Operations on the server's overview and
+[notifications](#get-notified) report it. To keep admins informed in Discord, send
+notifications to a private admin channel: add its webhook as a shared channel under
+**Notifications** and a rule for the events you want, such as failed jobs, alerts or
+**Update test finished**.
 
 - `/shutdown add time:14:00` plans a power cut at the next 14:00, or give a date as
   `2026-10-09 14:00`. Every server on the panel stops before it, not only the linked ones.
 - `/shutdown list` lists the planned power cuts in each reader's own time zone.
 - `/shutdown cancel` cancels one; pick it from the suggestions.
 
-Anyone else who tries `/shutdown` is refused. A role ID lets every member of that role
-plan a power cut for every server, so whoever can assign roles in the Discord server
-decides who that is. List user IDs instead when that is too broad. The audit log records the power cut as
-`shutdowns.create` or `shutdowns.delete` by `Discord: <name> (<user id>)`.
+Anyone else who tries an admin command is refused. A role ID lets every member of that role
+update and stop the linked servers and plan a power cut for every server, so whoever can
+assign roles in the Discord server decides who that is. List user IDs instead when that is
+too broad. The audit log records what an admin does by `Discord: <name> (<user id>)`: a power
+cut as `shutdowns.create` or `shutdowns.delete`, and a server command under the same action as
+in the panel, such as `instances.restart` or `instances.update_test.apply`.

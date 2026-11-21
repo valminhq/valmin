@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
@@ -56,7 +57,7 @@
 </script>
 
 <div class="grid max-w-2xl gap-4">
-	<h2 class="text-2xl font-semibold tracking-tight">Clone this server</h2>
+	<PageHeader title="Clone this server" level={2} />
 	<Problem error={failure} />
 
 	{#if !canClone}

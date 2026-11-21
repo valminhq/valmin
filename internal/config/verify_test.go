@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -218,6 +219,45 @@ func TestGameNetworkAcceptsARefusedConnection(t *testing.T) {
 
 	if err := VerifyGameNetwork(t.Context(), networkFake("127.0.0.1"), &cfg, closedPort(t)); err != nil {
 		t.Fatalf("VerifyGameNetwork: %v", err)
+	}
+}
+
+// The probe is created as a game container is, so a runtime the daemon cannot run stops the boot.
+func TestGameNetworkProbeRunsUnderTheGameRuntime(t *testing.T) {
+	cfg := Defaults()
+	cfg.Game.Network = DefaultGameNetwork
+	cfg.Game.Runtime, cfg.Game.DNS = "runsc", []string{"1.1.1.1"}
+	cfg.Data.HostRoot = "/host/valmin"
+
+	f := networkFake("127.0.0.1")
+	var probe runtime.ContainerSpec
+	start := f.OnStart
+	f.OnStart = func(c *runtime.FakeContainer) {
+		probe = c.Spec
+		start(c)
+	}
+	if err := VerifyGameNetwork(t.Context(), f, &cfg, closedPort(t)); err != nil {
+		t.Fatalf("VerifyGameNetwork: %v", err)
+	}
+	if probe.OCIRuntime != "runsc" {
+		t.Errorf("probe runtime = %q, want runsc", probe.OCIRuntime)
+	}
+	if !slices.Equal(probe.Binds, cfg.GameResolvBinds()) {
+		t.Errorf("probe binds = %+v, want the game resolv.conf %+v", probe.Binds, cfg.GameResolvBinds())
+	}
+}
+
+// A runtime Docker refuses is named in the startup error.
+func TestGameNetworkRefusalNamesTheRuntime(t *testing.T) {
+	cfg := Defaults()
+	cfg.Game.Network = DefaultGameNetwork
+	cfg.Game.Runtime, cfg.Game.DNS = "kata", []string{"1.1.1.1"}
+
+	f := networkFake("127.0.0.1")
+	f.CreateErr = errors.New("unknown or invalid runtime name: kata")
+	err := VerifyGameNetwork(t.Context(), f, &cfg, 1)
+	if err == nil || !strings.Contains(err.Error(), `runtime "kata"`) {
+		t.Errorf("VerifyGameNetwork = %v, want a refusal naming the runtime", err)
 	}
 }
 

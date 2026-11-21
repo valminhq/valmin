@@ -76,7 +76,16 @@ export type GameKind =
 	| 'raid_ended';
 
 /** What a rule can route: a condition the scan evaluates, or a one-off event. */
-export type RuleKind = InboxKind | 'power_cut' | 'server_started' | 'server_stopped' | GameKind;
+export type RuleKind =
+	| InboxKind
+	| 'power_cut'
+	| 'sign_ins_blocked'
+	| 'server_started'
+	| 'server_stopped'
+	| 'instance_down'
+	| 'game_updated'
+	| 'update_test_finished'
+	| GameKind;
 
 /** Which destinations hear about one kind of event, on one server or on every server, with the
  * kind's thresholds, its message and an optional quiet window. */

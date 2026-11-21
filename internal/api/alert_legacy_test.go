@@ -180,3 +180,58 @@ func TestAnUnexpectedStopReachesARuleDestinationOnce(t *testing.T) {
 	assertDeliveries(t, db, "a destination no rule names", everyone,
 		map[string]int{notify.KindInstanceDown.String(): 1})
 }
+
+// TestAnInstanceDownRuleReplacesTheBuiltInMessage asserts a destination an instance_down rule
+// names gets the rule's message once, and a destination no rule names still gets the built-in
+// one.
+func TestAnInstanceDownRuleReplacesTheBuiltInMessage(t *testing.T) {
+	t.Parallel()
+	rt, db, fake := supervisorWorld(t)
+	recordingReceiver(t, rt, http.StatusNoContent)
+	ruled := seedWebhook(t, db, "ruled")
+	everyone := seedWebhook(t, db, "everyone")
+	ruleID := seedRule(t, db, alerts.KindInstanceDown, "", ruled)
+	containerID := seedInstance(t, rt, db, fake, "running")
+
+	fake.Get(containerID).Exit(0)
+	if err := rt.supervisor.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	assertDeliveries(t, db, "the rule's destination", ruled,
+		map[string]int{notify.KindInstanceDown.String(): 1})
+	assertDeliveries(t, db, "a destination no rule names", everyone,
+		map[string]int{notify.KindInstanceDown.String(): 1})
+	sent, err := db.ListDeliveries(t.Context(), store.DeliveryFilter{RuleID: ruleID}, "", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sent) != 1 || sent[0].WebhookID != ruled {
+		t.Errorf("the rule sent %d deliveries, want 1 to its destination", len(sent))
+	}
+}
+
+// TestAServerInstanceDownRuleReplacesTheBuiltInOnASharedChannel asserts a rule about one server
+// that posts to a shared channel takes the built-in message's place there too.
+func TestAServerInstanceDownRuleReplacesTheBuiltInOnASharedChannel(t *testing.T) {
+	t.Parallel()
+	rt, db, fake := supervisorWorld(t)
+	recordingReceiver(t, rt, http.StatusNoContent)
+	shared := seedWebhook(t, db, "shared")
+	containerID := seedInstance(t, rt, db, fake, "running")
+	instanceID := seededInstanceID
+	if err := db.SaveAlertRule(t.Context(), &store.AlertRule{
+		ID: store.NewID(), ConditionKind: alerts.KindInstanceDown.String(), Params: "{}", Enabled: true,
+		InstanceID: &instanceID, WebhookIDs: []string{shared},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	fake.Get(containerID).Exit(0)
+	if err := rt.supervisor.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	assertDeliveries(t, db, "the shared channel", shared,
+		map[string]int{notify.KindInstanceDown.String(): 1})
+}

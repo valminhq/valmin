@@ -149,6 +149,37 @@ describe('Saved setups', () => {
 		});
 	});
 
+	it('lists the config files a saved setup does not carry', async () => {
+		serve();
+		daemon.on('GET', '/instances/inst-a/configs', () =>
+			Response.json({
+				items: [
+					{
+						file: 'plugin.cfg',
+						plugin: '',
+						size_bytes: 1,
+						installed_mods: [],
+						dir: 'BepInEx/config',
+						portable: true
+					},
+					{
+						file: 'expand_world/expand_biomes.yaml',
+						plugin: '',
+						size_bytes: 1,
+						installed_mods: [],
+						dir: 'BepInEx/config',
+						portable: false
+					}
+				]
+			})
+		);
+		await open();
+
+		expect(await screen.findByText('1 config file is not included')).toBeTruthy();
+		expect(screen.getByText('expand_world/expand_biomes.yaml')).toBeTruthy();
+		expect(screen.queryByText('plugin.cfg')).toBeNull();
+	});
+
 	it('keeps save and restore unavailable while the server is running', async () => {
 		serve({ state: 'running' });
 		await open();

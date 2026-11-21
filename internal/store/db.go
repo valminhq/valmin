@@ -19,9 +19,14 @@ import (
 //
 // Writes go through Writer, reads through Reader. Reader connections are opened query_only, so
 // a write sent to the wrong pool fails loudly instead of competing for the write lock.
+//
+// The mod catalogue lives in a file of its own, attached as "catalogue" to every Writer and
+// Reader connection, so queries name its tables like the panel's. Catalogue is its own single
+// writer: a sync's batches never hold the panel's writer.
 type DB struct {
-	Writer *sql.DB
-	Reader *sql.DB
+	Writer    *sql.DB
+	Reader    *sql.DB
+	Catalogue *sql.DB
 }
 
 // readerConns bounds the reader pool. Small: this is a single-host panel, and every
@@ -48,34 +53,52 @@ var expected = []struct{ name, want string }{
 	{"synchronous", "1"}, // NORMAL
 }
 
-// Open connects both pools, verifies the pragma set on every connection, and returns a
-// DB ready for Migrate.
-func Open(ctx context.Context, driver, dsn string) (*DB, error) {
+// Open connects the catalogue at cataloguePath, then both panel pools with it attached,
+// verifies the pragma set on every connection, and returns a DB ready for Migrate. An empty
+// cataloguePath opens the panel database alone, for a tool that runs beside a daemon and must
+// not touch the catalogue; Catalogue is then nil and no catalogue query works.
+func Open(ctx context.Context, driver, dsn, cataloguePath string) (*DB, error) {
 	if driver != "sqlite" {
 		return nil, fmt.Errorf("unsupported db.driver %q: only sqlite is wired", driver)
 	}
 
-	writer, err := openPool(ctx, dsn, false, 1)
-	if err != nil {
+	db := &DB{}
+	if cataloguePath != "" {
+		var err error
+		if db.Catalogue, err = openCatalogue(ctx, cataloguePath); err != nil {
+			return nil, fmt.Errorf("mod catalogue: %w", err)
+		}
+	}
+	var err error
+	if db.Writer, err = openPool(ctx, dsn, false, 1, cataloguePath); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("writer pool: %w", err)
 	}
-	reader, err := openPool(ctx, dsn, true, readerConns)
-	if err != nil {
-		_ = writer.Close()
+	if db.Reader, err = openPool(ctx, dsn, true, readerConns, cataloguePath); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("reader pool: %w", err)
 	}
-	return &DB{Writer: writer, Reader: reader}, nil
+	return db, nil
 }
 
-func openPool(ctx context.Context, dsn string, readOnly bool, maxConns int) (*sql.DB, error) {
+// openPool opens a pool of up to maxConns connections to dsn, with attach attached as the
+// catalogue when it is not empty.
+func openPool(ctx context.Context, dsn string, readOnly bool, maxConns int, attach string) (*sql.DB, error) {
 	params := pragmas
 	if readOnly {
 		params = append(append([]string{}, pragmas...), "_pragma=query_only(1)")
 	}
 
-	db, err := sql.Open("sqlite", withParams(dsn, params))
-	if err != nil {
-		return nil, fmt.Errorf("open: %w", err)
+	var db *sql.DB
+	if attach == "" {
+		var err error
+		if db, err = sql.Open("sqlite", withParams(dsn, params)); err != nil {
+			return nil, fmt.Errorf("open: %w", err)
+		}
+	} else {
+		//nolint:contextcheck // the driver's connection hook carries no context
+		connector := newAttachingConnector(withParams(dsn, params), attach)
+		db = sql.OpenDB(connector)
 	}
 	db.SetMaxOpenConns(maxConns)
 	db.SetMaxIdleConns(maxConns)
@@ -85,6 +108,13 @@ func openPool(ctx context.Context, dsn string, readOnly bool, maxConns int) (*sq
 		return nil, err
 	}
 	return db, nil
+}
+
+// SQLitePath is the database file a sqlite DSN names: the DSN without its file: prefix or its
+// query parameters.
+func SQLitePath(dsn string) string {
+	path, _, _ := strings.Cut(strings.TrimPrefix(dsn, "file:"), "?")
+	return path
 }
 
 // withParams appends query parameters to a DSN that may or may not already have some.
@@ -132,9 +162,15 @@ func assertPragmas(ctx context.Context, db *sql.DB, maxConns int) error {
 	return nil
 }
 
-// Close shuts both pools down.
+// Close shuts every open pool down.
 func (db *DB) Close() error {
-	return errors.Join(db.Reader.Close(), db.Writer.Close())
+	var errs []error
+	for _, pool := range []*sql.DB{db.Reader, db.Writer, db.Catalogue} {
+		if pool != nil {
+			errs = append(errs, pool.Close())
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // scanner is the common ground between *sql.Row and *sql.Rows, so one decode function can

@@ -79,7 +79,7 @@ func TestExpandFillsPlaceholdersAndKeepsOtherBraces(t *testing.T) {
 
 func TestEveryRuleKindHasADefaultMessage(t *testing.T) {
 	kinds := slices.Concat(alerts.Kinds(), []alerts.Kind{
-		alerts.KindPowerCut, alerts.KindServerStarted, alerts.KindServerStopped,
+		alerts.KindPowerCut, alerts.KindSignInsBlocked, alerts.KindServerStarted, alerts.KindServerStopped,
 	})
 	for _, game := range gameEvents {
 		kinds = append(kinds, game.rule)

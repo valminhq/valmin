@@ -43,6 +43,8 @@ mounts, ports, and the browser address.
 | `VALMIN_HTTP_PORT`          | Host TCP port for HTTP redirects; defaults to `80`.                                                |
 | `VALMIN_HTTPS_PORT`         | Host TCP and UDP port for HTTPS; defaults to `443`. Also requires an origin override when changed. |
 | `VALMIN_SUBNET_PREFIX`      | First two octets of the three Docker subnets; defaults to `10.89`. Set before the first start.     |
+| `VALMIN_GAME_RUNTIME`       | Docker runtime for game servers, such as `runsc`; unset. See [sandboxed game servers](sandboxed-game-servers.md). |
+| `VALMIN_GAME_DNS`           | Resolvers for game servers, such as `1.1.1.1,9.9.9.9`; unset. Required with `VALMIN_GAME_RUNTIME`. |
 
 Keep `.env` valid shell syntax: quote values containing spaces, and put no spaces
 around `=`. `prepare-host.sh` reads the same file to select images. The default images
@@ -65,13 +67,16 @@ override should name a digest too.
 | `VALMIN_GAME_IMAGE`                         | Runtime image already present on the Docker host.                                  |
 | `VALMIN_GAME_STEAMCMD_IMAGE`                | Download helper image; `steamcmd/steamcmd:latest`.                                 |
 | `VALMIN_GAME_NETWORK`                       | Docker network shared by game containers and the daemon; `valmin-games`.           |
+| `VALMIN_GAME_RUNTIME`                       | Docker runtime game containers run under, such as `runsc` or `kata`; empty is Docker's default. See [sandboxed game servers](sandboxed-game-servers.md). |
+| `VALMIN_GAME_DNS`                           | Up to three resolver addresses, comma-separated, mounted as each game container's `/etc/resolv.conf`; empty keeps Docker's DNS. Required with `VALMIN_GAME_RUNTIME`. |
 | `VALMIN_GAME_PUBLIC_IP_URL`                 | Service that answers with the host's public IP; `https://api.ipify.org`. See [reachability](#check-that-players-can-reach-a-server). |
+| `VALMIN_GAME_LAN_PROBE_ADDRESS`             | IPv4 address and port on your LAN, such as `192.168.1.1:80`, that the deep diagnostics try to reach from a game server; empty. See [the diagnostics page](troubleshooting.md#check-the-diagnostics-page). |
 | `VALMIN_GAME_DEFAULT_MEM_MB`                | Default per-server memory limit; `4096`.                                           |
 | `VALMIN_GAME_STOP_TIMEOUT`                  | Graceful stop timeout; `120s`, also the minimum.                                   |
 | `VALMIN_GAME_LOG_PATTERNS`                  | Log-line pattern overrides; empty. See [log patterns](#override-log-patterns).     |
 | `VALMIN_PORTS_BASE` / `VALMIN_PORTS_STRIDE` | Port allocation start and spacing; `2456` / `5`.                                   |
 | `VALMIN_THUNDERSTORE_BASE_URL`              | Thunderstore host; `https://thunderstore.io`.                                      |
-| `VALMIN_THUNDERSTORE_SYNC_INTERVAL`         | How often every enabled registry is refreshed; `1h`.                               |
+| `VALMIN_THUNDERSTORE_SYNC_INTERVAL`         | How often every enabled registry is refreshed; `6h`.                               |
 | `VALMIN_HEXIUM_BASE_URL`                    | Hexium host; `https://valheim.hexium.gg`.                                          |
 | `VALMIN_HEXIUM_ENABLED`                     | Whether Hexium is searched and installable; `true`.                                |
 | `VALMIN_AUTH_SESSION_IDLE_TTL`              | Sign-out after this long without activity; `24h`.                                  |
@@ -338,7 +343,8 @@ direct variable and its `_FILE` form is an error.
 The panel generates the key only on its first start. Afterwards a missing or
 different key stops startup; see [key recovery](operations.md#recover-from-a-lost-master-key).
 The database defaults to `panel.db` under the same root. Preserve both in
-[installation backups](operations.md#back-up-the-whole-installation).
+[installation backups](operations.md#back-up-the-whole-installation). The mod catalogue
+lives at `cache/catalogue.db` under the data root whatever `db.dsn` says, and needs no backup.
 
 Durations accept values such as `30s`, `24h`, and whole days such as `7d`.
 Environment variables for lists, such as trusted proxy CIDRs, use comma-separated

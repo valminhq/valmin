@@ -24,6 +24,17 @@ beforeEach(() => {
 	session.ended = false;
 });
 
+describe('the theme switch', () => {
+	it('steps through the themes and keeps the choice', async () => {
+		render(AppHeader);
+		await click(screen.getByRole('button', { name: /^Theme: System/ }));
+		expect(localStorage.getItem('mode-watcher-mode')).toBe('light');
+		await click(screen.getByRole('button', { name: /^Theme: Light/ }));
+		expect(localStorage.getItem('mode-watcher-mode')).toBe('dark');
+		expect(screen.getByRole('button', { name: /^Theme: Dark/ })).toBeTruthy();
+	});
+});
+
 describe('signing out', () => {
 	it('opens the sign-in page when the panel owns the sign-in', async () => {
 		daemon.on('POST', '/auth/logout', () => new Response(null, { status: 204 }));

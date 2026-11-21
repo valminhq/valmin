@@ -1,3 +1,4 @@
+import { formatInstant } from '#lib/api/schedules.js';
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AlertRule, Delivery, DeliveryPage, Webhook } from '#lib/api/notifications.js';
@@ -374,8 +375,8 @@ describe('the deliveries', () => {
 		expect(row).toContain('Midgard');
 		expect(row).toContain('Failed');
 		expect(row).toContain('3 attempts');
-		expect(row).toContain(`created ${new Date('2026-09-24T10:00:00Z').toLocaleString()}`);
-		expect(row).toContain(`updated ${new Date('2026-09-24T10:02:00Z').toLocaleString()}`);
+		expect(row).toContain(`created ${formatInstant('2026-09-24T10:00:00Z')}`);
+		expect(row).toContain(`updated ${formatInstant('2026-09-24T10:02:00Z')}`);
 	});
 
 	it('shows no error or update time on a delivered row that never changed', async () => {
@@ -393,6 +394,7 @@ describe('the deliveries', () => {
 		['alert_opened', 'Alert raised'],
 		['alert_resolved', 'Alert cleared'],
 		['power_cut_soon', 'Power cut soon'],
+		['sign_ins_blocked', 'Sign-ins blocked'],
 		['server_started', 'Server started'],
 		['player_joined', 'Player joined'],
 		['some_new_kind', 'some new kind']

@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { resolve } from '$app/paths';
+	import PageHeader from '#lib/components/page-header.svelte';
+	import { pageNarrow } from '#lib/layout.js';
 	import { api } from '#lib/api/client.js';
 	import { ApiError } from '#lib/api/errors.js';
 	import { session } from '#lib/state/session.svelte.js';
@@ -8,7 +9,6 @@
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import Problem from '#lib/components/problem.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 
 	let current = $state('');
 	let next = $state('');
@@ -30,6 +30,7 @@
 			await api.post('/me/password', { current_password: current, new_password: next });
 			current = next = repeat = '';
 			changed = true;
+			if (session.user) session.user = { ...session.user, password_change_required: false };
 		} catch (err) {
 			failure = err;
 			if (err instanceof ApiError && err.code === 'invalid_credentials') current = '';
@@ -39,20 +40,26 @@
 	}
 </script>
 
-<main class="mx-auto grid max-w-2xl gap-6 p-6">
-	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
-		<ArrowLeft /> Servers
-	</Button>
-
-	<header class="grid gap-1">
-		<h1 class="text-2xl font-semibold tracking-tight">Change password</h1>
-		<p class="text-sm text-muted-foreground">
-			Choose a new password{session.user ? ` for ${session.user.username}` : ''}. Every other place
-			you are signed in is signed out; this one stays signed in.
-		</p>
-	</header>
+<main class={pageNarrow}>
+	<PageHeader title="Change password">
+		Choose a new password{session.user ? ` for ${session.user.username}` : ''}. Every other place
+		you are signed in is signed out; this one stays signed in.
+	</PageHeader>
 
 	<Problem error={failure} />
+
+	{#if session.user?.password_change_required}
+		<section
+			class="grid gap-1 rounded-lg border border-l-4 border-l-primary bg-muted/40 p-4"
+			role="status"
+		>
+			<h2 class="font-semibold">Choose your own password</h2>
+			<p class="text-sm text-muted-foreground">
+				An administrator chose the password you signed in with. Replace it with one only you know to
+				continue.
+			</p>
+		</section>
+	{/if}
 
 	{#if changed}
 		<section

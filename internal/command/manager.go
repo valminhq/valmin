@@ -126,14 +126,19 @@ func settings(dataDir string) (port int, password string, err error) {
 }
 
 // ClearPassword blanks the RCON password in the plugin config under serverDir, if there is one,
-// so the next Configure mints a fresh password. A copied server tree uses it to stop sharing its
-// source's password.
+// so the next Configure mints a fresh password, and removes the copies kept beside the config,
+// which hold the old one. A copied server tree uses it to stop sharing its source's password.
 func ClearPassword(serverDir string) error {
 	root, err := os.OpenRoot(serverDir)
 	if err != nil {
 		return fmt.Errorf("open server directory: %w", err)
 	}
 	defer func() { _ = root.Close() }()
+	for _, suffix := range modconfig.CopySuffixes() {
+		if err := root.Remove(ConfigPath + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove RCON config copy: %w", err)
+		}
+	}
 	info, err := root.Lstat(ConfigPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil

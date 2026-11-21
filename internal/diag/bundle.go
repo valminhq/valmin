@@ -146,6 +146,7 @@ func (r *Report) forBundle(red *strings.Replacer) Report {
 		inst := &out.Instances[i]
 		inst.Name = serverAlias(i)
 		inst.Image, inst.ImageIssue = red.Replace(inst.Image), red.Replace(inst.ImageIssue)
+		inst.RuntimeIssue = red.Replace(inst.RuntimeIssue)
 		if inst.ModsError != "" {
 			inst.ModsError = "Could not read installed mods."
 		}

@@ -48,7 +48,8 @@ type Instance struct {
 	// (02 §4.4 step 7, B12). 0 keeps everything in that class.
 	BackupKeepCold int `json:"backup_keep_cold"`
 	BackupKeepHot  int `json:"backup_keep_hot"`
-	// BackupOnRestart takes a cold archive between a restart's stop and its start.
+	// BackupOnRestart takes a cold archive after the stop of a restart, of an auto-stop and of a
+	// scheduled stop. The name is the column's; a stop a person makes by hand never archives.
 	BackupOnRestart     bool `json:"backup_on_restart"`
 	RemoteBackupEnabled bool `json:"remote_backup_enabled"`
 	RemoteKeepCold      int  `json:"remote_keep_cold"`
@@ -62,9 +63,19 @@ type Instance struct {
 	// announcement, and how to join. Empty when unset.
 	StatusNotice      string `json:"status_notice"`
 	StatusConnectInfo string `json:"status_connect_info"`
+	// StatusShowJoin adds the join address, or the join code with crossplay, to the public
+	// status page; StatusShowModpack adds the current profile code.
+	StatusShowJoin    bool `json:"status_show_join"`
+	StatusShowModpack bool `json:"status_show_modpack"`
+	// JoinHost is the host name or IP address players connect to, without a port. Empty when
+	// unset.
+	JoinHost string `json:"join_host"`
 	// AutoStopMinutes stops the running server once it has had no players for this long. 0 is
 	// off.
 	AutoStopMinutes int `json:"auto_stop_minutes"`
+	// Watchdog is what the panel does about a running server whose log has gone quiet: "off",
+	// "alert" or "restart". The values are instance.Watchdog's.
+	Watchdog string `json:"watchdog"`
 	// TestOf is the server this instance is an update-test copy of, nil for an ordinary server.
 	TestOf *string `json:"test_of,omitempty"`
 	// TestPassed is whether the test that made this update-test copy ran to the end.
@@ -83,7 +94,7 @@ const instanceColumns = `id, name, state, container_id, data_dir, base_port, ser
 	mem_limit_mb, cpu_limit, game_build_id, game_branch, game_backups,
 	backup_keep_cold, backup_keep_hot, backup_on_restart, remote_backup_enabled,
  remote_keep_cold, remote_keep_hot, remote_keep_snapshots, status_published,
-	status_notice, status_connect_info, auto_stop_minutes, test_of, (test_passed_at IS NOT NULL),
+	status_notice, status_connect_info, status_show_join, status_show_modpack, join_host, auto_stop_minutes, watchdog, test_of, (test_passed_at IS NOT NULL),
 	container_started_at, created_at, updated_at`
 
 func scanInstance(s scanner) (Instance, error) {
@@ -123,7 +134,11 @@ func scanInstance(s scanner) (Instance, error) {
 		&inst.StatusPublished,
 		&inst.StatusNotice,
 		&inst.StatusConnectInfo,
+		&inst.StatusShowJoin,
+		&inst.StatusShowModpack,
+		&inst.JoinHost,
 		&inst.AutoStopMinutes,
+		&inst.Watchdog,
 		&testOf,
 		&inst.TestPassed,
 		&containerStartedAt,
@@ -505,6 +520,28 @@ func (db *DB) UpdateInstanceAutoStop(ctx context.Context, id string, minutes int
 	return updateInstanceAutoStop(ctx, db.Writer, id, minutes)
 }
 
+// UpdateInstanceWatchdog sets what the panel does about a running server whose log has gone
+// quiet. It shapes no container, so it leaves restart_required alone.
+func (db *DB) UpdateInstanceWatchdog(ctx context.Context, id, mode string) error {
+	return updateInstanceWatchdog(ctx, db.Writer, id, mode)
+}
+
+func updateInstanceWatchdog(ctx context.Context, ex execer, id, mode string) error {
+	res, err := ex.ExecContext(ctx,
+		`UPDATE instances SET watchdog = ?, updated_at = ? WHERE id = ?`, mode, Now(), id)
+	if err != nil {
+		return fmt.Errorf("update watchdog for instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update watchdog for instance %s: %w", id, err)
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
+}
+
 func updateInstanceAutoStop(ctx context.Context, ex execer, id string, minutes int) error {
 	res, err := ex.ExecContext(ctx,
 		`UPDATE instances SET auto_stop_minutes = ?, updated_at = ? WHERE id = ?`, minutes, Now(), id)
@@ -752,6 +789,50 @@ func setInstanceStatusText(ctx context.Context, ex execer, id, notice, connectIn
 	return nil
 }
 
+// updateInstanceJoinHost sets the address players connect to. It shapes no container, so it
+// leaves restart_required alone.
+func updateInstanceJoinHost(ctx context.Context, ex execer, id, host string) error {
+	res, err := ex.ExecContext(ctx,
+		`UPDATE instances SET join_host = ?, updated_at = ? WHERE id = ?`, host, Now(), id)
+	if err != nil {
+		return fmt.Errorf("update join host for instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update join host for instance %s: %w", id, err)
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
+}
+
+// StatusShow is what the public status page adds beyond its text: how to join, and the current
+// profile code.
+type StatusShow struct {
+	Join    bool
+	Modpack bool
+}
+
+// setInstanceStatusShow sets what the public status page adds beyond its text. It shapes no
+// container, so it leaves restart_required alone.
+func setInstanceStatusShow(ctx context.Context, ex execer, id string, show StatusShow) error {
+	res, err := ex.ExecContext(ctx, `
+		UPDATE instances SET status_show_join = ?, status_show_modpack = ?, updated_at = ? WHERE id = ?`,
+		show.Join, show.Modpack, Now(), id)
+	if err != nil {
+		return fmt.Errorf("update status page contents for instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update status page contents for instance %s: %w", id, err)
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return nil
+}
+
 // PublishedStatus is everything the unauthenticated status route may read. A narrow struct
 // rather than the whole row, so a column added later cannot reach that route by being added
 // to instanceColumns. JobKind is the kind of the job holding the instance lock, empty when
@@ -762,6 +843,11 @@ type PublishedStatus struct {
 	Notice      string
 	ConnectInfo string
 	JobKind     string
+	Show        StatusShow
+	// JoinHost, BasePort and Crossplay are read only when Show.Join is set.
+	JoinHost  string
+	BasePort  int
+	Crossplay bool
 }
 
 // PublishedInstanceStatus returns the row only if it exists and has opted in, and (nil, nil)
@@ -773,9 +859,11 @@ func (db *DB) PublishedInstanceStatus(ctx context.Context, id, lockKey string) (
 	err := db.Reader.QueryRowContext(ctx, `
 		SELECT server_name, state, status_notice, status_connect_info,
 			COALESCE((SELECT jr.kind FROM job_locks jl JOIN job_runs jr ON jr.id = jl.job_id
-				WHERE jl.lock_key = ?), '')
+				WHERE jl.lock_key = ?), ''),
+			status_show_join, status_show_modpack, join_host, base_port, crossplay
 		FROM instances WHERE id = ? AND status_published = TRUE`, lockKey, id).
-		Scan(&st.ServerName, &st.State, &st.Notice, &st.ConnectInfo, &st.JobKind)
+		Scan(&st.ServerName, &st.State, &st.Notice, &st.ConnectInfo, &st.JobKind,
+			&st.Show.Join, &st.Show.Modpack, &st.JoinHost, &st.BasePort, &st.Crossplay)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -845,7 +933,7 @@ func TxCreateCloneInstance(
 			id, name, state, data_dir, base_port, server_name, world_name, password,
 			public, crossplay, crossplay_instance_id, preset, modifiers, extra_args,
 			modded, bepinex_version, restart_required, mem_limit_mb, cpu_limit, game_build_id,
-			game_branch, game_branch_password, game_backups, auto_stop_minutes,
+			game_branch, game_branch_password, game_backups, auto_stop_minutes, watchdog, join_host,
 			backup_keep_cold, backup_keep_hot, backup_on_restart, test_of, created_at, updated_at
 		)
 		SELECT ?, ?, 'provisioning', ?, ?, server_name, world_name, ?,
@@ -853,13 +941,16 @@ func TxCreateCloneInstance(
 			modded, bepinex_version, FALSE, mem_limit_mb, COALESCE(?, cpu_limit), game_build_id,
 			game_branch, ?, game_backups,
 			CASE WHEN ? THEN ? ELSE auto_stop_minutes END,
-			backup_keep_cold, backup_keep_hot, backup_on_restart,
+			CASE WHEN ? THEN 'off' ELSE watchdog END, join_host,
+			backup_keep_cold, backup_keep_hot, CASE WHEN ? THEN FALSE ELSE backup_on_restart END,
 			CASE WHEN ? THEN id END, ?, ?
 		FROM instances WHERE id = ? AND (state = 'stopped' OR (? AND state = 'running'))`,
 		n.ID, n.Name, n.DataDir, n.BasePort, n.Password,
 		n.UpdateTest, n.UpdateTest, n.CrossplayInstanceID,
 		n.CPULimit, nullIfEmpty(n.GameBranchPassword),
 		n.UpdateTest, updateTestAutoStopMinutes,
+		n.UpdateTest,
+		n.UpdateTest,
 		n.UpdateTest, now, now, sourceID, n.UpdateTest)
 	if err != nil {
 		if !isUniqueViolation(err) {
@@ -1072,10 +1163,13 @@ type InstanceUpdate struct {
 	Launch          *InstanceLaunch
 	Backup          *BackupPolicy
 	AutoStopMinutes *int
+	Watchdog        *string
+	JoinHost        *string
 	Branch          *InstanceBranch
 	Remote          *RemotePolicy
 	StatusText      *StatusText
 	StatusPublished *bool
+	StatusShow      *StatusShow
 	Name            *string
 }
 
@@ -1110,6 +1204,12 @@ func (u *InstanceUpdate) writes(ctx context.Context, ex execer, id string) []fun
 	if u.AutoStopMinutes != nil {
 		out = append(out, func() error { return updateInstanceAutoStop(ctx, ex, id, *u.AutoStopMinutes) })
 	}
+	if u.Watchdog != nil {
+		out = append(out, func() error { return updateInstanceWatchdog(ctx, ex, id, *u.Watchdog) })
+	}
+	if u.JoinHost != nil {
+		out = append(out, func() error { return updateInstanceJoinHost(ctx, ex, id, *u.JoinHost) })
+	}
 	if b := u.Branch; b != nil {
 		out = append(out, func() error { return updateInstanceBranch(ctx, ex, id, b.Name, b.Password) })
 	}
@@ -1123,6 +1223,9 @@ func (u *InstanceUpdate) writes(ctx context.Context, ex execer, id string) []fun
 	}
 	if u.StatusPublished != nil {
 		out = append(out, func() error { return setInstanceStatusPublished(ctx, ex, id, *u.StatusPublished) })
+	}
+	if show := u.StatusShow; show != nil {
+		out = append(out, func() error { return setInstanceStatusShow(ctx, ex, id, *show) })
 	}
 	if u.Name != nil {
 		out = append(out, func() error { return renameInstance(ctx, ex, id, *u.Name) })

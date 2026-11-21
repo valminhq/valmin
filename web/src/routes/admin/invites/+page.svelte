@@ -1,6 +1,8 @@
 <script lang="ts">
+	import EmptyState from '#lib/components/empty-state.svelte';
+	import PageHeader from '#lib/components/page-header.svelte';
+	import { pageWide } from '#lib/layout.js';
 	import { formatInstant } from '#lib/api/schedules.js';
-	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
 	import { inviteAdmin, userAdmin, type Invite, type IssuedInvite } from '#lib/api/admin.js';
 	import { grants, type GrantPage, type GrantRole } from '#lib/api/grants.js';
@@ -8,14 +10,15 @@
 	import type { User } from '#lib/api/types.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import * as Select from '#lib/components/ui/select/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import Problem from '#lib/components/problem.svelte';
 	import { expiresIn, expiringSoon, inviteStatus, type InviteStatus } from '#lib/invite-status.js';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import CopyButton from '#lib/components/copy-button.svelte';
 	import Link from '@lucide/svelte/icons/link';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import { warningText } from '#lib/tone.js';
 
 	let invitations = $state<Invite[]>([]);
 	let people = $state<User[]>([]);
@@ -27,6 +30,8 @@
 	let issued = $state<IssuedInvite | null>(null);
 	let loading = $state(true);
 	let busy = $state<string | null>(null);
+	let revokeOpen = $state(false);
+	let revoking = $state<Invite | null>(null);
 	let failure = $state<unknown>(null);
 	let filter = $state<InviteStatus | 'all'>('active');
 
@@ -148,17 +153,10 @@
 	}
 </script>
 
-<main class="mx-auto grid max-w-4xl gap-6 p-6">
-	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
-		<ArrowLeft /> Servers
-	</Button>
-
-	<header class="grid gap-1">
-		<h1 class="text-2xl font-semibold tracking-tight">Invites</h1>
-		<p class="text-sm text-muted-foreground">
-			Create a single-use link so someone can choose their own username and password.
-		</p>
-	</header>
+<main class={pageWide}>
+	<PageHeader title="Invites">
+		Create a single-use link so someone can choose their own username and password.
+	</PageHeader>
 
 	<Problem error={failure} />
 
@@ -252,9 +250,7 @@
 		{#if loading && invitations.length === 0}
 			<p class="text-sm text-muted-foreground">Loading…</p>
 		{:else if invitations.length === 0}
-			<div class="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-				No invites have been issued.
-			</div>
+			<EmptyState>No invites have been issued.</EmptyState>
 		{:else}
 			<div
 				class="flex w-fit flex-wrap gap-1 rounded-lg bg-muted p-1"
@@ -277,9 +273,9 @@
 				{/each}
 			</div>
 			{#if shown.length === 0}
-				<div class="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+				<EmptyState>
 					No {filters.find(([value]) => value === filter)?.[1].toLowerCase()} invites.
-				</div>
+				</EmptyState>
 			{/if}
 		{/if}
 
@@ -296,7 +292,7 @@
 							class={[
 								'text-sm',
 								expiringSoon(invite.expires_at, now)
-									? 'font-medium text-amber-800 dark:text-amber-300'
+									? ['font-medium', warningText]
 									: 'text-muted-foreground'
 							]}
 						>
@@ -321,7 +317,14 @@
 				{/if}
 				{#if standing === 'active'}
 					<Card.Footer>
-						<Button variant="ghost" disabled={busy === invite.id} onclick={() => revoke(invite)}>
+						<Button
+							variant="ghost"
+							disabled={busy === invite.id}
+							onclick={() => {
+								revoking = invite;
+								revokeOpen = true;
+							}}
+						>
 							<Trash2 /> Revoke invite
 						</Button>
 					</Card.Footer>
@@ -330,3 +333,14 @@
 		{/each}
 	</section>
 </main>
+
+{#if revoking}
+	{@const invite = revoking}
+	<DestructiveConfirm
+		bind:open={revokeOpen}
+		title="Revoke this invite?"
+		description="Its link stops working. Anyone who has not used it yet needs a new invite."
+		confirmLabel="Revoke invite"
+		onconfirm={() => void revoke(invite)}
+	/>
+{/if}

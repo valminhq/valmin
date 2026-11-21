@@ -38,7 +38,7 @@ describe('the installation export screen', () => {
 		const button = screen.getByRole('button', { name: 'Export' }) as HTMLButtonElement;
 		await click(button);
 
-		expect(await screen.findByText(/writing the full export/)).toBeTruthy();
+		expect(await screen.findByText(/writing the full export/i)).toBeTruthy();
 		expect(daemon.requests('POST', '/admin/export').map((r) => r.body)).toEqual([{ mode: 'full' }]);
 		expect(button.disabled).toBe(true);
 	});
@@ -59,6 +59,6 @@ describe('the installation export screen', () => {
 
 		const link = await screen.findByRole('link', { name: /Download/ });
 		expect(link.getAttribute('href')).toBe('/api/v1/admin/export/download');
-		expect(screen.getByText(/30 MB/)).toBeTruthy();
+		expect(screen.getByText(/30\.0 MiB/)).toBeTruthy();
 	});
 });

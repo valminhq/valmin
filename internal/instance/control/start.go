@@ -28,10 +28,13 @@ type Starter struct {
 	HostRoot         string
 	Image            string
 	Network          string
+	Sandbox          instance.Sandbox
 	StopTimeout      time.Duration
 	ReadySettle      time.Duration
 	ReadyTimeout     time.Duration
 	PluginLoadWindow time.Duration
+	// AfterStart runs once a start or restart has committed the server as running. It may be nil.
+	AfterStart func(context.Context)
 }
 
 func (s *Starter) Run(instanceID, containerID string) jobs.Runner {
@@ -86,6 +89,7 @@ func (s *Starter) startAndAwaitReady(
 		OnFinish: func(ctx context.Context, tx *sql.Tx) error {
 			return instance.FinishStartTx(ctx, tx, instanceID, instance.StateStarting, instance.StateRunning)
 		},
+		AfterFinish: s.AfterStart,
 	}
 }
 
@@ -111,7 +115,12 @@ func (s *Starter) SpecFor(ctx context.Context, inst *store.Instance) (*runtime.C
 	if err != nil {
 		return nil, err
 	}
-	spec, err := instance.BuildSpec(launchSpecFor(inst, s.HostRoot, password), s.Image, s.Network, s.StopTimeout)
+	spec, err := instance.BuildSpec(
+		launchSpecFor(inst, s.HostRoot, password, s.Sandbox),
+		s.Image,
+		s.Network,
+		s.StopTimeout,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("build container spec for instance %s: %w", inst.ID, err)
 	}
@@ -120,13 +129,16 @@ func (s *Starter) SpecFor(ctx context.Context, inst *store.Instance) (*runtime.C
 
 // launchSpecFor is the one mapping from an instance row to its launch spec, which provision,
 // clone and start all build the container from, so their spec hashes agree.
-func launchSpecFor(inst *store.Instance, hostRoot, password string) *instance.LaunchSpec {
+func launchSpecFor(
+	inst *store.Instance, hostRoot, password string, sandbox instance.Sandbox,
+) *instance.LaunchSpec {
 	return &instance.LaunchSpec{
 		InstanceID: inst.ID, DataDir: instance.DataDir(hostRoot, inst.ID), BasePort: inst.BasePort,
 		ServerName: inst.ServerName, WorldName: inst.WorldName, Password: password,
 		Public: inst.Public, Crossplay: inst.Crossplay, CrossplayInstanceID: inst.CrossplayInstanceID,
 		Preset: deref(inst.Preset), Modifiers: deref(inst.Modifiers), ExtraArgs: deref(inst.ExtraArgs),
 		Backups: inst.GameBackups, MemLimitMB: inst.MemLimitMB, CPULimit: inst.CPULimit,
+		Sandbox: sandbox,
 	}
 }
 

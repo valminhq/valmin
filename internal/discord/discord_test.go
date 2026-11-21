@@ -111,12 +111,88 @@ func (s *fakeStarter) Submit(_ context.Context, in *control.StartSubmission) (*s
 	return s.job, nil
 }
 
-// world is a bot against a fresh database, a fake API and a fake starter.
+// fakeChainer records chain and step submissions and answers with job or fail.
+type fakeChainer struct {
+	mu     sync.Mutex
+	chains []*control.ChainSubmission
+	steps  []string
+	job    *store.Job
+	fail   error
+}
+
+func (c *fakeChainer) Submit(_ context.Context, in *control.ChainSubmission) (*store.Job, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.chains = append(c.chains, in)
+	return c.job, c.fail
+}
+
+// SubmitStep records the step as "<instance id>:<step type>".
+func (c *fakeChainer) SubmitStep(
+	_ context.Context, inst *store.Instance, step *control.ChainStep, _ control.StepOrigin,
+) (*store.Job, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.steps = append(c.steps, inst.ID+":"+step.Type)
+	return c.job, c.fail
+}
+
+// fakeTester records update tests and applies, and reads changes and verdict as every copy's.
+type fakeTester struct {
+	mu      sync.Mutex
+	tests   []*control.UpdateTestSubmission
+	applies []*control.UpdateApplySubmission
+	changes control.TestChanges
+	verdict *control.TestVerdict
+	job     *store.Job
+	fail    error
+}
+
+func (u *fakeTester) Changes(context.Context, *store.Instance, *store.Instance) (control.TestChanges, error) {
+	return u.changes, nil
+}
+
+func (u *fakeTester) Submit(_ context.Context, in *control.UpdateTestSubmission) (*store.Job, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.tests = append(u.tests, in)
+	return u.job, u.fail
+}
+
+func (u *fakeTester) SubmitApply(_ context.Context, in *control.UpdateApplySubmission) (*store.Job, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.applies = append(u.applies, in)
+	return u.job, u.fail
+}
+
+func (u *fakeTester) Verify(context.Context, *store.Instance) (*control.TestVerdict, error) {
+	return u.verdict, nil
+}
+
+// fakeDeleter records deletes and answers with job.
+type fakeDeleter struct {
+	mu  sync.Mutex
+	got []*control.DeleteSubmission
+	job *store.Job
+}
+
+func (d *fakeDeleter) Submit(_ context.Context, in *control.DeleteSubmission) (*store.Job, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.got = append(d.got, in)
+	return d.job, nil
+}
+
+// world is a bot against a fresh database, a fake API and fake job submitters.
 type world struct {
 	bot     *Bot
 	db      *store.DB
 	api     *fakeAPI
 	starter *fakeStarter
+	chainer *fakeChainer
+	tester  *fakeTester
+	deleter *fakeDeleter
 }
 
 func newWorld(t *testing.T, links []store.DiscordLink) *world {
@@ -157,7 +233,16 @@ func newWorld(t *testing.T, links []store.DiscordLink) *world {
 	})
 	bot.apiBase, bot.client = api.srv.URL, api.srv.Client()
 	bot.followTick, bot.followFor = 10*time.Millisecond, 2*time.Second
-	return &world{bot: bot, db: db, api: api, starter: starter}
+	w := &world{
+		bot: bot, db: db, api: api, starter: starter,
+		chainer: &fakeChainer{job: &store.Job{ID: "job-1"}},
+		tester: &fakeTester{
+			job: &store.Job{ID: "job-1"}, changes: control.TestChanges{SourceBuildID: "100", CopyBuildID: "200"},
+		},
+		deleter: &fakeDeleter{job: &store.Job{ID: "job-del"}},
+	}
+	bot.Chainer, bot.Updates, bot.Deleter = w.chainer, w.tester, w.deleter
+	return w
 }
 
 var testLinks = []store.DiscordLink{

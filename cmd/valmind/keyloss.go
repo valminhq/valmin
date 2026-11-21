@@ -36,7 +36,7 @@ func runAcceptNewKey(ctx context.Context, args []string, getenv func(string) str
 	}
 	defer func() { _ = db.Close() }()
 	// A running panel holds the old key in memory and would go on sealing with it.
-	if running, err := store.DaemonRunning(cfg.Data.Root); err != nil || running {
+	if running, err := store.DaemonRunning(daemonDirs(cfg)...); err != nil || running {
 		if err != nil {
 			return fmt.Errorf("check for a running panel: %w", err)
 		}
@@ -277,14 +277,19 @@ func openAdminDB(ctx context.Context, getenv func(string) string) (*config.Confi
 	}
 	slog.SetDefault(cfg.Log.Logger(os.Stderr))
 
-	db, err := store.Open(ctx, cfg.DB.Driver, cfg.DB.DSN)
+	running, err := store.DaemonRunning(daemonDirs(cfg)...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("check for a running panel: %w", err)
+	}
+	// Beside a running daemon the catalogue is its alone: a verb from another build could
+	// otherwise recreate it under the daemon.
+	catalogue := store.CataloguePath(cfg.Data.Root)
+	if running {
+		catalogue = ""
+	}
+	db, err := store.Open(ctx, cfg.DB.Driver, cfg.DB.DSN, catalogue)
 	if err != nil {
 		return nil, nil, fmt.Errorf("database %s: %w", cfg.DB.DSN, err)
-	}
-	running, err := store.DaemonRunning(cfg.Data.Root)
-	if err != nil {
-		_ = db.Close()
-		return nil, nil, fmt.Errorf("check for a running panel: %w", err)
 	}
 	if running {
 		if err := db.MigrationsApplied(ctx); err != nil {

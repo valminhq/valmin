@@ -1,10 +1,13 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
+	import { pageNarrow } from '#lib/layout.js';
 	import { shutdowns, type PlannedShutdown } from '#lib/api/admin.js';
 	import { actions } from '#lib/api/instances.js';
 	import { inZone, viewerZone } from '#lib/api/schedules.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import Problem from '#lib/components/problem.svelte';
@@ -17,6 +20,8 @@
 	let loading = $state(true);
 	let busy = $state(false);
 	let failure = $state<unknown>(null);
+	let cancelOpen = $state(false);
+	let cancelling = $state<PlannedShutdown | null>(null);
 
 	async function load() {
 		loading = true;
@@ -50,8 +55,6 @@
 	}
 
 	async function cancel(item: PlannedShutdown) {
-		const at = inZone(item.power_off_at, zone);
-		if (!confirm(`Cancel the power cut at ${at}? Servers will keep running through it.`)) return;
 		failure = null;
 		try {
 			await shutdowns.remove(item.id);
@@ -66,17 +69,16 @@
 	}
 </script>
 
-<main class="mx-auto grid w-full max-w-3xl gap-6 p-4 sm:p-6">
-	<h1 class="text-2xl font-semibold">Power cuts</h1>
+<main class={pageNarrow}>
+	<PageHeader title="Power cuts">
+		Enter the times the electricity goes off. Every running server is stopped early enough to save
+		its world before the cut, and players online are warned in chat five minutes before that, when
+		the server has the RCON mod. Servers stay stopped after the host comes back; start them from the
+		panel or with Discord's <code>/start</code>.
+	</PageHeader>
 	{#if !allowed}
-		<p>You do not have permission to plan power cuts.</p>
+		<p class="text-sm text-muted-foreground">You do not have permission to plan power cuts.</p>
 	{:else}
-		<p class="text-sm text-muted-foreground">
-			Enter the times the electricity goes off. Every running server is stopped early enough to save
-			its world before the cut, and players online are warned in chat five minutes before that, when
-			the server has the RCON mod. Servers stay stopped after the host comes back; start them from
-			the panel or with Discord's <code>/start</code>.
-		</p>
 		<Problem error={failure} />
 
 		<Card.Root>
@@ -102,7 +104,7 @@
 		<Card.Root>
 			<Card.Header><Card.Title>Planned</Card.Title></Card.Header>
 			<Card.Content>
-				{#if loading}<p>Loading power cuts…</p>
+				{#if loading}<p class="text-sm text-muted-foreground">Loading power cuts…</p>
 				{:else if planned.length === 0}
 					<p class="text-sm text-muted-foreground">No power cuts are planned.</p>
 				{:else}
@@ -116,7 +118,14 @@
 									</span>
 									<span class="text-xs text-muted-foreground">Added by {author(item)}</span>
 								</div>
-								<Button variant="outline" size="sm" onclick={() => cancel(item)}>
+								<Button
+									variant="outline"
+									size="sm"
+									onclick={() => {
+										cancelling = item;
+										cancelOpen = true;
+									}}
+								>
 									<Trash2 class="size-4" /> Cancel
 								</Button>
 							</li>
@@ -127,3 +136,15 @@
 		</Card.Root>
 	{/if}
 </main>
+
+{#if cancelling}
+	{@const item = cancelling}
+	<DestructiveConfirm
+		bind:open={cancelOpen}
+		title="Cancel the power cut at {inZone(item.power_off_at, zone)}?"
+		description="Servers will keep running through it."
+		confirmLabel="Cancel power cut"
+		cancelLabel="Keep it"
+		onconfirm={() => void cancel(item)}
+	/>
+{/if}

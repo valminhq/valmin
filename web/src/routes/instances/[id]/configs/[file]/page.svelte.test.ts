@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ConfigCopy, ConfigSchema, ConfigSetting } from '#lib/api/configs.js';
+import { page } from '$app/state';
+import type { ConfigCopy, ConfigRevision, ConfigSchema, ConfigSetting } from '#lib/api/configs.js';
 import { actions, type Instance } from '#lib/api/instances.js';
 import { session } from '#lib/state/session.svelte.js';
 import { FakeDaemon, envelope, instance, permissions, textResource } from '#lib/testing/daemon.js';
@@ -42,21 +43,52 @@ function schema(settings: ConfigSetting[] = [setting()]): ConfigSchema {
 	};
 }
 
+function revision(id: string, overrides: Partial<ConfigRevision> = {}): ConfigRevision {
+	return {
+		id,
+		created_at: '2026-09-01T10:00:00Z',
+		source: 'found',
+		user: null,
+		mod: null,
+		from_version: null,
+		to_version: null,
+		replaced_edits: false,
+		baseline: false,
+		size_bytes: 20,
+		...overrides
+	};
+}
+
+/** Serves a file's history, newest first, and the settings of each listed version. */
+function serveHistory(
+	base: string,
+	history: ConfigRevision[],
+	versions: Record<string, ConfigCopy>
+) {
+	daemon.on('GET', `${base}/history`, () => Response.json({ items: history, next_cursor: null }));
+	for (const [id, copy] of Object.entries(versions)) {
+		daemon.on('GET', `${base}/history/${id}`, () => Response.json(copy));
+	}
+}
+
 /** Renders the file for a member holding `held`, once its first read has settled. */
 async function open(
 	held: string[],
 	{
 		read = schema(),
 		row = instance(),
-		original = null
-	}: { read?: ConfigSchema; row?: Instance; original?: ConfigCopy | null } = {}
+		history = [],
+		versions = {}
+	}: {
+		read?: ConfigSchema;
+		row?: Instance;
+		history?: ConfigRevision[];
+		versions?: Record<string, ConfigCopy>;
+	} = {}
 ) {
 	daemon.on('GET', '/instances/inst-a', () => Response.json(row));
 	daemon.on('GET', path, () => Response.json(read));
-	daemon.on('GET', `${path}/original`, () =>
-		original ? Response.json(original) : envelope(404, 'not_found', 'No copy.')
-	);
-	daemon.on('GET', `${path}/previous`, () => envelope(404, 'not_found', 'No copy.'));
+	serveHistory(path, history, versions);
 	session.permissions = permissions('inst-a', held);
 	render(Page);
 	await screen.findByLabelText('Filter settings');
@@ -211,34 +243,112 @@ describe('the config editor', () => {
 		);
 	});
 
-	// The compared versions come from the daemon, dated, and restoring one only fills the
-	// form: it goes through the same confirmation as anything typed by hand (F4).
-	it('offers the kept original and restores it into the form without writing', async () => {
+	// The compared versions come from the daemon, and restoring one only fills the form: it
+	// goes through the same confirmation as anything typed by hand.
+	it('compares with the baseline and restores it into the form without writing', async () => {
 		await open(edit, {
 			read: schema([setting({ current: 2 })]),
-			original: { ...schema([setting({ current: 1 })]), captured_at: '2026-09-01T10:00:00Z' }
+			history: [
+				revision('edit', { source: 'edit', user: 'den' }),
+				revision('base', { baseline: true })
+			],
+			versions: {
+				base: { ...schema([setting({ current: 1 })]), captured_at: '2026-09-01T10:00:00Z' }
+			}
 		});
 
-		expect(text(document.body)).toMatch(/1 setting differs from this version, kept/);
-		await click(button(/Load 1 settings from the original/));
+		expect((screen.getByLabelText('Compare with') as HTMLSelectElement).value).toBe('base');
+		expect(await screen.findByText(/1 setting differs from As first found/)).toBeTruthy();
+		await click(button(/Load 1 setting from As first found/));
 		expect((screen.getByLabelText('Speed') as HTMLInputElement).value).toBe('1');
 		expect(daemon.requests('PATCH', path), 'restoring writes nothing').toHaveLength(0);
 		expect(button('Review changes')).toBeTruthy();
 	});
 
-	it('offers no comparison, and no error, for a file the panel never wrote', async () => {
+	it('compares with nothing, and shows no error, for a file without history', async () => {
 		await open(edit);
-		expect(screen.queryByText('Compare with')).toBeNull();
+		expect((screen.getByLabelText('Compare with') as HTMLSelectElement).value).toBe('off');
 		expect(screen.queryByRole('alert')).toBeNull();
+	});
+
+	it("loads the mod's declared defaults", async () => {
+		await open(edit, { read: schema([setting({ current: 2, default: 1 })]) });
+		const select = screen.getByLabelText('Compare with') as HTMLSelectElement;
+		select.value = 'defaults';
+		await fireEvent.change(select);
+		await click(
+			await screen.findByRole('button', { name: /Load 1 setting from the mod's defaults/ })
+		);
+		expect((screen.getByLabelText('Speed') as HTMLInputElement).value).toBe('1');
+	});
+
+	it('keeps comparing with nothing after a save', async () => {
+		await open(edit, { history: [revision('base', { baseline: true })] });
+		const select = screen.getByLabelText('Compare with') as HTMLSelectElement;
+		select.value = 'off';
+		await fireEvent.change(select);
+		daemon.on('PATCH', path, () => Response.json(schema([setting({ current: 2 })])));
+
+		await typeNumber('Speed', '2');
+		await click(button('Review changes'));
+		await click(await screen.findByRole('button', { name: 'Save changes' }));
+		await vi.waitFor(() => expect(daemon.requests('PATCH', path)).toHaveLength(1));
+		await vi.waitFor(() => expect(daemon.requests('GET', `${path}/history`)).toHaveLength(2));
+		expect((screen.getByLabelText('Compare with') as HTMLSelectElement).value).toBe('off');
+	});
+
+	it('leaves settings without a declared default out of the defaults', async () => {
+		await open(edit, {
+			read: schema([
+				setting({ current: 2, default: 1 }),
+				setting({ key: 'Name', type: '', widget: 'text', default: '', current: 'boat' })
+			])
+		});
+		const select = screen.getByLabelText('Compare with') as HTMLSelectElement;
+		select.value = 'defaults';
+		await fireEvent.change(select);
+		expect(
+			await screen.findByRole('button', { name: /Load 1 setting from the mod's defaults/ })
+		).toBeTruthy();
+	});
+
+	// A mod update that replaced edits says so and compares with the version it replaced.
+	it('names the mod update that replaced edits and compares with what it replaced', async () => {
+		await open(edit, {
+			read: schema([setting({ current: 1 })]),
+			history: [
+				revision('mod', {
+					source: 'mod',
+					mod: 'Ns-Sailing',
+					from_version: '1.0.0',
+					to_version: '2.0.0',
+					replaced_edits: true,
+					baseline: true
+				}),
+				revision('mine', { source: 'edit', user: 'den' })
+			],
+			versions: {
+				mine: { ...schema([setting({ current: 3 })]), captured_at: '2026-09-01T10:00:00Z' }
+			}
+		});
+
+		expect(text(screen.getByTestId('config-replaced'))).toMatch(
+			/Ns-Sailing 1.0.0 → 2.0.0 replaced/
+		);
+		expect((screen.getByLabelText('Compare with') as HTMLSelectElement).value).toBe('mine');
+		expect(text(screen.getByTestId('config-predates'))).toMatch(
+			/from before Ns-Sailing 1.0.0 → 2.0.0/
+		);
+		expect(await screen.findByText(/1 setting differs from Saved by den/)).toBeTruthy();
 	});
 });
 
 describe('the raw config editor', () => {
 	const raw = [...edit, actions.configRaw];
 
-	async function openRaw(disk = 'Speed = 1\n', etag = '"v1"') {
+	async function openRaw(disk = 'Speed = 1\n', etag = '"v1"', history: ConfigRevision[] = []) {
 		daemon.on('GET', `${path}/raw`, () => textResource(disk, etag));
-		await open(raw);
+		await open(raw, { history });
 		await click(button('Raw text'));
 		return (await screen.findByLabelText('Author.Sailing.cfg as text')) as HTMLTextAreaElement;
 	}
@@ -291,8 +401,8 @@ describe('the raw config editor', () => {
 	// The line view shows what the by-setting comparison cannot, and diffs the editor rather
 	// than the file, so an unsaved edit shows as what it will be.
 	it('diffs the kept version against what is in the editor', async () => {
-		daemon.on('GET', `${path}/original/raw`, () => textResource('Speed = 1\n', '"orig"'));
-		const area = await openRaw('Speed = 1\n');
+		daemon.on('GET', `${path}/history/base/raw`, () => textResource('Speed = 1\n', '"orig"'));
+		const area = await openRaw('Speed = 1\n', '"v1"', [revision('base', { baseline: true })]);
 		expect(await screen.findByText('Identical to the version being compared.')).toBeTruthy();
 
 		await fireEvent.input(area, { target: { value: 'Speed = 1\n# tuned by hand\n' } });
@@ -306,5 +416,49 @@ describe('the raw config editor', () => {
 		expect(
 			screen.getByText('Save or discard your changes to edit this file as text.')
 		).toBeTruthy();
+	});
+});
+
+describe('a config file with no settings', () => {
+	const name = 'expand_world/expand_biomes.yaml';
+	const filePath = `/instances/inst-a/configs/${encodeURIComponent(name)}`;
+	const params = page.params as Record<string, string>;
+
+	beforeEach(() => {
+		params.file = name;
+	});
+
+	afterEach(() => {
+		params.file = 'Author.Sailing.cfg';
+	});
+
+	function serve() {
+		daemon.on('GET', '/instances/inst-a', () => Response.json(instance()));
+		daemon.on('GET', `${filePath}/raw`, () => textResource('biomes: []\n', '"v1"'));
+		serveHistory(filePath, [revision('base', { baseline: true })], {});
+		daemon.on('GET', `${filePath}/history/base/raw`, () => textResource('biomes: [old]\n', '"o"'));
+	}
+
+	// The settings read would project YAML lines as settings; the daemon refuses it anyway.
+	it('opens straight in the raw editor and never asks for settings', async () => {
+		serve();
+		session.permissions = permissions('inst-a', [...edit, actions.configRaw]);
+		render(Page);
+
+		const area = (await screen.findByLabelText(`${name} as text`)) as HTMLTextAreaElement;
+		await vi.waitFor(() => expect(area.value).toBe('biomes: []\n'));
+		expect(screen.queryByRole('button', { name: 'Raw text' })).toBeNull();
+		expect(screen.queryByLabelText('Filter settings')).toBeNull();
+		expect(daemon.requests('GET', filePath)).toHaveLength(0);
+		expect(await screen.findByText(/line differs|lines differ/)).toBeTruthy();
+	});
+
+	it('says why a member without raw access cannot open it', async () => {
+		serve();
+		session.permissions = permissions('inst-a', edit);
+		render(Page);
+
+		expect(await screen.findByText(/no settings form/)).toBeTruthy();
+		expect(screen.queryByLabelText(`${name} as text`)).toBeNull();
 	});
 });

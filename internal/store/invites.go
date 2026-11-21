@@ -238,7 +238,7 @@ func (db *DB) RedeemInviteToUser(
 		if n != 1 {
 			return ErrInviteNotLive
 		}
-		if err := createUser(ctx, tx, userID, username, passwordHash, RoleMember, now); err != nil {
+		if err := createUser(ctx, tx, userID, username, passwordHash, RoleMember, now, false); err != nil {
 			return err
 		}
 		if _, err := tx.ExecContext(ctx,

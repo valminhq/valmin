@@ -49,6 +49,12 @@ var (
 	// KindBackupAttention is a server whose newest archive the world check flagged. It clears
 	// once a newer archive passes or the operator acknowledges the flagged one.
 	KindBackupAttention = Kind{"backup_attention"}
+	// KindModsFailed is a server whose latest boot could not load some of its mods. It clears on
+	// the next boot that loads them all.
+	KindModsFailed = Kind{"mods_failed"}
+	// KindModUpdates is a server with newer versions of its mods in the catalogue. It is only
+	// evaluated for servers a rule of its kind covers.
+	KindModUpdates = Kind{"mod_updates"}
 )
 
 // Event kinds are one-off events a rule can route rather than conditions a scan evaluates. They
@@ -57,11 +63,20 @@ var (
 	// KindPowerCut is a planned power cut close enough that every running server is about to
 	// stop. Host-level.
 	KindPowerCut = Kind{"power_cut"}
+	// KindSignInsBlocked is an account whose sign-ins were refused after too many failures
+	// from anywhere. Host-level.
+	KindSignInsBlocked = Kind{"sign_ins_blocked"}
 	// KindServerStarted is a start or restart that left the server running.
 	KindServerStarted = Kind{"server_started"}
 	// KindServerStopped is a stop the panel made, by hand, by auto-stop or for a power cut. A
 	// server that stops on its own is instance_down instead.
 	KindServerStopped = Kind{"server_stopped"}
+	// KindInstanceDown is a server that stopped or restarted on its own.
+	KindInstanceDown = Kind{"instance_down"}
+	// KindGameUpdated is a game update, or tested updates, applied to a server.
+	KindGameUpdated = Kind{"game_updated"}
+	// KindUpdateTestFinished is an update test on a copy of a server that ended, passed or not.
+	KindUpdateTestFinished = Kind{"update_test_finished"}
 )
 
 // Game event kinds are events ValminEye reports from inside the game. A rule renders them through
@@ -79,6 +94,7 @@ var (
 var all = []Kind{
 	KindJobFailed, KindLowDisk, KindStaleBackup, KindUncleanStop, KindRestartRequired,
 	KindUpdateAvailable, KindInstanceError, KindCrashLoop, KindJobStuck, KindBackupAttention,
+	KindModsFailed, KindModUpdates,
 }
 
 var gameEvents = []Kind{
@@ -86,7 +102,11 @@ var gameEvents = []Kind{
 	KindRaidStarted, KindRaidEnded,
 }
 
-var events = slices.Concat([]Kind{KindPowerCut, KindServerStarted, KindServerStopped}, gameEvents)
+var events = slices.Concat(
+	[]Kind{
+		KindPowerCut, KindSignInsBlocked, KindServerStarted, KindServerStopped, KindInstanceDown,
+		KindGameUpdated, KindUpdateTestFinished,
+	}, gameEvents)
 
 // ParseKind resolves a condition or event kind name to its constant. An unresolved name is the
 // caller's cue to answer 422.
@@ -103,7 +123,9 @@ func ParseKind(name string) (Kind, bool) {
 func Kinds() []Kind { return append([]Kind(nil), all...) }
 
 // HostWide reports whether k never concerns one server, so a rule for it cannot name one.
-func HostWide(k Kind) bool { return k == KindLowDisk || k == KindPowerCut }
+func HostWide(k Kind) bool {
+	return k == KindLowDisk || k == KindPowerCut || k == KindSignInsBlocked
+}
 
 // Condition is one thing currently believed true. InstanceID is empty for a host-level
 // condition.
@@ -130,6 +152,9 @@ const (
 	DetailLast      = "Last"
 	DetailRunning   = "Running"
 	DetailBackup    = "Backup"
+	DetailMods      = "Mods"
+	DetailCount     = "Count"
+	DetailMemLimit  = "MemLimitMB"
 )
 
 // Params are a kind's thresholds. Zero fields read as the defaults, so a rule written before a

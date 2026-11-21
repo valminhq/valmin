@@ -7,6 +7,8 @@ import (
 
 	"github.com/valminhq/valmin/internal/alerts"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/notify"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -105,5 +107,106 @@ func TestServerStoppedNamesItsReasonAndHonoursTheRulesOptions(t *testing.T) {
 	}
 	if got := body.Detail["Stopped"]; len(got) < 4 || got[len(got)-4:] != " JST" {
 		t.Errorf("stopped at %q, want a time in JST", got)
+	}
+}
+
+// TestGameUpdatedNamesTheModsAndNeedsARule asserts an update message lists the updated mods,
+// leaves out a build it did not install, and goes nowhere without a rule.
+func TestGameUpdatedNamesTheModsAndNeedsARule(t *testing.T) {
+	t.Parallel()
+	rt, db, _, _ := provisionWorld(t)
+	seed(t, db, `INSERT INTO instances (
+		id, name, state, data_dir, base_port, server_name, world_name, password,
+		crossplay_instance_id, created_at, updated_at
+	) VALUES ('inst-a', 'inst-a', 'stopped', '/srv/inst-a', 2456, 'Server', 'Midgard', 'env', 'cp-a', ?, ?)`,
+		store.Now(), store.Now())
+	seedWebhook(t, db, "everyone")
+	mods := []string{"ValheimModding-Jotunn 2.30.3"}
+
+	rt.notifier.NotifyGameUpdated(t.Context(), "inst-a", "", mods)
+	if sent := deliveriesOfKind(t, db, notify.KindGameUpdated); len(sent) != 0 {
+		t.Fatalf("deliveries without a rule = %d, want 0", len(sent))
+	}
+
+	seedRule(t, db, alerts.KindGameUpdated, "", seedWebhook(t, db, "ruled"))
+	rt.notifier.NotifyGameUpdated(t.Context(), "inst-a", "", mods)
+	sent := deliveriesOfKind(t, db, notify.KindGameUpdated)
+	if len(sent) != 1 {
+		t.Fatalf("deliveries = %d, want 1", len(sent))
+	}
+	var body struct {
+		Detail map[string]string `json:"detail"`
+	}
+	if err := json.Unmarshal([]byte(sent[0].Payload), &body); err != nil {
+		t.Fatal(err)
+	}
+	if got := body.Detail["Mods updated"]; got != mods[0] {
+		t.Errorf("mods = %q, want %q", got, mods[0])
+	}
+	if _, ok := body.Detail["Game build"]; ok {
+		t.Error("a build the update did not install was sent")
+	}
+}
+
+// TestUpdateTestFinishedSaysItWasNotApplied asserts an update test's message names its
+// result, the tested mod updates and the mods that failed, says an apply it asked for did not
+// happen, and goes nowhere without a rule.
+func TestUpdateTestFinishedSaysItWasNotApplied(t *testing.T) {
+	t.Parallel()
+	rt, db, _, _ := provisionWorld(t)
+	seed(t, db, `INSERT INTO instances (
+		id, name, state, data_dir, base_port, server_name, world_name, password,
+		crossplay_instance_id, created_at, updated_at
+	) VALUES ('inst-a', 'inst-a', 'running', '/srv/inst-a', 2456, 'Server', 'Midgard', 'env', 'cp-a', ?, ?)`,
+		store.Now(), store.Now())
+	inst, err := db.InstanceByID(t.Context(), "inst-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := &control.UpdateTestResult{
+		Instance: inst,
+		Changes: &control.TestChanges{
+			SourceBuildID: "21981590", CopyBuildID: "21981590",
+			Mods: []manager.UpdateTarget{{FullName: "Author-Mod", FromVersion: "1.0.0", Version: "1.1.0"}},
+		},
+		Verdict: &control.TestVerdict{
+			Load: &instance.PluginLoad{
+				Declared: 1, Complete: true,
+				Plugins: []instance.LoadedPlugin{{Name: "Broken"}},
+				Failed:  []instance.FailedPlugin{{LoadedPlugin: instance.LoadedPlugin{Name: "Broken"}}},
+			},
+			Failed: []control.FailedMod{{FullName: "Author-Broken", Reason: "Could not load"}},
+		},
+		NotApplied: "1 failed: Broken",
+	}
+
+	rt.notifier.NotifyUpdateTest(t.Context(), res)
+	if sent := deliveriesOfKind(t, db, notify.KindUpdateTestFinished); len(sent) != 0 {
+		t.Fatalf("deliveries without a rule = %d, want 0", len(sent))
+	}
+
+	seedRule(t, db, alerts.KindUpdateTestFinished, "", seedWebhook(t, db, "ruled"))
+	rt.notifier.NotifyUpdateTest(t.Context(), res)
+	sent := deliveriesOfKind(t, db, notify.KindUpdateTestFinished)
+	if len(sent) != 1 {
+		t.Fatalf("deliveries = %d, want 1", len(sent))
+	}
+	var body struct {
+		Detail map[string]string `json:"detail"`
+	}
+	if err := json.Unmarshal([]byte(sent[0].Payload), &body); err != nil {
+		t.Fatal(err)
+	}
+	if got := body.Detail["Mods updated"]; got != "Author-Mod 1.1.0" {
+		t.Errorf("mods = %q", got)
+	}
+	if got := body.Detail["Failed to load"]; got != "Author-Broken" {
+		t.Errorf("failed = %q", got)
+	}
+	if got, want := body.Detail["Result"], "Not every mod loaded: 1 failed: Broken. Not applied."; got != want {
+		t.Errorf("result = %q, want %q", got, want)
+	}
+	if _, ok := body.Detail["Game build"]; ok {
+		t.Error("a game build the copy did not change was sent")
 	}
 }

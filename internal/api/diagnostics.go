@@ -148,8 +148,8 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 	free, freeErr := instance.FreeSpace(h.Cfg.Data.Root)
 	recorded := d.recordedChecks(ctx)
 
-	read := func(key string, out any) bool {
-		found, err := h.DB.KVGet(ctx, key, out)
+	read := func(get func(context.Context, string, any) (bool, error), key string, out any) bool {
+		found, err := get(ctx, key, out)
 		if err != nil {
 			slog.WarnContext(ctx, "diagnostics: read a recorded fact",
 				slog.String("key", key), slog.Any("error", err))
@@ -160,16 +160,16 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 		build  instance.PublicBuild
 		fsType string
 	)
-	read(instance.PublicBuildKey, &build)
-	read(instance.DataFSTypeKey, &fsType)
+	read(h.DB.KVGet, instance.PublicBuildKey, &build)
+	read(h.DB.KVGet, instance.DataFSTypeKey, &fsType)
 
 	registries := make([]diag.Registry, 0, len(source.All()))
 	for _, src := range source.All() {
 		reg := diag.Registry{Name: src.String(), Client: d.Clients[src]}
-		read(manager.ETagKey(src), &reg.ETag)
-		read(manager.SyncedAtKey(src), &reg.SyncedAt)
+		read(h.DB.CatalogueStateGet, manager.ETagKey(src), &reg.ETag)
+		read(h.DB.CatalogueStateGet, manager.SyncedAtKey(src), &reg.SyncedAt)
 		var result diag.RegistrySync
-		if read(manager.SyncResultKey(src), &result) {
+		if read(h.DB.CatalogueStateGet, manager.SyncResultKey(src), &result) {
 			reg.LastSync = &result
 		}
 		registries = append(registries, reg)
@@ -215,11 +215,14 @@ func (d *Diagnostics) collect(ctx context.Context) (diag.Report, error) {
 // recordedChecks reads the outcomes the startup gate and the diagnose job stamped. One that
 // cannot be read is left out, and its check reads as not recorded.
 func (d *Diagnostics) recordedChecks(ctx context.Context) map[string]diag.Observation {
-	out := make(map[string]diag.Observation, 3)
+	out := make(map[string]diag.Observation, 6)
 	for key, id := range map[string]string{
-		diag.HostRootKey:    diag.CheckHostRoot,
-		diag.DataRootKey:    diag.CheckDataRootWrite,
-		diag.GameNetworkKey: diag.CheckGameNetwork,
+		diag.HostRootKey:       diag.CheckHostRoot,
+		diag.DataRootKey:       diag.CheckDataRootWrite,
+		diag.GameNetworkKey:    diag.CheckGameNetwork,
+		diag.MetadataEgressKey: diag.CheckMetadataEgress,
+		diag.LANEgressKey:      diag.CheckLANEgress,
+		diag.NameLookupKey:     diag.CheckNameLookup,
 	} {
 		var obs diag.Observation
 		found, err := d.Instances.DB.KVGet(ctx, key, &obs)
@@ -289,6 +292,10 @@ func (d *Diagnostics) inspectContainer(ctx context.Context, id *string, row *dia
 	if configured := d.Instances.Cfg.Game.Image; row.Image != configured {
 		row.ImageIssue = "runs " + row.Image + ", not game.image " + configured +
 			"; recreate the container to move it to the configured image"
+	}
+	if configured := d.Instances.Cfg.Game.Runtime; configured != "" && c.Spec.OCIRuntime != configured {
+		row.RuntimeIssue = "runs under " + instance.RuntimeName(c.Spec.OCIRuntime) + ", not game.runtime " +
+			instance.RuntimeName(configured) + "; its next start recreates the container under game.runtime"
 	}
 	row.RestartCount = &c.RestartCount
 	if !c.FinishedAt.IsZero() {

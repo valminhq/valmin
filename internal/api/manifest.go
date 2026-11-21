@@ -155,7 +155,7 @@ func instanceDefinition(
 	return manifest, installed, nil
 }
 
-// readInstanceConfigs reads every portable .cfg in the instance's config directory whole. A
+// readInstanceConfigs reads every carried config in the instance's config directory whole. A
 // server that has never started has none, which is an empty list rather than an error (03 §9).
 func readInstanceConfigs(inst *store.Instance) ([]control.ManifestConfig, error) {
 	dir, err := instance.OpenConfigDir(inst.DataDir)
@@ -173,7 +173,7 @@ func readInstanceConfigs(inst *store.Instance) ([]control.ManifestConfig, error)
 	out := []control.ManifestConfig{}
 	for _, e := range entries {
 		// Type is the entry's own, unfollowed: a symlink is skipped rather than read.
-		if !e.Type().IsRegular() || !strings.HasSuffix(e.Name(), ".cfg") {
+		if !e.Type().IsRegular() || !control.CarriedConfig(e.Name()) {
 			continue
 		}
 		raw, _, err := fsutil.ReadRegularIn(dir, e.Name())
@@ -183,7 +183,7 @@ func readInstanceConfigs(inst *store.Instance) ([]control.ManifestConfig, error)
 		out = append(out, control.ManifestConfig{File: e.Name(), Content: string(raw)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
-	return portableConfigs(out), nil
+	return out, nil
 }
 
 // portableConfigs drops the config files that belong to one installation rather than to its

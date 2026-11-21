@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -80,6 +81,7 @@ type Server struct {
 	remoteBackups *RemoteBackups
 	diagnostics   *Diagnostics
 	discord       *discord.Bot
+	retention     *Retention
 	hub           *ws.Hub
 }
 
@@ -99,7 +101,7 @@ func (s *Server) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, run := range []func(context.Context){
 		s.supervisor.Run, s.mods.Run, s.scheduler.Run, s.shutdowns.Run, s.notifier.Run, s.notifier.Dispatcher.Run,
-		s.remoteBackups.worker.Run, s.players.Run, s.discord.Run,
+		s.remoteBackups.worker.Run, s.players.Run, s.discord.Run, s.retention.Run,
 	} {
 		wg.Go(func() { run(ctx) })
 	}
@@ -150,9 +152,10 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	rt := &Router{mux: http.NewServeMux(), api: http.NewServeMux(), within: w.cfg.Server.RequestTimeout.Std()}
 	healthRoutes(rt.mux, health)
 	gate := middleware.NewBootstrapGate(d.BootstrapPending)
-	grants := w.accountRoutes(gate)
+	grants, signIn := w.accountRoutes(gate)
 
 	webhooks, notifier := w.notifications(d.Options.WebhookSender)
+	signIn.Alerts = notifier
 	remoteBackups := w.remoteBackups()
 	alertRuleRoutes(w.routes, &AlertRules{
 		DB: w.db, Authz: w.az, Dispatcher: webhooks.dispatcher, TestSends: webhooks.testSends,
@@ -179,16 +182,16 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 		ready, err := logs.ReadyLogged(ctx, *inst.ContainerID)
 		return err == nil && ready
 	}
+	hub = w.hub(external, streams, grants)
+
+	worlds := &control.Worlds{DataRoot: w.cfg.Data.Root, Runtime: w.runtime}
+	mods := w.mods(worlds)
 	// Outside the API chain and outside the API subtree, on a thin chain of its own: it is the
 	// only route a stranger can reach, and it authorizes on a column rather than a session. Its
 	// limiter is its own, so a flood of status reads cannot spend the login route's budget.
 	publicStatusRoutes(rt.mux, middleware.PublicChain(
 		trusted, perMinute(publicStatusPerMinute, publicStatusBurst)),
-		&PublicStatus{DB: w.db, Streams: streams})
-	hub = w.hub(external, streams, grants)
-
-	worlds := &control.Worlds{DataRoot: w.cfg.Data.Root, Runtime: w.runtime}
-	mods := w.mods(worlds)
+		&PublicStatus{DB: w.db, Streams: streams, Modpacks: mods})
 	ctl, err := control.New(w.cfg, &control.Deps{
 		DB: w.db, Engine: w.engine, Runtime: w.runtime, Keeper: w.keeper, Streams: streams,
 		Worlds: worlds, Installer: mods.install, Notifier: notifier, Commands: w.commands,
@@ -202,12 +205,9 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 		return nil, fmt.Errorf("build instance control: %w", err)
 	}
 	instances := &Instances{
-		ctl: ctl,
-		alerts: &scan.Scanner{
-			DB: w.db, Engine: w.engine, DataRoot: w.cfg.Data.Root, Dispatcher: notifier,
-			AlarmFloor: reportedAlarmFloor(streams, w.cfg.Data.FreeSpaceFloorBytes),
-		},
-		DB: w.db, Authz: w.az, Runtime: w.runtime, Keeper: w.keeper, Engine: w.engine, Cfg: w.cfg,
+		ctl:    ctl,
+		alerts: w.alertScanner(ctl.Starter, streams, mods, notifier),
+		DB:     w.db, Authz: w.az, Runtime: w.runtime, Keeper: w.keeper, Engine: w.engine, Cfg: w.cfg,
 		Streams: streams, Commands: w.commands, Mods: mods.install, Notify: notifier,
 		Profiles:          mods.Profiles,
 		PatchNotes:        instance.NewPatchNotesFeed(&http.Client{Timeout: patchNotesHTTPTimeout}),
@@ -221,18 +221,37 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	diagnostics := w.diagnostics(instances, mods)
 	sched := w.schedules(instances, hub)
 	shutdowns := w.shutdowns(instances, notifier)
-	bot := w.discord(ctl.Starter, streams)
+	bot := w.discord(ctl, streams, mods)
 	bot.StopLead = shutdowns.StopLead()
 
 	srv := &Server{
 		router: rt, health: health, supervisor: ctl.Supervisor, instances: instances, mods: mods,
 		scheduler: sched, shutdowns: shutdowns, players: players, webhooks: webhooks, notifier: notifier,
 		remoteBackups: remoteBackups, diagnostics: diagnostics, discord: bot, hub: hub,
+		retention: &Retention{DB: w.db, Engine: w.engine},
 	}
 	w.engine.OnFinish(srv.onJobFinished)
 	registerCancellationPolicies(w.engine)
 	srv.routes = w.finishRouter(rt, extraRoutes, trusted, external, gate, d.Options.SPA)
 	return srv, nil
+}
+
+// alertScanner builds the alert scan and has every successful start run one, so mods that failed
+// to load are reported before players find them.
+func (w *wiring) alertScanner(
+	starter *control.Starter, streams *instance.Streams, mods *Mods, notifier *delivery.Notifier,
+) *scan.Scanner {
+	scanner := &scan.Scanner{
+		DB: w.db, Engine: w.engine, DataRoot: w.cfg.Data.Root, Dispatcher: notifier,
+		AlarmFloor: reportedAlarmFloor(streams, w.cfg.Data.FreeSpaceFloorBytes),
+		Patterns:   streams.Patterns(), ModUpdates: mods.plan.PendingUpdates,
+	}
+	starter.AfterStart = func(ctx context.Context) {
+		if _, err := scanner.Submit(ctx, ""); err != nil {
+			slog.DebugContext(ctx, "alert scan after a start not submitted", slog.Any("error", err))
+		}
+	}
+	return scanner
 }
 
 // onJobFinished is the engine's finish hook, with two owners: the definition chain records its
@@ -246,8 +265,9 @@ func (s *Server) onJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.Finish
 }
 
 // accountRoutes registers the user, session, permission, audit, job, key and export endpoints and
-// returns the grants handler, whose changes the hub announces.
-func (w *wiring) accountRoutes(gate *middleware.BootstrapGate) *Grants {
+// returns the grants handler, whose changes the hub announces, and the sign-in handler, which is
+// given the notifier once it exists.
+func (w *wiring) accountRoutes(gate *middleware.BootstrapGate) (*Grants, *Auth) {
 	permissionRoutes(w.routes, &Permissions{Authz: w.az, DB: w.db, Commands: w.commands})
 	a := NewAuth(auth.NewBootstrap(w.db), w.sessions, gate, w.keeper,
 		auth.NewDeviceTrust(w.db, func(msg []byte) ([]byte, error) {
@@ -271,7 +291,7 @@ func (w *wiring) accountRoutes(gate *middleware.BootstrapGate) *Grants {
 		FreeSpace:      func() (uint64, error) { return instance.FreeSpace(w.cfg.Data.Root) },
 		FreeSpaceFloor: uint64(max(w.cfg.Data.FreeSpaceFloorBytes, 0)),
 	}})
-	return grants
+	return grants, a
 }
 
 // notifications builds the webhook endpoints and the notifier every domain event goes through.
@@ -295,15 +315,50 @@ func (w *wiring) notifications(sender *notify.Sender) (*Webhooks, *delivery.Noti
 }
 
 // discord builds the Discord bot and its admin endpoints.
-func (w *wiring) discord(starter *control.Starter, streams *instance.Streams) *discord.Bot {
-	bot := discord.New(w.db, w.keeper, starter, func(id string) *int {
+func (w *wiring) discord(ctl *control.Components, streams *instance.Streams, mods *Mods) *discord.Bot {
+	bot := discord.New(w.db, w.keeper, ctl.Starter, func(id string) *int {
 		if r := streams.Reader(id); r != nil {
 			return r.Players()
 		}
 		return nil
 	})
+	bot.JoinCode = func(id string) string {
+		if r := streams.Reader(id); r != nil {
+			return r.JoinCode()
+		}
+		return ""
+	}
+	bot.Join = func(ctx context.Context, inst *store.Instance) discord.JoinInfo {
+		return discordJoin(ctx, inst, bot.JoinCode, mods)
+	}
+	bot.Chainer, bot.Updates, bot.Deleter = ctl.Chainer, ctl.UpdateTester, ctl.Deleter
 	discordRoutes(w.routes, &Discord{DB: w.db, Authz: w.az, Keeper: w.keeper, Bot: bot})
 	return bot
+}
+
+// discordJoin is how players join inst, as the bot's /join shows it: the crossplay join code, or
+// the join address and its Steam link, and the profile code while it matches the server's mods.
+func discordJoin(
+	ctx context.Context, inst *store.Instance, joinCode func(string) string, mods modpackReader,
+) discord.JoinInfo {
+	var info discord.JoinInfo
+	if inst.Crossplay {
+		info.Code = joinCode(inst.ID)
+	} else if addr := joinAddress(inst.JoinHost, inst.BasePort); addr != nil {
+		info.Address = *addr
+		if link := steamJoinURL(addr, false); link != nil {
+			info.SteamURL = *link
+		}
+	}
+	code, err := mods.currentModpackCode(ctx, inst.ID)
+	if err != nil {
+		slog.WarnContext(ctx, "could not read the profile code for discord",
+			slog.String("instance_id", inst.ID), slog.Any("error", err))
+	}
+	if code != nil {
+		info.ProfileCode, info.ProfileRegistry = code.Code, code.Registry
+	}
+	return info
 }
 
 // remoteBackups builds the off-host copy endpoints and their copy worker.
@@ -379,7 +434,7 @@ func (w *wiring) mods(worlds *control.Worlds) *Mods {
 	}
 	m := &Mods{
 		DB: w.db, Authz: w.az, Engine: w.engine, Clients: clients, Patterns: w.patterns,
-		Profiles: w.profileHosts(),
+		Profiles: w.profileHosts(), profileCodeLimit: perMinute(profileCodePerMinute, profileCodeBurst),
 	}
 	m.plan = &manager.Planner{DB: w.db, Enabled: m.enabledSources()}
 	m.install = &manager.Installer{

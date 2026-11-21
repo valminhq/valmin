@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { tick } from 'svelte';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
@@ -102,13 +103,10 @@
 </script>
 
 <div class="grid gap-8">
-	<header class="grid gap-1">
-		<h2 class="text-2xl font-semibold tracking-tight">Notifications</h2>
-		<p class="max-w-prose text-sm text-muted-foreground">
-			Post what happens on this server to your channels: when it starts and stops, problems,
-			updates, and what players do in the game.
-		</p>
-	</header>
+	<PageHeader title="Notifications" level={2}>
+		Post what happens on this server to your channels: when it starts and stops, problems, updates,
+		and what players do in the game.
+	</PageHeader>
 
 	<Problem error={failure} />
 

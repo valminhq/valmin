@@ -1,5 +1,8 @@
 <script lang="ts">
-	import { resolve } from '$app/paths';
+	import { unsaved } from '#lib/state/dirty.svelte.js';
+	import { NativeSelect } from '#lib/components/ui/native-select/index.js';
+	import PageHeader from '#lib/components/page-header.svelte';
+	import { pageNarrow } from '#lib/layout.js';
 	import { api } from '#lib/api/client.js';
 	import { browserZone, formatInstant } from '#lib/api/schedules.js';
 	import type { User } from '#lib/api/types.js';
@@ -9,7 +12,7 @@
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import Problem from '#lib/components/problem.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import SaveFooter from '#lib/components/save-footer.svelte';
 
 	const browser = browserZone();
 	const zones = [...new Set([...Intl.supportedValuesOf('timeZone'), 'UTC'])].sort();
@@ -29,6 +32,7 @@
 	let hourCycle = $state<User['hour_cycle']>(session.user?.hour_cycle ?? '');
 	let dateOrder = $state<User['date_order']>(session.user?.date_order ?? '');
 	let busy = $state(false);
+	let savingWhat = $state<'zone' | 'format' | null>(null);
 	let saved = $state<'zone' | 'format' | null>(null);
 	let failure = $state<unknown>(null);
 
@@ -38,6 +42,18 @@
 	const formatChanged = $derived(
 		hourCycle !== (session.user?.hour_cycle ?? '') || dateOrder !== (session.user?.date_order ?? '')
 	);
+
+	// On a direct load the session arrives after the page; the form then takes the saved values.
+	let seeded = session.user !== null;
+	$effect(() => {
+		if (seeded || !session.user) return;
+		seeded = true;
+		chosen = session.user.timezone ?? '';
+		hourCycle = session.user.hour_cycle ?? '';
+		dateOrder = session.user.date_order ?? '';
+	});
+
+	unsaved(() => session.user !== null && (chosen !== current || formatChanged));
 
 	const timeOnly = { hour: 'numeric', minute: '2-digit' } as const;
 	const dateOnly = { year: 'numeric', month: '2-digit', day: '2-digit' } as const;
@@ -53,6 +69,7 @@
 
 	async function save(body: Partial<User>, what: 'zone' | 'format') {
 		busy = true;
+		savingWhat = what;
 		saved = null;
 		failure = null;
 		try {
@@ -63,6 +80,7 @@
 			failure = err;
 		} finally {
 			busy = false;
+			savingWhat = null;
 		}
 	}
 
@@ -78,18 +96,11 @@
 	}
 </script>
 
-<main class="mx-auto grid max-w-2xl gap-6 p-6">
-	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
-		<ArrowLeft /> Servers
-	</Button>
-
-	<header class="grid gap-1">
-		<h1 class="text-2xl font-semibold tracking-tight">Date and time</h1>
-		<p class="text-sm text-muted-foreground">
-			The zone and format the panel shows times in. They are saved on your account, so they follow
-			you to every browser.
-		</p>
-	</header>
+<main class={pageNarrow}>
+	<PageHeader title="Date and time">
+		The zone and format the panel shows times in. They are saved on your account, so they follow you
+		to every browser.
+	</PageHeader>
 
 	<Problem error={failure} />
 
@@ -148,19 +159,25 @@
 						instead of your real zone.
 					</p>
 				</div>
-				<div class="flex flex-wrap gap-2">
-					<Button type="submit" disabled={!ready}>Save</Button>
+				<SaveFooter
+					saveLabel="Save"
+					changed={chosen !== current}
+					{busy}
+					invalid={!known}
+					ondiscard={() => (chosen = current)}
+				>
 					{#if current !== ''}
 						<Button
 							type="button"
 							variant="outline"
+							size="sm"
 							disabled={busy}
 							onclick={() => save({ timezone: '' }, 'zone')}
 						>
 							Follow my browser
 						</Button>
 					{/if}
-				</div>
+				</SaveFooter>
 			</Card.Content>
 		</form>
 	</Card.Root>
@@ -170,40 +187,39 @@
 			<Card.Content class="grid gap-4">
 				<div class="grid gap-2">
 					<Label for="hour-cycle">Clock</Label>
-					<select
-						id="hour-cycle"
-						bind:value={hourCycle}
-						class="h-10 rounded-md border bg-background px-3"
-					>
+					<NativeSelect id="hour-cycle" bind:value={hourCycle}>
 						<option value="">Follow my browser ({example('', '', timeOnly)})</option>
 						{#each hourCycles as option (option.value)}
 							<option value={option.value}
 								>{option.label} ({example(option.value, '', timeOnly)})</option
 							>
 						{/each}
-					</select>
+					</NativeSelect>
 				</div>
 				<div class="grid gap-2">
 					<Label for="date-order">Date</Label>
-					<select
-						id="date-order"
-						bind:value={dateOrder}
-						class="h-10 rounded-md border bg-background px-3"
-					>
+					<NativeSelect id="date-order" bind:value={dateOrder}>
 						<option value="">Follow my browser ({example('', '', dateOnly)})</option>
 						{#each dateOrders as option (option.value)}
 							<option value={option.value}
 								>{option.label} ({example('', option.value, dateOnly)})</option
 							>
 						{/each}
-					</select>
+					</NativeSelect>
 				</div>
 				<p class="text-sm text-muted-foreground">
 					Times will read like {example(hourCycle, dateOrder)}.
 				</p>
-				<div>
-					<Button type="submit" disabled={!formatChanged || busy}>Save format</Button>
-				</div>
+				<SaveFooter
+					saveLabel="Save format"
+					changed={formatChanged}
+					{busy}
+					saving={savingWhat === 'format'}
+					ondiscard={() => {
+						hourCycle = session.user?.hour_cycle ?? '';
+						dateOrder = session.user?.date_order ?? '';
+					}}
+				/>
 			</Card.Content>
 		</form>
 	</Card.Root>

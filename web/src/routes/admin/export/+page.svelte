@@ -1,15 +1,15 @@
 <script lang="ts">
-	import { resolve } from '$app/paths';
+	import PageHeader from '#lib/components/page-header.svelte';
+	import { pageNarrow } from '#lib/layout.js';
 	import { installExport, type ExportMode, type InstallExport } from '#lib/api/admin.js';
 	import { actions } from '#lib/api/instances.js';
 	import { formatInstant } from '#lib/api/schedules.js';
-	import { formatBytes } from '#lib/conditions.js';
+	import { formatBytes } from '#lib/format.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import Problem from '#lib/components/problem.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Download from '@lucide/svelte/icons/download';
 	import PackageOpen from '@lucide/svelte/icons/package-open';
 
@@ -52,18 +52,11 @@
 	}
 </script>
 
-<main class="mx-auto grid max-w-2xl gap-6 p-6">
-	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
-		<ArrowLeft /> Servers
-	</Button>
-
-	<header class="grid gap-1">
-		<h1 class="text-2xl font-semibold tracking-tight">Export installation</h1>
-		<p class="text-sm text-muted-foreground">
-			One archive that <code>install.sh --restore</code> turns into this panel on another host. The new
-			host downloads the game and the mods again.
-		</p>
-	</header>
+<main class={pageNarrow}>
+	<PageHeader title="Export installation">
+		One archive that <code>install.sh --restore</code> turns into this panel on another host. The new
+		host downloads the game and the mods again.
+	</PageHeader>
 
 	<Problem error={failure} />
 
@@ -126,7 +119,7 @@
 			<Card.Header>
 				<Card.Title>Latest export</Card.Title>
 				<Card.Description>
-					{latest.mode === 'full' ? 'Full' : 'Light'} · {formatBytes(String(latest.size_bytes))} · made
+					{latest.mode === 'full' ? 'Full' : 'Light'} · {formatBytes(latest.size_bytes)} · made
 					{formatInstant(latest.created_at)}. A new export replaces it.
 				</Card.Description>
 			</Card.Header>

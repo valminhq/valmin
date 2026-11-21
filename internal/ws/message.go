@@ -36,6 +36,9 @@ type StatsMsg struct {
 	MemLimit uint64    `json:"mem_limit"`
 	MemPct   *float64  `json:"mem_pct"`
 	Players  *int      `json:"players"`
+
+	RxBytesPerSecond *float64 `json:"rx_bytes_per_second"`
+	TxBytesPerSecond *float64 `json:"tx_bytes_per_second"`
 }
 
 // StateMsg is an instance transition (12 §2.2), published after the transaction that wrote

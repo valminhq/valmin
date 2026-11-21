@@ -21,6 +21,7 @@ import Page from './+page.svelte';
 vi.mock('$app/state', () => ({
 	page: { params: { id: 'inst-a' }, url: new URL('http://localhost/instances/inst-a/mods') }
 }));
+vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 vi.mock('#lib/socket/index.svelte.js', () => import('#lib/testing/socket.js'));
 
 const base = '/instances/inst-a/mods';
@@ -92,6 +93,7 @@ const boot: PluginLoad = {
 	declared: 1,
 	loaded: 1,
 	failed: 0,
+	complete: true,
 	discrepancy: null
 };
 

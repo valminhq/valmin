@@ -1,9 +1,9 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Backup } from '#lib/api/backups.js';
+import type { Backup, BackupRemoval } from '#lib/api/backups.js';
 import { actions, type Instance, type WorldOnDisk } from '#lib/api/instances.js';
 import { session } from '#lib/state/session.svelte.js';
-import { click } from '#lib/testing/interact.js';
+import { click, text } from '#lib/testing/interact.js';
 import { FakeDaemon, backup, instance, job, permissions } from '#lib/testing/daemon.js';
 import BackupsPanel from './backups-panel.svelte';
 
@@ -34,10 +34,23 @@ async function open(
 	{
 		archives = [backup()],
 		row = instance(),
-		worlds = [world()]
-	}: { archives?: Backup[]; row?: Instance; worlds?: WorldOnDisk[] } = {}
+		worlds = [world()],
+		removals = {}
+	}: {
+		archives?: Backup[];
+		row?: Instance;
+		worlds?: WorldOnDisk[];
+		removals?: { consistent?: BackupRemoval[]; bestEffort?: BackupRemoval[] };
+	} = {}
 ) {
-	daemon.on('GET', list, () => Response.json({ items: archives, next_cursor: null }));
+	daemon.on('GET', list, () =>
+		Response.json({
+			items: archives,
+			next_cursor: null,
+			removed_by_next_consistent: removals.consistent ?? [],
+			removed_by_next_best_effort: removals.bestEffort ?? []
+		})
+	);
 	daemon.on('GET', '/instances/inst-a/worlds', () =>
 		Response.json({ items: worlds, next_cursor: null })
 	);
@@ -117,6 +130,23 @@ describe('the backups panel', () => {
 		expect(screen.getByLabelText('Consistent backups to keep')).toBeTruthy();
 	});
 
+	it('offers Upload now only once an off-host destination is set up', async () => {
+		const summary = { destination_id: null, enabled: false, pending: 0, failed: 0 };
+		daemon.on('GET', '/instances/inst-a/remote-copies', () =>
+			Response.json({ items: [], next_cursor: null, summary })
+		);
+		const view = await open([actions.backupsList, actions.backupsCreate]);
+		await vi.waitFor(() =>
+			expect(daemon.requests('GET', '/instances/inst-a/remote-copies')).toHaveLength(1)
+		);
+		expect(screen.queryByRole('button', { name: 'Upload now' })).toBeNull();
+		view.unmount();
+
+		summary.destination_id = 'dest-1' as never;
+		await open([actions.backupsList, actions.backupsCreate]);
+		expect(await screen.findByRole('button', { name: 'Upload now' })).toBeTruthy();
+	});
+
 	// The two controls are not two speeds of one thing: a quiesced archive
 	// stops the server, which is what makes it trustworthy; a hot copy may not restore.
 	it('sends the mode the operator chose, and says what each costs', async () => {
@@ -132,6 +162,56 @@ describe('the backups panel', () => {
 		await click(button('Stop and back up'));
 		await vi.waitFor(() => expect(daemon.requests('POST', list)).toHaveLength(1));
 		expect(daemon.requests('POST', list)[0].query.get('mode')).toBe('quiesced');
+	});
+
+	// Restart and Stop ask first; this takes a running server offline just the same.
+	it('asks before stopping a running server for a backup', async () => {
+		await open([actions.backupsList, actions.backupsCreate], {
+			row: instance({ state: 'running', backup_keep_cold: 2 }),
+			removals: { consistent: [{ id: 'b-old', created_at: '2026-09-18T23:05:00Z' }] }
+		});
+		daemon.on('POST', list, () => Response.json(job(), { status: 202 }));
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
+
+		await click(button('Stop and back up'));
+		const dialog = await screen.findByRole('dialog');
+		expect(text(dialog)).toContain('Connected players are disconnected');
+		expect(text(dialog)).toContain('Retention then removes the backup from');
+		expect(daemon.requests('POST', list), 'nothing sent before the answer').toHaveLength(0);
+
+		await click(within(dialog).getByRole('button', { name: 'Stop and back up' }));
+		await vi.waitFor(() => expect(daemon.requests('POST', list)).toHaveLength(1));
+		expect(daemon.requests('POST', list)[0].query.get('mode')).toBe('quiesced');
+	});
+
+	// What the next backup deletes is said before it is taken, for each kind on its own.
+	it('names what each kind of backup would remove, and says nothing when it removes none', async () => {
+		await open([actions.backupsList, actions.backupsCreate], {
+			row: instance({ state: 'running' }),
+			removals: {
+				consistent: [
+					{ id: 'b-1', created_at: '2026-09-18T23:05:00Z' },
+					{ id: 'b-2', created_at: '2026-09-17T23:05:00Z' }
+				]
+			}
+		});
+
+		expect(screen.getByText(/Retention then removes 2 backups, the newest from/)).toBeTruthy();
+		expect(screen.getAllByText(/Retention then removes/)).toHaveLength(1);
+	});
+
+	// A server that is not running has no live world to copy, so the daemon stores the copy as a
+	// consistent one and prunes it with those.
+	it('uses the consistent removals for a best-effort copy of a stopped server', async () => {
+		await open([actions.backupsList, actions.backupsCreate], {
+			row: instance({ state: 'stopped' }),
+			removals: {
+				consistent: [{ id: 'b-1', created_at: '2026-09-18T23:05:00Z' }],
+				bestEffort: []
+			}
+		});
+
+		expect(screen.getAllByText(/Retention then removes the backup from/)).toHaveLength(2);
 	});
 
 	it('sends hot for the best-effort copy', async () => {
@@ -402,14 +482,14 @@ describe('the backups panel', () => {
 			Response.json(instance({ backup_keep_cold: 10, backup_keep_hot: 2, backup_on_restart: true }))
 		);
 
-		expect(screen.getByText(/The restart waits for the backup to finish/)).toBeTruthy();
+		expect(screen.getByText(/A stop you make by hand does not back up/)).toBeTruthy();
 		await fireEvent.input(screen.getByLabelText('Consistent backups to keep'), {
 			target: { value: '10' }
 		});
 		await fireEvent.input(screen.getByLabelText('Best-effort backups to keep'), {
 			target: { value: '2' }
 		});
-		await click(screen.getByRole('switch', { name: 'Back up when this server restarts' }));
+		await click(screen.getByRole('switch', { name: 'Back up on restarts and automatic stops' }));
 		await click(button('Save backup settings'));
 
 		await vi.waitFor(() => expect(daemon.requests('PATCH', '/instances/inst-a')).toHaveLength(1));
@@ -494,7 +574,7 @@ describe('worlds on disk', () => {
 			worlds: [world({ bytes: 40 * 1024 * 1024, db_bytes: 1024 })]
 		});
 
-		expect(await screen.findByText(/40\.0 MB/)).toBeTruthy();
+		expect(await screen.findByText(/40\.0 MiB/)).toBeTruthy();
 	});
 
 	it('lists the game’s backups newest first, each restorable once the server stops', async () => {
@@ -548,5 +628,81 @@ describe('worlds on disk', () => {
 		);
 		await click(retry);
 		expect(await screen.findByText('· loaded by this server')).toBeTruthy();
+	});
+
+	it('compares two backups over the window between them, showing only what the viewer may read', async () => {
+		const older = backup({ id: 'bk-old', created_at: '2026-09-20T12:00:00Z', world_bytes: 1024 });
+		const newer = backup({ id: 'bk-new', created_at: '2026-09-21T12:00:00Z', world_bytes: 3072 });
+		daemon.on('GET', '/instances/inst-a/jobs', () =>
+			Response.json({
+				items: [job({ job_id: 'j-restart', kind: 'restart', status: 'succeeded' })],
+				next_cursor: null
+			})
+		);
+		await open([actions.backupsList], { archives: [newer, older] });
+
+		await click(button('Compare two backups'));
+		const boxes = screen.getAllByRole('checkbox');
+		await click(boxes[0]);
+		await click(boxes[1]);
+		await click(button('Show what happened between them'));
+
+		const dialog = await screen.findByRole('dialog');
+		await within(dialog).findByText('Restart');
+		const [sent] = daemon.requests('GET', '/instances/inst-a/jobs');
+		expect(sent.query.get('since')).toBe(older.created_at);
+		expect(sent.query.get('until')).toBe(newer.created_at);
+		expect(within(dialog).getByTestId('compare-world').textContent).toContain('+2.0 KiB');
+		expect(within(dialog).queryByTestId('compare-players')).toBeNull();
+		expect(within(dialog).queryByTestId('compare-audit')).toBeNull();
+		expect(daemon.requests('GET', '/audit')).toHaveLength(0);
+	});
+
+	it('lists the non-job audit entries of the window for an administrator', async () => {
+		const older = backup({ id: 'bk-old', created_at: '2026-09-20T12:00:00Z' });
+		const newer = backup({ id: 'bk-new', created_at: '2026-09-21T12:00:00Z' });
+		const entry = (id: string, action: string, jobId: string | null) => ({
+			id,
+			user_id: 'u-1',
+			actor: 'alice',
+			instance_id: 'inst-a',
+			instance: 'Alpha',
+			action,
+			detail: null,
+			ip: null,
+			outcome: null,
+			job_id: jobId,
+			job_error: null,
+			created_at: '2026-09-20T18:00:00Z'
+		});
+		daemon.on('GET', '/instances/inst-a/jobs', () =>
+			Response.json({ items: [], next_cursor: null })
+		);
+		daemon.on('GET', '/audit', () =>
+			Response.json({
+				items: [entry('a-1', 'instances.restart', 'j-1'), entry('a-2', 'configs.write', null)],
+				next_cursor: null
+			})
+		);
+		daemon.on('GET', list, () => Response.json({ items: [newer, older], next_cursor: null }));
+		daemon.on('GET', '/instances/inst-a/worlds', () =>
+			Response.json({ items: [], next_cursor: null })
+		);
+		session.permissions = permissions('inst-a', [actions.backupsList], [actions.auditRead]);
+		render(BackupsPanel, { instance: instance() });
+		await screen.findByText('Newest backup');
+
+		await click(button('Compare two backups'));
+		for (const box of screen.getAllByRole('checkbox')) await click(box);
+		await click(button('Show what happened between them'));
+
+		const audit = await screen.findByTestId('compare-audit');
+		await within(audit).findByRole('listitem');
+		expect(within(audit).getAllByRole('listitem')).toHaveLength(1);
+		expect(audit.textContent).not.toContain('No other changes');
+		expect(screen.getByText('No operations finished between these backups.')).toBeTruthy();
+		const [sent] = daemon.requests('GET', '/audit');
+		expect(sent.query.get('since')).toBe(older.created_at);
+		expect(sent.query.get('until')).toBe(newer.created_at);
 	});
 });

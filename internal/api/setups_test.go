@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -209,6 +210,23 @@ func TestSetupRestoresOfflineModsParkedFilesConfigurationAndSettings(t *testing.
 	for _, path := range []string{"BepInEx/config/New.cfg", "BepInEx/plugins/Ns-New.dll"} {
 		if _, err := os.Stat(serverPath(dataDir, path)); !os.IsNotExist(err) {
 			t.Errorf("%s after restore: %v, want absent", path, err)
+		}
+	}
+	// Each replaced or removed config is in its history first, and the restored one after.
+	for file, want := range map[string][]string{
+		"Mod.cfg": {"setup", "found"},
+		"New.cfg": {"found"},
+	} {
+		revs, err := db.ConfigRevisions(t.Context(), "inst-a", file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for i := range revs {
+			got = append(got, string(revs[i].Source))
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("%s history = %v, want %v", file, got, want)
 		}
 	}
 	inst, err := db.InstanceByID(t.Context(), "inst-a")

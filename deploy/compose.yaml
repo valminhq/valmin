@@ -27,6 +27,9 @@ services:
       VALMIN_GAME_IMAGE: ${VALMIN_GAME_IMAGE:?set VALMIN_GAME_IMAGE, pinned by digest}
       # The network the panel creates game containers on.
       VALMIN_GAME_NETWORK: valmin-games
+      # A sandboxed runtime registered with the host's Docker, and the resolvers it needs.
+      VALMIN_GAME_RUNTIME: ${VALMIN_GAME_RUNTIME:-}
+      VALMIN_GAME_DNS: ${VALMIN_GAME_DNS:-}
       VALMIN_DOCKER_ENDPOINT: tcp://docker-proxy:2375
       VALMIN_GAME_STEAMCMD_IMAGE: ${VALMIN_STEAMCMD_IMAGE:-steamcmd/steamcmd:latest@sha256:c0f1d52b97361919db70034a67b05d2b128061d58a6f8b4bf66787b2aaeeb17d}
       VALMIN_LOG_FORMAT: json

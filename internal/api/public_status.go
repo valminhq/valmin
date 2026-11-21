@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -22,6 +24,13 @@ import (
 type PublicStatus struct {
 	DB      *store.DB
 	Streams *instance.Streams
+	// Modpacks reads a server's stored profile code while its mods still match it.
+	Modpacks modpackReader
+}
+
+// modpackReader is the stored profile code lookup the status route needs.
+type modpackReader interface {
+	currentModpackCode(ctx context.Context, instanceID string) (*store.ModpackCode, error)
 }
 
 // publicStatusRoutes registers the route on mux behind its own thin chain, outside the API chain and
@@ -33,9 +42,9 @@ func publicStatusRoutes(mux *http.ServeMux, chain []middleware.Layer, h *PublicS
 }
 
 // publicStatusView is the whole public contract, and it is short on purpose: the page answers
-// "is it up", "who is on" and what the administrator chose to say. Nothing else — no ports, no
-// join code, no resource usage, no world name, no state beyond up, down, and a coarse activity.
-// Every field here is a disclosure to strangers.
+// "is it up", "who is on", what the administrator chose to say, and how to join only when the
+// administrator turned that on. No resource usage, no world name, no state beyond up, down, and
+// a coarse activity. Every field here is a disclosure to strangers.
 type publicStatusView struct {
 	Name   string `json:"name"`
 	Online bool   `json:"online"`
@@ -50,6 +59,14 @@ type publicStatusView struct {
 	ConnectInfo string `json:"connect_info,omitempty"`
 	// Activity is one word or two for panel work keeping the server down, from publicActivity.
 	Activity string `json:"activity,omitempty"`
+	// JoinAddress and SteamJoinURL, or JoinCode with crossplay, are set when the page shows how
+	// to join. ModpackCode and ModpackRegistry are set when it shows the profile code and the
+	// stored one still matches the server's mods.
+	JoinAddress     string `json:"join_address,omitempty"`
+	SteamJoinURL    string `json:"steam_join_url,omitempty"`
+	JoinCode        string `json:"join_code,omitempty"`
+	ModpackCode     string `json:"modpack_code,omitempty"`
+	ModpackRegistry string `json:"modpack_registry,omitempty"`
 }
 
 // publicActivities names the jobs a stranger may learn are in progress. A kind absent here
@@ -103,10 +120,52 @@ func (h *PublicStatus) status(w http.ResponseWriter, r *http.Request) {
 		ConnectInfo: st.ConnectInfo,
 		Activity:    publicActivity(st.State, st.JobKind),
 	}
-	if sampler := h.Streams.Sampler(id); sampler != nil {
-		if latest, ok := sampler.Latest(); ok {
-			view.Players, view.ObservedAt = latest.Players, &latest.TS
+	h.addPlayers(&view, id)
+	if st.Show.Join {
+		h.addJoin(&view, id, st)
+	}
+	if st.Show.Modpack {
+		code, err := h.Modpacks.currentModpackCode(r.Context(), id)
+		if err != nil {
+			slog.WarnContext(r.Context(), "could not read the profile code for the status page",
+				slog.String("instance_id", id), slog.Any("error", err))
+		}
+		if code != nil {
+			view.ModpackCode, view.ModpackRegistry = code.Code, code.Registry
 		}
 	}
 	JSON(w, r, http.StatusOK, view)
+}
+
+// addPlayers adds the log reader's current player count while the server's container is
+// sampled, which it is not once the server stops.
+func (h *PublicStatus) addPlayers(view *publicStatusView, id string) {
+	sampler, reader := h.Streams.Sampler(id), h.Streams.Reader(id)
+	if sampler == nil || reader == nil {
+		return
+	}
+	if _, ok := sampler.Latest(); !ok {
+		return
+	}
+	now := time.Now().UTC()
+	view.Players, view.ObservedAt = reader.Players(), &now
+}
+
+// addJoin fills in how to join: the join code this boot logged on a crossplay server, else the
+// join address and its Steam link when a join host is set.
+func (h *PublicStatus) addJoin(view *publicStatusView, id string, st *store.PublishedStatus) {
+	if st.Crossplay {
+		if reader := h.Streams.Reader(id); reader != nil {
+			view.JoinCode = reader.JoinCode()
+		}
+		return
+	}
+	addr := joinAddress(st.JoinHost, st.BasePort)
+	if addr == nil {
+		return
+	}
+	view.JoinAddress = *addr
+	if link := steamJoinURL(addr, false); link != nil {
+		view.SteamJoinURL = *link
+	}
 }

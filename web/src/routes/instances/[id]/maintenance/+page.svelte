@@ -1,10 +1,12 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { page } from '$app/state';
 	import { instances, type Instance } from '#lib/api/instances.js';
 	import { socket } from '#lib/socket/index.svelte.js';
 	import { topics, type ServerMessage } from '#lib/socket/messages.js';
 	import { withLive } from '#lib/state/instances.svelte.js';
 	import AutoStopPanel from '#lib/components/auto-stop-panel.svelte';
+	import WatchdogPanel from '#lib/components/watchdog-panel.svelte';
 	import GameVersionPanel from '#lib/components/game-version-panel.svelte';
 	import ScheduledRuns from '#lib/components/scheduled-runs.svelte';
 	import SchedulesEditor from '#lib/components/schedules-editor.svelte';
@@ -24,6 +26,8 @@
 		void load(id);
 		return off;
 	});
+	// A first read that failed while the panel was unreachable is tried again when it comes back.
+	$effect(() => socket.onConnected(() => void (!instance && load(id))));
 
 	/** Reads the instance, dropping a reply for one no longer shown. */
 	async function load(instanceId: string) {
@@ -41,20 +45,20 @@
 </script>
 
 <div class="grid gap-6">
-	<header class="grid gap-1">
-		<h2 class="text-2xl font-semibold tracking-tight">Maintenance</h2>
-		<p class="text-sm text-muted-foreground">
-			Scheduled restarts, backups and game updates for this server, what runs next, runs that did
-			not complete, stopping it when nobody plays, the game version, and world tools.
-		</p>
-	</header>
+	<PageHeader title="Maintenance" level={2}>
+		Scheduled restarts, backups and game updates for this server, what runs next, runs that did not
+		complete, stopping it when nobody plays, the game version, and world tools.
+	</PageHeader>
 
 	<Problem error={failure} />
 
 	{#if loading}
 		<p class="text-sm text-muted-foreground">Loading…</p>
 	{:else if !instance}
-		<p class="text-sm text-muted-foreground">This server is not here.</p>
+		<!-- A failed read is explained by the problem above. -->
+		{#if !failure}
+			<p class="text-sm text-muted-foreground">This server is not here.</p>
+		{/if}
 	{:else}
 		<div class="grid items-start gap-6 lg:grid-cols-2">
 			<div class="grid gap-6">
@@ -63,6 +67,7 @@
 			</div>
 			<div class="grid gap-6">
 				<AutoStopPanel {instance} onchange={() => void load(id)} />
+				<WatchdogPanel {instance} onchange={() => void load(id)} />
 				<GameVersionPanel {instance} onchange={() => void load(id)} />
 				<ScheduledRuns instanceId={instance.id} />
 			</div>

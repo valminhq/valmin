@@ -31,12 +31,12 @@ export const sourceLabel: Record<ModSource, string> = {
 
 export const sourceText: Record<ModSource, string> = {
 	thunderstore: 'text-sky-700 dark:text-sky-300',
-	hexium: 'text-amber-700 dark:text-amber-300'
+	hexium: 'text-violet-700 dark:text-violet-300'
 };
 
 export const sourceBadge: Record<ModSource, string> = {
 	thunderstore: 'bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300',
-	hexium: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+	hexium: 'bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300'
 };
 
 /** One package in the cached index, as `GET /mods/search` and `GET /mods/{ns}/{name}`
@@ -90,8 +90,9 @@ export interface ModSearchPage {
  * panel has nothing to compare against — no load report yet, or a package that places
  * nothing loadable — which is not the same claim as `not_seen`. `failed` is a plugin the
  * loader said it could not load, with its own line in `load_error` (Q38); `not_seen` is one
- * it said nothing about. */
-export type LoadStatus = 'loaded' | 'not_seen' | 'failed';
+ * it said nothing about. `pending` is a plugin installed after the last load report, which
+ * could not have loaded it. */
+export type LoadStatus = 'loaded' | 'not_seen' | 'failed' | 'pending';
 
 /** The curator-supplied compatibility labels accepted by the daemon. */
 export type ModSide = 'server_only' | 'client_required' | 'client_optional' | 'unknown';
@@ -175,6 +176,8 @@ export interface PluginLoad {
 	loaded: number;
 	/** How many plugins the loader said it could not load. */
 	failed: number;
+	/** Whether the loader logged that it finished; until then the counts are partial. */
+	complete: boolean;
 	/** The panel's own sentence when the two numbers disagree, rendered as sent. The
 	 * gap is reported, never resolved, and the wording belongs to the daemon — a frontend
 	 * that composed it would be holding a piece of game knowledge (F2, `02 §2.1`). */
@@ -282,11 +285,11 @@ export interface ExportPreview {
 	conflicts: ExportConflict[];
 }
 
-/** `POST /instances/{id}/mods/export/code`: the profile code r2modman and Gale import, and the
- * registry it was uploaded to. */
+/** A profile code r2modman and Gale import, the registry it was uploaded to, and when. */
 export interface ExportCode {
 	code: string;
 	registry: ModSource;
+	created_at: string;
 }
 
 /** One installed package and the version "Update all" moves it to. The preview lists these
@@ -478,5 +481,8 @@ export const mods = {
 	 * `409 mod_conflict` while the preview reports a conflict. */
 	exportUrl: (id: string) => `/api/v1/instances/${id}/mods/export?format=r2z`,
 	/** Uploads the same list to a registry and answers with the code a mod manager imports. */
-	exportCode: (id: string) => api.post<ExportCode>(`/instances/${id}/mods/export/code`)
+	exportCode: (id: string) => api.post<ExportCode>(`/instances/${id}/mods/export/code`),
+	/** The last uploaded code while the server's mods still match it, else null. Never uploads. */
+	currentCode: (id: string) =>
+		api.get<{ current: ExportCode | null }>(`/instances/${id}/mods/export/code`)
 };

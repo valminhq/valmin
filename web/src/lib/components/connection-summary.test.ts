@@ -39,18 +39,16 @@ describe('the connection summary', () => {
 		expect(html, 'the field can carry a stale code from a crossplay past').not.toContain('123456');
 	});
 
-	it('names the port and claims no address for it', () => {
+	it('names the port and claims no address when none is set', () => {
 		const html = body();
 		expect(html).toContain('2456');
 		expect(html).toContain('2457');
-		// `02 §5`: the panel publishes a host port and knows nothing about how a player reaches
-		// the host. An address rendered here would be one the panel guessed.
-		expect(html).toMatch(/does\s+not know that address/);
+		expect(html).toContain('No join address is set');
 		expect(html, 'no host, no literal address').not.toMatch(/\b\d{1,3}(\.\d{1,3}){3}\b/);
 	});
 
 	it('mentions the community browser only for a listed server', () => {
-		expect(body({ public: true })).toContain('Community browser');
-		expect(body({ public: false })).not.toContain('Community browser');
+		expect(body({ public: true })).toContain('community browser');
+		expect(body({ public: false })).not.toContain('community browser');
 	});
 });

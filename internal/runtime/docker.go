@@ -121,6 +121,7 @@ func (d *Docker) Create(ctx context.Context, spec *ContainerSpec) (string, error
 	}
 
 	host := &container.HostConfig{
+		Runtime:      spec.OCIRuntime,
 		Binds:        binds(spec.Binds),
 		PortBindings: bindings,
 		CapDrop:      dropAllCaps,
@@ -311,13 +312,25 @@ func (d *Docker) Stats(ctx context.Context, id string) (Stats, error) {
 		return Stats{}, fmt.Errorf("decode stats of container %s: %w", id, err)
 	}
 
+	rx, tx := networkTotals(raw.Networks)
 	return Stats{
 		CPUNanos:    raw.CPUStats.CPUUsage.TotalUsage,
 		SystemNanos: raw.CPUStats.SystemUsage,
 		OnlineCPUs:  raw.CPUStats.OnlineCPUs,
 		MemBytes:    workingSet(raw.MemoryStats),
 		MemLimit:    raw.MemoryStats.Limit,
+		RxBytes:     rx,
+		TxBytes:     tx,
 	}, nil
+}
+
+// networkTotals sums received and sent bytes over a container's interfaces.
+func networkTotals(networks map[string]container.NetworkStats) (rx, tx uint64) {
+	for _, n := range networks {
+		rx += n.RxBytes
+		tx += n.TxBytes
+	}
+	return rx, tx
 }
 
 // workingSet subtracts the page cache term, which is what docker stats reports. The
@@ -342,13 +355,16 @@ func (d *Docker) Inspect(ctx context.Context, id string) (Container, error) {
 }
 
 // InspectWithImageDefaults is Inspect plus the environment and labels of the image the
-// container was created from.
+// container was created from. A removed image is ErrImageNotFound, not ErrNotFound.
 func (d *Docker) InspectWithImageDefaults(ctx context.Context, id string) (Container, error) {
 	c, err := d.Inspect(ctx, id)
 	if err != nil {
 		return Container{}, err
 	}
 	image, err := d.cli.ImageInspect(ctx, c.ImageID)
+	if cerrdefs.IsNotFound(err) {
+		return Container{}, fmt.Errorf("inspect image %s of container %s: %w", c.ImageID, id, ErrImageNotFound)
+	}
 	if err != nil {
 		return Container{}, wrap(err, "inspect image %s of container %s", c.ImageID, id)
 	}
@@ -454,6 +470,7 @@ func toContainer(resp container.InspectResponse) (Container, error) {
 		c.Spec.Ports, c.Security.HostIPs = inspectPorts(exposed, resp.HostConfig.PortBindings)
 		c.Spec.NetworkDisabled, c.Spec.Network = inspectNetwork(resp.HostConfig.NetworkMode)
 		c.Spec.RestartPolicy = string(resp.HostConfig.RestartPolicy.Name)
+		c.Spec.OCIRuntime = inspectOCIRuntime(resp.HostConfig.Runtime)
 		c.Spec.MemoryBytes = resp.HostConfig.Memory
 		c.Spec.NanoCPUs = resp.HostConfig.NanoCPUs
 		c.Spec.LogMaxBytes, c.Spec.LogMaxFiles = inspectLogLimit(resp.HostConfig.LogConfig)
@@ -478,6 +495,18 @@ func toContainer(resp container.InspectResponse) (Container, error) {
 		}
 	}
 	return c, nil
+}
+
+// defaultOCIRuntime is the name Docker reports for a container created without a runtime.
+const defaultOCIRuntime = "runc"
+
+// inspectOCIRuntime recovers ContainerSpec.OCIRuntime from HostConfig.Runtime, reading the
+// default's name as empty.
+func inspectOCIRuntime(name string) string {
+	if name == defaultOCIRuntime {
+		return ""
+	}
+	return name
 }
 
 // inspectNetwork recovers ContainerSpec's network fields from Docker's NetworkMode. Docker

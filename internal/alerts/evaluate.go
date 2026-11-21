@@ -28,8 +28,12 @@ type Snapshot struct {
 	// FlaggedBackups is each instance's newest archive, other than a snapshot, when the world
 	// check flagged it.
 	FlaggedBackups map[string]store.Backup
-	// Incidents is when each instance was observed going down on its own, newest first.
-	Incidents map[string][]time.Time
+	// Incidents is each instance's observed stops on its own, newest first.
+	Incidents map[string][]store.Incident
+	// FailedMods is, per instance, the mods its latest boot could not load.
+	FailedMods map[string]FailedMods
+	// ModUpdates is, per instance, the mod updates the catalogue offers, one line each.
+	ModUpdates map[string][]string
 	// InstalledBuilds is the build each instance actually runs, by instance id.
 	InstalledBuilds map[string]string
 	// BranchBuilds is the last observed build of each listed Steam branch, by branch name.
@@ -38,6 +42,13 @@ type Snapshot struct {
 	// AlarmBytes is the floor below which free space is low. Zero disables the check.
 	AlarmBytes uint64
 	Now        time.Time
+}
+
+// FailedMods is what one boot's mod loader refused: the mods it named, and the loader's line for
+// the first mod that failed on its own.
+type FailedMods struct {
+	Names  []string
+	Reason string
 }
 
 // BackupSchedule is one instance's backup cadence.
@@ -66,6 +77,8 @@ func Evaluate(s *Snapshot, resolve Resolver) []Condition {
 	out = append(out, uncleanStops(s)...)
 	out = append(out, staleBackups(s, params)...)
 	out = append(out, flaggedBackups(s)...)
+	out = append(out, modsFailed(s)...)
+	out = append(out, modUpdates(s)...)
 	out = append(out, stuckJobs(s, params)...)
 	return out
 }
@@ -90,7 +103,11 @@ func perInstance(s *Snapshot, params func(Kind, string) Params) []Condition {
 			out = append(out, Condition{Kind: KindRestartRequired, InstanceID: inst.ID})
 		}
 		if inst.State == stateError {
-			out = append(out, Condition{Kind: KindInstanceError, InstanceID: inst.ID})
+			c := Condition{Kind: KindInstanceError, InstanceID: inst.ID}
+			if cause := errorCause(s, inst.ID); cause != "" {
+				c.Detail = map[string]string{DetailReason: cause, DetailMemLimit: strconv.Itoa(inst.MemLimitMB)}
+			}
+			out = append(out, c)
 		}
 		if c, ok := updateAvailable(s, inst); ok {
 			out = append(out, c)
@@ -116,8 +133,8 @@ func updateAvailable(s *Snapshot, inst *store.Instance) (Condition, bool) {
 func crashLoop(s *Snapshot, instanceID string, p Params, now time.Time) (Condition, bool) {
 	cutoff := now.Add(-p.CrashWindow)
 	n := 0
-	for _, at := range s.Incidents[instanceID] {
-		if at.After(cutoff) {
+	for _, incident := range s.Incidents[instanceID] {
+		if incident.At.After(cutoff) {
 			n++
 		}
 	}
@@ -203,6 +220,53 @@ func flaggedBackups(s *Snapshot) []Condition {
 		out = append(out, Condition{Kind: KindBackupAttention, InstanceID: instanceID, Detail: map[string]string{
 			DetailReason: strings.Join(messages, "; "),
 			DetailBackup: b.CreatedAt.UTC().Format(time.RFC3339),
+		}})
+	}
+	return out
+}
+
+// errorCause is the reason the observer gave for an instance's newest incident, when no job
+// finished after it. An error a job left behind is the job's to explain, under job_failed.
+func errorCause(s *Snapshot, instanceID string) string {
+	incidents := s.Incidents[instanceID]
+	if len(incidents) == 0 {
+		return ""
+	}
+	newest := incidents[0]
+	for i := range s.LatestTerminalJobs {
+		j := &s.LatestTerminalJobs[i]
+		if deref(j.InstanceID) == instanceID && j.FinishedAt != nil && j.FinishedAt.After(newest.At) {
+			return ""
+		}
+	}
+	return newest.Reason
+}
+
+// modsFailed reports each server whose latest boot left mods unloaded, naming them.
+func modsFailed(s *Snapshot) []Condition {
+	out := make([]Condition, 0, len(s.FailedMods))
+	for instanceID, f := range s.FailedMods {
+		if len(f.Names) == 0 {
+			continue
+		}
+		out = append(out, Condition{Kind: KindModsFailed, InstanceID: instanceID, Detail: map[string]string{
+			DetailMods:   strings.Join(f.Names, ", "),
+			DetailReason: f.Reason,
+		}})
+	}
+	return out
+}
+
+// modUpdates reports each server the catalogue has newer mod versions for.
+func modUpdates(s *Snapshot) []Condition {
+	out := make([]Condition, 0, len(s.ModUpdates))
+	for instanceID, updates := range s.ModUpdates {
+		if len(updates) == 0 {
+			continue
+		}
+		out = append(out, Condition{Kind: KindModUpdates, InstanceID: instanceID, Detail: map[string]string{
+			DetailMods:  strings.Join(updates, ", "),
+			DetailCount: strconv.Itoa(len(updates)),
 		}})
 	}
 	return out

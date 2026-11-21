@@ -13,6 +13,8 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | [Backups, restore, and upgrades](operations.md) | World backups, schedules, auto-stop, power cuts, full installation copies, keys, and updates.  |
 | [Remote backups](remote-backups.md)             | Copy world backups to WebDAV or any rclone remote, and recover after losing the host.          |
 | [Configuration](configuration.md)               | Daemon settings, environment variables, and host/container paths.                              |
+| [Advanced network setup](advanced-network-setup.md) | Docker subnets, restricting the panel's ports, and keeping game servers off the LAN.    |
+| [Sandboxed game servers](sandboxed-game-servers.md) | Run game servers under gVisor or Kata Containers, and the DNS they need.  |
 | [Troubleshooting](troubleshooting.md)           | Diagnostics page, support bundle, logs, startup failures, and password recovery.               |
 
 ## Find a feature
@@ -26,36 +28,50 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | Set memory and CPU limits                       | [Resource limits](usage.md#resource-limits)                                                |
 | Update Valheim                                  | [Update the game](usage.md#update-the-game)                                                |
 | Try an update before changing a modded server   | [Test an update on a copy](usage.md#test-an-update-on-a-copy)                              |
+| Update a modded server unattended               | [Test updates on a schedule](operations.md#test-updates-on-a-schedule)                     |
 | Delete a server                                 | [Delete a server](usage.md#delete-a-server)                                                |
 | Read the console or send commands               | [Send server commands](usage.md#send-server-commands)                                      |
 | Install, update, lock or downgrade mods         | [Manage mods](usage.md#manage-mods)                                                        |
+| Stop mods reaching my LAN or the host           | [Keep game servers off your LAN](advanced-network-setup.md#keep-game-servers-off-your-lan) |
+| Sandbox game servers with gVisor or Kata        | [Sandboxed game servers](sandboxed-game-servers.md)                                        |
 | Read what a mod update changes                  | [Read what changed in a mod](usage.md#read-what-changed-in-a-mod)                          |
+| Know what a mod update does to its config files | [Config files a mod ships](usage.md#config-files-a-mod-ships)                              |
 | Give players the mod list they need             | [Tell players which mods they need](usage.md#tell-players-which-mods-they-need)            |
 | Edit mod settings                               | [Edit mod configuration](usage.md#edit-mod-configuration)                                  |
+| Edit a mod's YAML or JSON files in subfolders   | [Edit as raw text](usage.md#edit-as-raw-text)                                              |
+| See or undo earlier versions of a config file   | [Compare with an earlier version](usage.md#compare-with-an-earlier-version)                |
 | Import, reset or roll back a world              | [Manage worlds](usage.md#manage-worlds)                                                    |
 | Back up and restore a world                     | [Back up or restore a world](operations.md#back-up-or-restore-a-world)                     |
+| Move a world or backup to another server        | [Import a world](usage.md#import-a-world)                                                  |
 | Keep backups off the host                       | [Remote backups](remote-backups.md)                                                        |
 | Find out when a backup holds a broken world     | [World check](operations.md#world-check)                                                   |
+| See what happened between two backups           | [Compare two backups](operations.md#compare-two-backups)                                   |
 | Undo a bad mod or config change                 | [Save and restore a setup](usage.md#save-and-restore-a-setup)                              |
 | Share a server's setup with another panel       | [Share a server as a template](usage.md#share-a-server-as-a-template)                      |
 | See how two servers differ                      | [Compare two servers](usage.md#compare-two-servers)                                        |
 | Ban, allow or make players admins               | [Player lists](usage.md#player-lists)                                                      |
+| Ban a player on every server                    | [Players across servers](usage.md#players-across-servers)                                  |
 | See when people play                            | [Player activity](usage.md#player-activity)                                                |
 | See which names a player has used, on any server | [Names](usage.md#names), [Players across servers](usage.md#players-across-servers)         |
 | Show server status to people without an account | [Public status page](usage.md#public-status-page)                                          |
 | Give friends access                             | [Share access](usage.md#share-access)                                                      |
+| Show friends how to join a server               | [The overview](usage.md#the-overview), [Connections](usage.md#connections)                 |
 | Sign in with our SSO (Authelia, Authentik)      | [Sign in through a reverse proxy](configuration.md#sign-in-through-a-reverse-proxy)        |
 | Back up, restart or update on a timetable       | [Schedule maintenance](operations.md#schedule-maintenance)                                 |
+| Test a schedule without waiting for its time    | [Schedule maintenance](operations.md#schedule-maintenance)                                 |
 | Stop servers nobody is playing on               | [Stop a server when nobody plays](operations.md#stop-a-server-when-nobody-plays)           |
+| Be told about, or restart, a hung server        | [Restart a hung server](operations.md#restart-a-hung-server)                               |
 | Reset or upgrade the world with mods            | [Reset or upgrade the world with mods](operations.md#reset-or-upgrade-the-world-with-mods) |
 | Shut everything down before a power outage      | [Stop every server before a power cut](operations.md#stop-every-server-before-a-power-cut) |
 | Get alerts in Discord or elsewhere              | [Get notified](usage.md#get-notified)                                                      |
+| Know when mods fail to load or updates appear   | [Add a rule](usage.md#add-a-rule)                                                          |
 | Let friends start servers from Discord          | [Use the Discord bot](usage.md#use-the-discord-bot)                                        |
+| Restart, back up or update servers from Discord | [Bot admins](usage.md#bot-admins)                                                          |
 | See who changed what                            | [Read the audit log](usage.md#read-the-audit-log)                                          |
 | Check the panel's health or report a bug        | [Check the diagnostics page](troubleshooting.md#check-the-diagnostics-page)                |
 | Back up the whole panel or upgrade it           | [Back up the whole installation](operations.md#back-up-the-whole-installation)             |
 | Move the panel to a new host                    | [Move to a new host](operations.md#move-to-a-new-host)                                     |
-| Set my time zone or change my password          | [Your account](usage.md#your-account)                                                      |
+| Set my time zone, theme or change my password   | [Your account](usage.md#your-account)                                                      |
 
 ## Integrate or contribute
 

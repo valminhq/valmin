@@ -45,16 +45,32 @@ files. Valmin starts a temporary SteamCMD container to download a dedicated serv
 build into `cache/steam/896660/<build-id>/`. Each instance gets its own writable
 copy under `instances/<id>/server/`.
 
+The registries' mod catalogue, which search, install plans and update checks read, is a
+SQLite file of its own at `cache/catalogue.db`, apart from `panel.db`. It is a cache: a
+sync rewrites it, and a damaged file, or one a build with another catalogue layout wrote, is
+deleted at startup and filled again by the next sync. Upgrading from a release that kept the
+catalogue inside `panel.db` moves it across. `panel.db` keeps only the panel's own state, so
+its pre-upgrade copies and installation exports stay small.
+
 Mod packages are downloaded once and cached under `cache/<registry>/`, shared by
 every server that installs them. Each registry has its own directory: two registries
 can publish different files under one package name and version, so a shared directory
 could hand one registry's download to an install of the other's. Every installed
 package has a file manifest, which is what makes uninstall, disable and rollback
-exact.
+exact. It lists each file the package wrote with the hash of the bytes it shipped, and each
+config file under `BepInEx/config` the package ships that was already on the server or that
+another package places, marked `kept` with the shipped hash. A version change compares a config file's shipped hash with the
+installed version's: when the mod changed its file, the new version replaces the one on the
+server unless that already holds the new bytes; otherwise the file is left as it is.
 
 A game container mounts its installation, worlds, and logs. The backup archive
 directory is not mounted into it. All managed processes use UID/GID `10000:10000`
 so the daemon and containers can work with the same files.
+
+Game containers, and the startup and deep checks that stand in for one, run under
+`game.runtime` when it is set, with `game-resolv.conf` from the data directory mounted as
+`/etc/resolv.conf`. SteamCMD and the host path check use Docker's default runtime. See
+[sandboxed game servers](sandboxed-game-servers.md).
 
 The daemon can see a different absolute path from Docker's host. For example,
 `/mnt/games/valmin` on the host can be mounted at `/srv/valmin` in the panel. At
@@ -74,8 +90,9 @@ lock prevents conflicting operations from changing the same server at once. A
 transaction covers the change of state, never the work itself, so a slow Docker call
 or file copy never holds the database.
 
-The daemon holds a database lease to prevent multiple active daemons from managing
-the same installation. On startup, the supervisor removes helper containers a killed
+The daemon holds an exclusive lock on `.valmind.lock` in the data directory, so a second
+daemon refuses to start against the same installation. The kernel releases the lock when
+the process exits, so a restart after a crash is never kept waiting. On startup, the supervisor removes helper containers a killed
 daemon left behind, closes out the jobs a crash interrupted, reconciles database records with
 Docker containers, and resumes starts that a crash cut short. Interrupted multi-step
 operations, such as provisioning, wait for an operator to resume or abandon them.
@@ -142,8 +159,12 @@ queued updates combined into one job and one world backup. A restart requested w
 installs are queued stops the server, runs them, and starts it again.
 
 Configuration files are parsed into a document that keeps comments and layout, so a
-form edit changes only the values it touches. The previous bytes are kept beside the
-file for comparison. A file edited while its server runs is also kept as a pending
+form edit changes only the values it touches. Earlier versions of each file are kept in the
+`config_revisions` table: before a write, the panel records the bytes on disk, which shows a
+change made outside the panel since its last record, and after it the bytes it wrote. Each
+file keeps its newest 20 versions plus a baseline, the first version recorded or the one a mod
+install last wrote, which template codes measure tweaks against. A file with no history yet
+takes the `.orig` and `.bak` copies earlier releases kept beside it. A file edited while its server runs is also kept as a pending
 copy: many plugins write their loaded settings back at shutdown, so the daemon
 reapplies the pending values once the server has stopped and before it starts again.
 

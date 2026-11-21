@@ -35,7 +35,9 @@ every server gets its own copy.
   versions, disable a mod to find a broken one, and see which mods failed to load.
 - Queue installs and updates on a running server; they run when it stops or restarts.
 - Edit BepInEx and plugin configuration in a form built from the file, or as raw text,
-  with a review step and comparison against earlier versions.
+  with a review step and comparison against earlier versions. YAML, JSON and text configs
+  in subfolders (Expand World Data, WackysDatabase, EpicLoot patches) open as text, with a
+  syntax check before saving.
 - Export the mods players need as a profile for r2modman, Gale or Thunderstore Mod
   Manager.
 
@@ -72,7 +74,9 @@ every server gets its own copy.
 - Send alerts to Discord or any webhook for unexpected stops, crash loops, failed or
   stuck jobs, stale backups, low disk space, new game builds and more, with quiet hours.
   Each server can have its own channels and rules, alongside the shared ones.
-- Let friends check and start servers from Discord with `/status` and `/start`.
+- Let friends check, join and start servers from Discord with `/status`, `/join` and `/start`,
+  and let bot admins restart, back up and update them with `/restart`, `/stop`, `/backup` and
+  `/update`.
 
 **Running the panel**
 
@@ -80,6 +84,8 @@ every server gets its own copy.
   diagnostics page with a redacted support bundle for bug reports.
 - Secrets are encrypted at rest, and every action is checked against the user's
   permissions on that server.
+- Optionally run game servers, and the mods inside them, in a gVisor or Kata Containers
+  sandbox.
 
 ## Get started
 
@@ -106,6 +112,7 @@ the panel and game servers as UID/GID `10000:10000`. The default memory limit is
 | Back up worlds, schedule tasks, and upgrade   | [Backups, restore, and upgrades](docs/operations.md) |
 | Copy backups to cloud storage                 | [Remote backups](docs/remote-backups.md)             |
 | Set paths, images, ports, and daemon options  | [Configuration](docs/configuration.md)               |
+| Sandbox game servers with gVisor or Kata      | [Sandboxed game servers](docs/sandboxed-game-servers.md) |
 | Diagnose a failure or reset a password        | [Troubleshooting](docs/troubleshooting.md)           |
 | Integrate with the panel                      | [HTTP API and WebSockets](docs/api.md)               |
 | Build, run, and test changes                  | [Development](docs/development.md)                   |

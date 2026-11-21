@@ -88,7 +88,7 @@ describe('compareSettings', () => {
 			'CPU limit (cores)',
 			'Consistent backups to keep',
 			'Best-effort backups to keep',
-			'Back up when this server restarts'
+			'Back up on restarts and automatic stops'
 		]);
 		expect(rows.every((row) => row.change === 'same')).toBe(true);
 	});

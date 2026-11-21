@@ -1,4 +1,6 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
+	import { pageNarrow } from '#lib/layout.js';
 	import { tick } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { actions, instances, type Instance } from '#lib/api/instances.js';
@@ -11,7 +13,6 @@
 	import Problem from '#lib/components/problem.svelte';
 	import RuleEditor from '#lib/components/rule-editor.svelte';
 	import RuleList from '#lib/components/rule-list.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
 	import Plus from '@lucide/svelte/icons/plus';
 
@@ -96,18 +97,11 @@
 	const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 </script>
 
-<main class="mx-auto grid max-w-3xl gap-6 p-6">
-	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
-		<ArrowLeft /> Servers
-	</Button>
-
-	<header class="grid gap-1">
-		<h1 class="text-2xl font-semibold tracking-tight">Notifications</h1>
-		<p class="text-sm text-muted-foreground">
-			Shared channels and the rules that cover every server. Each server sets up its own channels
-			and rules on its Notifications tab.
-		</p>
-	</header>
+<main class={pageNarrow}>
+	<PageHeader title="Notifications">
+		Shared channels and the rules that cover every server. Each server sets up its own channels and
+		rules on its Notifications tab.
+	</PageHeader>
 
 	<Problem error={failure} />
 

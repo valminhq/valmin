@@ -1,4 +1,6 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
+	import { pageNarrow } from '#lib/layout.js';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { ApiError } from '#lib/api/errors.js';
@@ -16,6 +18,7 @@
 	import { unsaved } from '#lib/state/dirty.svelte.js';
 	import { tick, untrack } from 'svelte';
 	import Field, { focusFirstInvalid } from '#lib/components/field.svelte';
+	import { passwordInName } from '#lib/launch-rules.js';
 	import Problem from '#lib/components/problem.svelte';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import ModPicker from '#lib/components/mod-picker.svelte';
@@ -119,17 +122,19 @@
 	const pickedWorld = $derived([...Array.from(pickedFolder ?? []), ...Array.from(picked ?? [])]);
 	const worldFiles = $derived(canImport ? pickedWorld : []);
 
-	// The daemon's own rules on names and passwords come back beside each field; only the
-	// minimum length it serves is checked here.
+	// The daemon checks every rule again and its answers come back beside each field; the ones
+	// it serves or that are cheap to copy are checked here first.
 	const localProblems = $derived.by(() => {
 		const problems: Record<string, string> = {};
 		if (password && password.length < minPassword) {
 			problems.password = `At least ${minPassword} characters.`;
+		} else if (passwordInName(password, serverName.trim(), worldName.trim())) {
+			problems.password = 'Must not appear inside the server name or the world name.';
 		}
 		if (options && memLimitMB < options.min_memory_limit_mb) {
 			problems.mem_limit_mb = `Use at least ${options.min_memory_limit_mb} MB.`;
 		}
-		if (options && seedOn) {
+		if (options && seedOn && worldFiles.length === 0) {
 			const valid = new RegExp(`^[A-Za-z0-9]{1,${options.custom_seed.max_length}}$`);
 			if (seed.trim() !== '' ? !valid.test(seed.trim()) : seedDirect) {
 				problems.seed = `Use 1 to ${options.custom_seed.max_length} letters or digits.`;
@@ -149,6 +154,22 @@
 			password !== '' &&
 			Object.keys(localProblems).length === 0
 	);
+
+	/** What still keeps the form from being submitted, as one sentence. */
+	const waiting = $derived.by(() => {
+		const missing = [
+			[name.trim(), 'panel name'],
+			[serverName.trim(), 'server name'],
+			[worldName.trim(), 'world name'],
+			[password, 'server password']
+		]
+			.filter(([value]) => value === '')
+			.map(([, label]) => label);
+		if (missing.length > 0) return `Still needed: ${missing.join(', ')}.`;
+		return Object.keys(localProblems).length > 0 ? 'Fix the fields marked above.' : '';
+	});
+
+	const shownWaiting = $derived(busy ? '' : waiting);
 
 	// A part-filled form is unsaved work like any editor's. After submission the daemon owns
 	// what was entered, with one exception: the world upload is held in this browser and sent
@@ -204,7 +225,7 @@
 				source: m.source
 			}));
 		}
-		if (seedOn && seed.trim() !== '') body.seed = seed.trim();
+		if (seedOn && worldFiles.length === 0 && seed.trim() !== '') body.seed = seed.trim();
 
 		try {
 			// 202 and a job, never the instance (`11 §3`, ADR-028): nothing about this server is on
@@ -257,12 +278,12 @@
 	async function done() {
 		leaving = true;
 		await instanceList.load();
-		await goto(resolve('/'));
+		await goto(newInstanceId ? resolve('/instances/[id]', { id: newInstanceId }) : resolve('/'));
 	}
 </script>
 
-<main class="mx-auto grid max-w-3xl gap-4 p-6">
-	<h1 class="text-2xl font-semibold tracking-tight">New server</h1>
+<main class={pageNarrow}>
+	<PageHeader title="New server" />
 
 	{#if job}
 		<Card.Root>
@@ -610,6 +631,15 @@
 						{busy ? 'Creating…' : 'Create server'}
 					</Button>
 				</div>
+				<p
+					class={[
+						'basis-full text-right text-sm text-muted-foreground',
+						!shownWaiting && 'sr-only'
+					]}
+					role="status"
+				>
+					{shownWaiting}
+				</p>
 			</div>
 		</form>
 	{/if}

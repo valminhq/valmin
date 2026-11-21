@@ -1,4 +1,7 @@
 <script lang="ts">
+	import { formatBytes } from '#lib/format.js';
+	import PageHeader from '#lib/components/page-header.svelte';
+	import { pageWide } from '#lib/layout.js';
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { resolve } from '$app/paths';
 	import {
@@ -17,7 +20,6 @@
 	import JobDetail from '#lib/components/job-detail.svelte';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import Problem from '#lib/components/problem.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Download from '@lucide/svelte/icons/download';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 
@@ -74,6 +76,7 @@
 			row.inspection_error ||
 			row.port_issue ||
 			row.image_issue ||
+			row.runtime_issue ||
 			row.oom_killed ||
 			(row.exit_code != null && row.exit_code !== 0) ||
 			(row.restart_count ?? 0) > 0 ||
@@ -83,13 +86,7 @@
 	}
 	function bytes(value: number | null) {
 		if (value == null) return 'Not measured';
-		const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB'];
-		let unit = 0;
-		while (value >= 1024 && unit < units.length - 1) {
-			value /= 1024;
-			unit++;
-		}
-		return `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })} ${units[unit]}`;
+		return formatBytes(value);
 	}
 	async function openJob(id: string) {
 		selectedJob = null;
@@ -134,7 +131,7 @@
 
 	function badge(status: DiagnosticCheck['status']) {
 		if (status === 'fail') return 'destructive';
-		if (status === 'warn') return 'secondary';
+		if (status === 'warn') return 'warning';
 		return 'outline';
 	}
 
@@ -142,15 +139,7 @@
 		if (!at) return 'Not measured';
 		const date = new Date(at);
 		if (Number.isNaN(date.getTime())) return 'Not measured';
-		return formatInstant(date, {
-			year: 'numeric',
-			month: 'short',
-			day: 'numeric',
-			hour: '2-digit',
-			minute: '2-digit',
-			second: '2-digit',
-			timeZoneName: 'short'
-		});
+		return formatInstant(date, { second: '2-digit' });
 	}
 
 	$effect(() => {
@@ -159,18 +148,11 @@
 	});
 </script>
 
-<main class="mx-auto grid max-w-5xl gap-6 p-6">
-	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
-		<ArrowLeft /> Servers
-	</Button>
-
-	<header class="grid gap-1">
-		<h1 class="text-2xl font-semibold tracking-tight">Diagnostics</h1>
-		<p class="text-sm text-muted-foreground">
-			What this panel can and cannot reach, and the settings that decide whether it works. Every row
-			says where its answer came from.
-		</p>
-	</header>
+<main class={pageWide}>
+	<PageHeader title="Diagnostics">
+		What this panel can and cannot reach, and the settings that decide whether it works. Every row
+		says where its answer came from.
+	</PageHeader>
 
 	<Problem error={failure} />
 
@@ -188,7 +170,8 @@
 				<Download /> Download support bundle
 			</Button>
 			<label class="flex items-center gap-2 text-sm">
-				<input type="checkbox" bind:checked={problemsOnly} /> Show problems only
+				<input type="checkbox" class="size-4 accent-primary" bind:checked={problemsOnly} /> Show problems
+				only
 			</label>
 			{#if report}
 				<span class="text-sm text-muted-foreground">
@@ -200,7 +183,8 @@
 
 		<p class="text-sm text-muted-foreground">
 			The deep checks start a throwaway container each to re-prove the host data root, the game
-			network and Steam, so they run as a job rather than on page load.
+			network and Steam, and to test whether game servers can reach the cloud metadata service or
+			your LAN, so they run as a job rather than on page load.
 		</p>
 
 		{#if jobId}
@@ -241,7 +225,7 @@
 							</div>
 						{/each}
 						<Problem error={jobFailure} />
-						{#if jobLoading}<p class="text-sm">Loading job details…</p>{/if}
+						{#if jobLoading}<p class="text-sm text-muted-foreground">Loading job details…</p>{/if}
 						{#if selectedJob}
 							<div class="grid gap-2 rounded border p-3 text-sm" aria-live="polite">
 								<p>{selectedJob.kind.replaceAll('_', ' ')} · {selectedJob.status}</p>
@@ -277,6 +261,12 @@
 								{/if}
 								{#if check.remedy}
 									<p class="text-sm text-muted-foreground">{check.remedy}</p>
+								{/if}
+								{#if check.docs}
+									<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+									<a class="text-sm underline" href={check.docs} target="_blank" rel="noreferrer"
+										>How to fix this</a
+									>
 								{/if}
 							</div>
 						{/each}
@@ -319,6 +309,9 @@
 												>
 												{#if row.image_issue}
 													<div class="text-destructive">{row.image_issue}</div>
+												{/if}
+												{#if row.runtime_issue}
+													<div class="text-destructive">{row.runtime_issue}</div>
 												{/if}</td
 											>
 											<td class="py-2 pr-4">

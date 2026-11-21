@@ -28,6 +28,9 @@ export interface StatsMessage {
 	mem_pct: number | null;
 	/** Always null on this build (E7, Q7). Render "unknown", never 0. */
 	players: number | null;
+	/** Network traffic since the previous sample; null until there is one, and after a restart. */
+	rx_bytes_per_second: number | null;
+	tx_bytes_per_second: number | null;
 }
 
 export interface StateMessage {

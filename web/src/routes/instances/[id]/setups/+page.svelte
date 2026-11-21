@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { NativeSelect } from '#lib/components/ui/native-select/index.js';
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
@@ -16,6 +18,7 @@
 	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import Problem from '#lib/components/problem.svelte';
+	import ConfigLeftOut from '#lib/components/config-left-out.svelte';
 	import SetupComparison from '#lib/components/setup-comparison.svelte';
 
 	const id = $derived(page.params.id ?? '');
@@ -166,7 +169,8 @@
 			selectedId = '';
 			preview = null;
 		}
-		if (jobAction === 'restore') preview = null;
+		if (jobAction === 'restore' && jobTarget && jobTarget === selectedId)
+			void loadPreview(jobTarget);
 		void load(id);
 	}
 
@@ -176,13 +180,10 @@
 </script>
 
 <div class="grid gap-6">
-	<header class="grid gap-1">
-		<h2 class="text-2xl font-semibold tracking-tight">Saved setups</h2>
-		<p class="text-sm text-muted-foreground">
-			Save exact mod versions and supported configuration, then compare and restore them later.
-			World backups are linked for reference and restored separately.
-		</p>
-	</header>
+	<PageHeader title="Saved setups" level={2}>
+		Save exact mod versions and supported configuration, then compare and restore them later. World
+		backups are linked for reference and restored separately.
+	</PageHeader>
 
 	{#if !canManage}
 		<p class="text-sm text-muted-foreground">You don't have permission to manage saved setups.</p>
@@ -200,22 +201,19 @@
 					</Card.Description>
 				</Card.Header>
 				<Card.Content class="grid gap-4">
+					<ConfigLeftOut {id} />
 					<div class="grid max-w-lg gap-2">
 						<Label for="setup-name">Name</Label>
 						<Input id="setup-name" bind:value={name} required />
 					</div>
 					<div class="grid max-w-lg gap-2">
 						<Label for="setup-backup">Associated world backup (optional)</Label>
-						<select
-							id="setup-backup"
-							class="h-9 rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-							bind:value={worldBackupId}
-						>
+						<NativeSelect id="setup-backup" bind:value={worldBackupId}>
 							<option value="">None</option>
 							{#each linkedBackups as backup (backup.id)}
 								<option value={backup.id}>{when(backup.created_at)} · {backup.world_name}</option>
 							{/each}
-						</select>
+						</NativeSelect>
 						<p class="text-xs text-muted-foreground">
 							Only consistent backups from this server can be linked. A linked backup is kept until
 							the setup is deleted. Linking does not restore the world.

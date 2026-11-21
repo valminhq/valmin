@@ -1,9 +1,11 @@
 <script lang="ts">
+	import EmptyState from '#lib/components/empty-state.svelte';
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { actions } from '#lib/api/instances.js';
 	import { configs, type ConfigFile } from '#lib/api/configs.js';
-	import { filterConfigs } from '#lib/config-files.js';
+	import { filterConfigs, hasSettings } from '#lib/config-files.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { Badge } from '#lib/components/ui/badge/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
@@ -30,6 +32,12 @@
 
 	const allowed = $derived(session.allowed(id));
 	const canEdit = $derived(allowed.includes(actions.configEdit));
+	const canRaw = $derived(allowed.includes(actions.configRaw));
+
+	// Deleting a `.cfg` needs config.edit; a text-only file needs config.raw.
+	function canDelete(file: string): boolean {
+		return hasSettings(file) ? canEdit : canRaw;
+	}
 
 	$effect(() => {
 		void load();
@@ -72,18 +80,11 @@
 </script>
 
 <div class="grid max-w-3xl gap-6">
-	<header class="grid gap-3">
-		<div class="flex flex-wrap items-center justify-between gap-3">
-			<div class="grid gap-1">
-				<h2 class="text-2xl font-semibold tracking-tight">Mod configuration</h2>
-				<p class="text-sm text-muted-foreground">
-					{canEdit
-						? 'Configure the mods installed on this server. Stop the server before editing.'
-						: 'Configuration files for the mods installed on this server.'}
-				</p>
-			</div>
-		</div>
-	</header>
+	<PageHeader title="Mod configuration" level={2}>
+		{canEdit
+			? 'Configure the mods installed on this server. Edits to a running server take effect when it restarts.'
+			: 'Configuration files for the mods installed on this server.'}
+	</PageHeader>
 
 	<Problem error={failure} />
 
@@ -96,10 +97,9 @@
 	{:else if files.length === 0}
 		<!-- The daemon's sentence, rendered as sent. Why a mod has no file yet is Valheim
 		     knowledge, and the SPA holds none of it (F2, ADR-110). -->
-		<div class="grid gap-1 rounded-lg border border-dashed p-6 text-center">
-			<p class="font-medium">Nothing to configure yet</p>
-			<p class="text-sm text-muted-foreground">{note}</p>
-		</div>
+		<EmptyState title="Nothing to configure yet">
+			{note}
+		</EmptyState>
 	{:else}
 		<div class="grid gap-2">
 			<Label for="config-search">Search by filename or plugin</Label>
@@ -110,35 +110,48 @@
 			</p>
 		</div>
 		{#if shown.length === 0}
-			<div class="grid gap-1 rounded-lg border border-dashed p-6 text-center">
-				<p class="font-medium">No files match</p>
-				<p class="text-sm text-muted-foreground">
-					No filename or plugin name contains “{query.trim()}”.
-				</p>
-			</div>
+			<EmptyState title="No files match">
+				No filename or plugin name contains “{query.trim()}”.
+			</EmptyState>
 		{:else}
 			<ul class="divide-y rounded-lg border">
 				{#each shown as file (file.file)}
 					<li class="flex items-center">
 						<a
 							class="flex min-w-0 flex-1 items-center gap-3 p-4 hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none"
-							href={resolve('/instances/[id]/configs/[file]', { id, file: file.file })}
+							href={resolve('/instances/[id]/configs/[file]', {
+								id,
+								file: encodeURIComponent(file.file)
+							})}
 						>
 							<div class="grid min-w-0 flex-1 gap-0.5">
 								<span class="truncate font-mono text-sm font-medium">{file.file}</span>
 								<span class="truncate text-sm text-muted-foreground">
-									{file.plugin || 'No plugin named in this file'}
+									{hasSettings(file.file)
+										? file.plugin || 'No plugin named in this file'
+										: 'Edited as text'}
 								</span>
 							</div>
 							{#if file.dir === ''}
 								<Badge variant="outline" class="shrink-0">Server root</Badge>
+							{/if}
+							{#if file.mod_replaced_edits}
+								{@const by = file.mod_replaced_edits}
+								<Badge
+									variant="outline"
+									class="max-w-40 min-w-0 truncate sm:max-w-64"
+									title="A mod update replaced this file while it held edits; the history keeps them."
+								>
+									Replaced by {by.mod}
+									{by.version}
+								</Badge>
 							{/if}
 							{#if file.installed_mods.length === 0}
 								<Badge variant="outline" class="shrink-0">No installed mod</Badge>
 							{/if}
 							<ChevronRight class="size-4 shrink-0 text-muted-foreground" />
 						</a>
-						{#if canEdit}
+						{#if canDelete(file.file)}
 							<Button
 								variant="ghost"
 								size="sm"

@@ -122,6 +122,7 @@ func instanceRoutes(rt *routeTable, h *Instances) {
 	rt.Handle("GET /api/v1/instances/inbox", http.HandlerFunc(h.inbox))
 	rt.Handle("GET /api/v1/orphans/{container_id}", http.HandlerFunc(h.previewAdoption))
 	rt.Handle("POST /api/v1/orphans/{container_id}", http.HandlerFunc(h.adopt))
+	rt.Handle("DELETE /api/v1/orphans/{container_id}", http.HandlerFunc(h.removeOrphan))
 	rt.Handle("GET /api/v1/game/options", http.HandlerFunc(h.options))
 	rt.Handle("GET /api/v1/game/patch-notes", http.HandlerFunc(h.patchNotes))
 	rt.Handle("GET /api/v1/instances/{id}", http.HandlerFunc(h.get))
@@ -157,12 +158,7 @@ func instanceRoutes(rt *routeTable, h *Instances) {
 	h.listRoutes(rt)
 	h.configRoutes(rt)
 	h.setupRoutes(rt)
-	// Stream, not Handle: 11 §8.1's 30 s TimeoutHandler would sever a large upload
-	// mid-transfer.
-	rt.Handle("GET /api/v1/instances/{id}/worlds", http.HandlerFunc(h.listWorlds))
-	rt.LargeStream("POST /api/v1/instances/{id}/worlds/import", http.HandlerFunc(h.importWorld))
-	rt.Handle("POST /api/v1/instances/{id}/worlds/{name}/restore", http.HandlerFunc(h.restoreWorldFromDisk))
-	rt.Handle("DELETE /api/v1/instances/{id}/worlds/{name}", http.HandlerFunc(h.deleteWorld))
+	h.worldRoutes(rt)
 	// Stream for the same reason in the other direction: a world archive over a slow link
 	// outlasts the request timeout, and a severed download is a corrupt file the operator
 	// only discovers when they try to restore from it.
@@ -175,10 +171,16 @@ type instanceView struct {
 	// CrossplayJoinCode is this boot's code, null until the session logs one (Q25). Read from
 	// the log rather than stored, since a previous boot's code names a session that is gone.
 	CrossplayJoinCode *string `json:"crossplay_join_code"`
+	// JoinAddress is the join host with the game port, null when no join host is set.
+	// SteamJoinURL starts the game through Steam and connects to it, null without a join
+	// address, for an IPv6 address, or with crossplay on.
+	JoinAddress  *string `json:"join_address"`
+	SteamJoinURL *string `json:"steam_join_url"`
 }
 
 func (h *Instances) view(inst *store.Instance) instanceView {
-	v := instanceView{Instance: inst}
+	addr := joinAddress(inst.JoinHost, inst.BasePort)
+	v := instanceView{Instance: inst, JoinAddress: addr, SteamJoinURL: steamJoinURL(addr, inst.Crossplay)}
 	if reader := h.Streams.Reader(inst.ID); reader != nil {
 		if code := reader.JoinCode(); code != "" {
 			v.CrossplayJoinCode = &code
@@ -251,9 +253,8 @@ type patchInstanceRequest struct {
 	ExtraArgs  *string            `json:"extra_args"`
 	// GameBackups is how many rolling backups the game keeps, minGameBackups to maxGameBackups.
 	GameBackups *int `json:"game_backups"`
-	// Backup retention and the restart archive. Not launch fields: they shape no container,
-	// so changing one sets no restart_required (ADR-118's drift check would not see it
-	// either).
+	// Backup retention and the archive after restarts and automatic stops. Not launch fields:
+	// they shape no container, so changing one sets no restart_required.
 	BackupKeepCold      *int  `json:"backup_keep_cold"`
 	BackupKeepHot       *int  `json:"backup_keep_hot"`
 	BackupOnRestart     *bool `json:"backup_on_restart"`
@@ -268,9 +269,19 @@ type patchInstanceRequest struct {
 	// maxStatusText characters each.
 	StatusNotice      *string `json:"status_notice"`
 	StatusConnectInfo *string `json:"status_connect_info"`
+	// StatusShowJoin and StatusShowModpack add how to join and the current profile code to the
+	// status page.
+	StatusShowJoin    *bool `json:"status_show_join"`
+	StatusShowModpack *bool `json:"status_show_modpack"`
+	// JoinHost is the host name or IP address players connect to, without a port; empty clears
+	// it. It takes effect immediately.
+	JoinHost *string `json:"join_host"`
 	// AutoStopMinutes is 0 for off, or minAutoStop to maxAutoStop idle minutes. It takes effect
 	// immediately.
 	AutoStopMinutes *int `json:"auto_stop_minutes"`
+	// Watchdog is "off", "alert" or "restart": what the panel does about a running server whose
+	// log has gone quiet. It takes effect immediately.
+	Watchdog *string `json:"watchdog"`
 	// GameBranch and GameBranchPassword choose the Steam branch the next game update installs.
 	// They are applied together: a password branch needs its password each time it is chosen,
 	// and a branch set without one clears the stored password.
@@ -338,6 +349,10 @@ func (b *patchInstanceRequest) actions() []authz.Action {
 	if b.AutoStopMinutes != nil {
 		need = append(need, authz.InstanceStop)
 	}
+	// A watchdog that restarts a hung server restarts it, so it also needs the right to.
+	if b.Watchdog != nil && *b.Watchdog == string(instance.WatchdogRestart) {
+		need = append(need, authz.InstanceRestart)
+	}
 	// The branch decides what the game update installs, so it needs the right to run one.
 	if b.branch() {
 		need = append(need, authz.InstanceUpdate)
@@ -350,8 +365,13 @@ func (b *patchInstanceRequest) settings() bool {
 	return b.Name != nil || b.ServerName != nil || b.Password != nil || b.Public != nil ||
 		b.Crossplay != nil || b.Preset != nil || b.Modifiers != nil || b.GameBackups != nil ||
 		b.BackupOnRestart != nil ||
-		b.StatusPublished != nil || b.StatusNotice != nil || b.StatusConnectInfo != nil ||
-		b.AutoStopMinutes != nil
+		b.statusPage() || b.JoinHost != nil || b.AutoStopMinutes != nil || b.Watchdog != nil
+}
+
+// statusPage reports whether the body touches the public status page.
+func (b *patchInstanceRequest) statusPage() bool {
+	return b.StatusPublished != nil || b.StatusNotice != nil || b.StatusConnectInfo != nil ||
+		b.StatusShowJoin != nil || b.StatusShowModpack != nil
 }
 
 // retention reports whether the body touches how many archives are kept, here or off-host.
@@ -447,6 +467,15 @@ func addAutoStopViolations(val *apierr.Validation, body *patchInstanceRequest) {
 	}
 }
 
+// addWatchdogViolations rejects a watchdog value other than off, alert or restart.
+func addWatchdogViolations(val *apierr.Validation, body *patchInstanceRequest) {
+	if v := body.Watchdog; v != nil {
+		if _, ok := instance.ParseWatchdog(*v); !ok {
+			val.Add("watchdog", apierr.FieldInvalid, "Use off, alert or restart.")
+		}
+	}
+}
+
 // addGameBackupsViolations rejects a rolling backup count outside minGameBackups..maxGameBackups.
 func addGameBackupsViolations(val *apierr.Validation, body *patchInstanceRequest) {
 	if v := body.GameBackups; v != nil && (*v < minGameBackups || *v > maxGameBackups) {
@@ -501,6 +530,8 @@ func (h *Instances) mergePatch(
 	addBackupPolicyViolations(&val, body)
 	addStatusTextViolations(&val, body)
 	addAutoStopViolations(&val, body)
+	addWatchdogViolations(&val, body)
+	addJoinHostViolations(&val, body)
 	addGameBackupsViolations(&val, body)
 
 	patch := mergeInstanceLaunch(current, body, password)
@@ -685,9 +716,9 @@ func branchUpdate(current *store.Instance, branch *branchPatch) (*store.Instance
 	return &store.InstanceBranch{Name: branch.name, Password: branch.envelope}, changes
 }
 
-// settingsUpdate validates the launch, retention, auto-stop, branch and remote-policy fields the
-// body sets, adds them to update, and returns what changes. It writes nothing; it reports false
-// after writing the error.
+// settingsUpdate validates the launch, retention, auto-stop, watchdog, join host, branch and
+// remote-policy fields the body sets, adds them to update, and returns what changes. It writes
+// nothing; it reports false after writing the error.
 func (h *Instances) settingsUpdate(
 	w http.ResponseWriter, r *http.Request, current *store.Instance, body *patchInstanceRequest,
 	update *store.InstanceUpdate,
@@ -711,6 +742,8 @@ func (h *Instances) settingsUpdate(
 		addBackupPolicyViolations(&val, body)
 		addStatusTextViolations(&val, body)
 		addAutoStopViolations(&val, body)
+		addWatchdogViolations(&val, body)
+		addJoinHostViolations(&val, body)
 		if err := val.Err(); err != nil {
 			apierr.Write(w, r, err)
 			return nil, false
@@ -726,6 +759,16 @@ func (h *Instances) settingsUpdate(
 	if v := body.AutoStopMinutes; v != nil && *v != current.AutoStopMinutes {
 		update.AutoStopMinutes = v
 		changes = fieldChange(changes, "auto_stop_minutes", current.AutoStopMinutes, *v)
+	}
+	if v := body.Watchdog; v != nil && *v != current.Watchdog {
+		update.Watchdog = v
+		changes = fieldChange(changes, "watchdog", current.Watchdog, *v)
+	}
+	if v := body.JoinHost; v != nil {
+		if host := strings.TrimSpace(*v); host != current.JoinHost {
+			update.JoinHost = &host
+			changes = fieldChange(changes, "join_host", current.JoinHost, host)
+		}
 	}
 	var branchChanges []change
 	update.Branch, branchChanges = branchUpdate(current, branch)
@@ -804,7 +847,7 @@ func (h *Instances) patch(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	JSON(w, r, http.StatusOK, updated)
+	JSON(w, r, http.StatusOK, h.view(updated))
 }
 
 // auditor builds the audit entries of one caller's change to one instance.
@@ -830,6 +873,20 @@ func statusUpdate(
 	text = fieldChange(text, "status_connect_info", current.StatusConnectInfo, connectInfo)
 	if len(text) > 0 {
 		update.StatusText = &store.StatusText{Notice: notice, ConnectInfo: connectInfo}
+	}
+	show := store.StatusShow{Join: current.StatusShowJoin, Modpack: current.StatusShowModpack}
+	if v := body.StatusShowJoin; v != nil {
+		show.Join = *v
+	}
+	if v := body.StatusShowModpack; v != nil {
+		show.Modpack = *v
+	}
+	shown := fieldChange(nil, "status_show_join", current.StatusShowJoin, show.Join)
+	shown = fieldChange(shown, "status_show_modpack", current.StatusShowModpack, show.Modpack)
+	if len(shown) > 0 {
+		update.StatusShow = &show
+	}
+	if text = append(text, shown...); len(text) > 0 {
 		audits = append(audits, audit("instances.status.update", text))
 	}
 	if want := body.StatusPublished; want != nil && *want != current.StatusPublished {
@@ -982,5 +1039,5 @@ func (h *Instances) acknowledge(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	JSON(w, r, http.StatusOK, updated)
+	JSON(w, r, http.StatusOK, h.view(updated))
 }

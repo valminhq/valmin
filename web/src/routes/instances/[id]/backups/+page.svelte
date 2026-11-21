@@ -1,4 +1,5 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { page } from '$app/state';
 	import { instances, type Instance } from '#lib/api/instances.js';
 	import { socket } from '#lib/socket/index.svelte.js';
@@ -20,6 +21,8 @@
 		void load(id);
 		return off;
 	});
+	// A first read that failed while the panel was unreachable is tried again when it comes back.
+	$effect(() => socket.onConnected(() => void (!instance && load(id))));
 
 	/** Re-read after a job, because a restore changes the world on disk and retention changes
 	 * the row the panel renders its counts from. */
@@ -36,23 +39,19 @@
 </script>
 
 <div class="grid gap-6">
-	<header class="grid gap-3">
-		<div class="flex flex-wrap items-center justify-between gap-3">
-			<div class="grid gap-1">
-				<h2 class="text-2xl font-semibold tracking-tight">Backups</h2>
-				<p class="text-sm text-muted-foreground">
-					What this server has archived, and how much is kept.
-				</p>
-			</div>
-		</div>
-	</header>
+	<PageHeader title="Backups" level={2}>
+		What this server has archived, and how much is kept.
+	</PageHeader>
 
 	<Problem error={failure} />
 
 	{#if loading}
 		<p class="text-sm text-muted-foreground">Loading…</p>
 	{:else if !instance}
-		<p class="text-sm text-muted-foreground">This server is not here.</p>
+		<!-- A failed read is explained by the problem above. -->
+		{#if !failure}
+			<p class="text-sm text-muted-foreground">This server is not here.</p>
+		{/if}
 	{:else}
 		<BackupsPanel {instance} onchange={() => load(id)} />
 	{/if}

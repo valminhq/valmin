@@ -107,7 +107,7 @@ func TestCatalogueFreshnessUsesSelectedRegistry(t *testing.T) {
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 	stamp := "2026-09-21T12:00:00Z"
-	if err := db.KVSet(t.Context(), manager.SyncedAtKey(source.Thunderstore), stamp); err != nil {
+	if err := db.CatalogueStateSet(t.Context(), manager.SyncedAtKey(source.Thunderstore), stamp); err != nil {
 		t.Fatal(err)
 	}
 	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/mods/search?source=thunderstore", http.NoBody))
@@ -179,7 +179,7 @@ func TestRegistryStatusDescribesPartialCatalogue(t *testing.T) {
 	rt, db, admin, _ := world(t)
 	seedBothRegistries(t, db)
 	stamp := "2026-09-21T12:00:00Z"
-	if err := db.KVSet(t.Context(), manager.SyncedAtKey(source.Thunderstore), stamp); err != nil {
+	if err := db.CatalogueStateSet(t.Context(), manager.SyncedAtKey(source.Thunderstore), stamp); err != nil {
 		t.Fatal(err)
 	}
 	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, "/api/v1/mods/search", http.NoBody))
@@ -241,11 +241,11 @@ func TestInstalledMetadataRetainsDisabledRegistry(t *testing.T) {
 	}
 }
 
-// TestAPackagePulledFromTheIndexSaysSo is Q39's hard case. A package installed and later pulled
-// upstream keeps its catalogue row, since a sync never deletes one, so only the row's stamp
-// predating the registry's last complete listing tells it apart. It must read as not indexed and
-// offer no update: its latest version is what the registry offered before pulling it. Before any
-// complete listing the panel has nothing to say, and says nothing.
+// TestAPackagePulledFromTheIndexSaysSo asserts a package installed and later pulled upstream
+// reads as not indexed. It keeps its catalogue row, since a sync never deletes one, so only the
+// unlisted stamp a complete listing leaves tells it apart. It must offer no update: its latest
+// version is what the registry offered before pulling it. Before any complete listing the panel
+// has nothing to say, and says nothing.
 func TestAPackagePulledFromTheIndexSaysSo(t *testing.T) {
 	t.Parallel()
 	rt, db, admin, _ := world(t)
@@ -264,12 +264,13 @@ func TestAPackagePulledFromTheIndexSaysSo(t *testing.T) {
 		}
 		return body.Mods[0]
 	}
-	listingStarted := func(at time.Time) {
+	listingCompleted := func(listed map[string]bool) {
 		t.Helper()
-		if err := db.KVSet(
-			t.Context(),
-			manager.ListingStartedKey(source.Thunderstore),
-			store.FormatTime(at),
+		if err := db.MarkUnlisted(t.Context(), source.Thunderstore, listed, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.CatalogueStateSet(
+			t.Context(), manager.ListingCompletedKey(source.Thunderstore), store.Now(),
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -287,12 +288,12 @@ func TestAPackagePulledFromTheIndexSaysSo(t *testing.T) {
 		t.Errorf("before any complete listing: %+v, want silence and the update", mod)
 	}
 
-	listingStarted(time.Now().Add(-time.Hour))
+	listingCompleted(map[string]bool{"Only-Ts": true})
 	if mod := installed(); mod.NotIndexed || mod.UpdateVersion != "2.0.0" {
-		t.Errorf("a package the last listing stamped: %+v, want it listed with its update", mod)
+		t.Errorf("a package the last listing carried: %+v, want it listed with its update", mod)
 	}
 
-	listingStarted(time.Now().Add(time.Hour))
+	listingCompleted(map[string]bool{})
 	if mod := installed(); !mod.NotIndexed || mod.UpdateVersion != "" {
 		t.Errorf("a package the last listing left out: %+v, want not_indexed and no update", mod)
 	}
@@ -306,32 +307,31 @@ func TestAPackagePulledFromTheIndexSaysSo(t *testing.T) {
 	}
 }
 
-// TestUnlistedNeedsACompleteListingAndAnOlderStamp pins the rule's edges: a stamp equal to the
-// listing's start was written by that listing, and a stamp that does not parse proves nothing.
-func TestUnlistedNeedsACompleteListingAndAnOlderStamp(t *testing.T) {
+// TestUnlistedNeedsACompleteListing pins the rule's edges: nothing is unlisted before its
+// registry's first complete listing, and after one a package is unlisted when it has no row or
+// its row carries an unlisted stamp.
+func TestUnlistedNeedsACompleteListing(t *testing.T) {
 	t.Parallel()
-	started := time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC)
-	starts := map[source.Source]time.Time{source.Thunderstore: started}
-	row := func(src source.Source, listedAt string, catalogued bool) *store.CataloguedMod {
-		c := &store.CataloguedMod{ListedAt: listedAt}
+	completed := map[source.Source]bool{source.Thunderstore: true}
+	row := func(src source.Source, unlistedAt string, catalogued bool) *store.CataloguedMod {
+		c := &store.CataloguedMod{UnlistedAt: unlistedAt}
 		c.Source = src
 		if catalogued {
 			c.Package = &store.ModPackage{Source: src}
 		}
 		return c
 	}
+	stamp := store.FormatTime(time.Date(2026, 9, 26, 12, 0, 0, 0, time.UTC))
 	for name, tc := range map[string]struct {
 		mod  *store.CataloguedMod
 		want bool
 	}{
-		"no complete listing":         {row(source.Hexium, "", false), false},
-		"no row after a listing":      {row(source.Thunderstore, "", false), true},
-		"stamped before the listing":  {row(source.Thunderstore, store.FormatTime(started.Add(-time.Second)), true), true},
-		"stamped at the listing":      {row(source.Thunderstore, store.FormatTime(started), true), false},
-		"stamped after the listing":   {row(source.Thunderstore, store.FormatTime(started.Add(time.Second)), true), false},
-		"a stamp that does not parse": {row(source.Thunderstore, "yesterday", true), false},
+		"no complete listing":        {row(source.Hexium, stamp, false), false},
+		"no row after a listing":     {row(source.Thunderstore, "", false), true},
+		"a listed row":               {row(source.Thunderstore, "", true), false},
+		"a row the listing left out": {row(source.Thunderstore, stamp, true), true},
 	} {
-		if got := manager.Unlisted(tc.mod, starts); got != tc.want {
+		if got := manager.Unlisted(tc.mod, completed); got != tc.want {
 			t.Errorf("%s: unlisted = %v, want %v", name, got, tc.want)
 		}
 	}

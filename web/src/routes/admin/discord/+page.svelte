@@ -1,11 +1,16 @@
 <script lang="ts">
+	import { Textarea } from '#lib/components/ui/textarea/index.js';
+	import PageHeader from '#lib/components/page-header.svelte';
+	import { pageNarrow } from '#lib/layout.js';
 	import { discordAdmin, type DiscordLink, type DiscordSettings } from '#lib/api/admin.js';
 	import { actions, instances, type Instance } from '#lib/api/instances.js';
 	import { viewerZone } from '#lib/api/schedules.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { unsaved } from '#lib/state/dirty.svelte.js';
+	import SaveBar from '#lib/components/save-bar.svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import { Switch } from '#lib/components/ui/switch/index.js';
@@ -28,6 +33,7 @@
 	let loading = $state(true);
 	let saving = $state(false);
 	let failure = $state<unknown>(null);
+	let removeOpen = $state(false);
 	let baseline = $state('');
 	let nextKey = 0;
 	const zones = [...new Set([...Intl.supportedValuesOf('timeZone'), 'UTC'])].sort();
@@ -36,7 +42,8 @@
 	const draft = $derived(
 		JSON.stringify([enabled, rows.map(({ key: _key, ...link }) => link), adminIDs, zone])
 	);
-	unsaved(() => allowed && !loading && (draft !== baseline || token !== ''));
+	const dirty = $derived(allowed && !loading && (draft !== baseline || token !== ''));
+	unsaved(() => dirty);
 
 	const STATE_TEXT: Record<string, string> = {
 		disabled: 'Off',
@@ -125,7 +132,6 @@
 	}
 
 	async function remove() {
-		if (!confirm('Remove the Discord bot? Its token and every link are deleted.')) return;
 		failure = null;
 		try {
 			await discordAdmin.remove();
@@ -136,19 +142,21 @@
 	}
 </script>
 
-<main class="mx-auto grid w-full max-w-3xl gap-6 p-4 sm:p-6">
-	<h1 class="text-2xl font-semibold">Discord bot</h1>
+<main class={pageNarrow}>
+	<PageHeader title="Discord bot">
+		Let people in your Discord check, join and start game servers with <code>/status</code>,
+		<code>/join</code> and <code>/start</code>. Each link decides which servers a Discord server or
+		channel can see, and whether it may start them. Everyone in a linked channel can use these
+		commands. Bot admins can also restart, stop, back up and update the linked servers, and plan
+		power cuts for every server with <code>/shutdown</code>.
+	</PageHeader>
 	{#if !allowed}
-		<p>You do not have permission to manage the Discord bot.</p>
-	{:else}
 		<p class="text-sm text-muted-foreground">
-			Let people in your Discord check and start game servers with <code>/status</code> and
-			<code>/start</code>. Each link decides which servers a Discord server or channel can see, and
-			whether it may start them. Everyone in a linked channel can use both commands. Bot admins can
-			also plan power cuts for every server with <code>/shutdown</code>.
+			You do not have permission to manage the Discord bot.
 		</p>
+	{:else}
 		<Problem error={failure} />
-		{#if loading}<p>Loading Discord settings…</p>
+		{#if loading}<p class="text-sm text-muted-foreground">Loading Discord settings…</p>
 		{:else if settings}
 			<Card.Root>
 				<Card.Header><Card.Title>Bot</Card.Title></Card.Header>
@@ -223,6 +231,7 @@
 									<label class="flex items-center gap-2 text-sm">
 										<input
 											type="checkbox"
+											class="size-4 accent-primary"
 											checked={row.instance_ids.includes(server.id)}
 											onchange={(event) =>
 												toggleServer(row, server.id, event.currentTarget.checked)}
@@ -255,18 +264,20 @@
 				<Card.Header>
 					<Card.Title>Bot admins</Card.Title>
 					<Card.Description>
-						Who may plan and cancel power cuts with <code>/shutdown</code>, in any linked channel.
-						Right-click a member or a role and copy its ID.
+						Who may use <code>/restart</code>, <code>/stop</code>, <code>/backup</code> and
+						<code>/update</code> on the servers linked to a channel, and plan and cancel power cuts
+						with <code>/shutdown</code>. Right-click a member or a role and copy its ID.
 					</Card.Description>
 				</Card.Header>
 				<Card.Content class="grid gap-4">
 					<div class="grid gap-2">
 						<Label for="discord-admins">User or role IDs, one per line</Label>
-						<textarea
+						<Textarea
 							id="discord-admins"
-							class="min-h-20 rounded-md border bg-transparent px-3 py-2 font-mono text-sm"
+							class="min-h-20 font-mono"
 							spellcheck="false"
-							bind:value={admins}></textarea>
+							bind:value={admins}
+						></Textarea>
 					</div>
 					<div class="grid gap-2">
 						<Label for="discord-zone">Time zone of typed times</Label>
@@ -284,14 +295,31 @@
 				</Card.Content>
 			</Card.Root>
 
-			<div class="flex flex-wrap gap-2">
-				<Button disabled={saving} onclick={save}
-					>{saving ? 'Saving…' : 'Save Discord settings'}</Button
+			{#if settings.configured || settings.links.length > 0}
+				<div>
+					<Button variant="outline" disabled={saving} onclick={() => (removeOpen = true)}
+						>Remove bot</Button
+					>
+				</div>
+			{/if}
+			{#if dirty}
+				<SaveBar
+					saveLabel="Save Discord settings"
+					busy={saving}
+					ondiscard={() => settings && fill(settings)}
+					onsave={save}
 				>
-				{#if settings.configured || settings.links.length > 0}
-					<Button variant="outline" disabled={saving} onclick={remove}>Remove bot</Button>
-				{/if}
-			</div>
+					You have unsaved Discord settings.
+				</SaveBar>
+			{/if}
 		{/if}
 	{/if}
 </main>
+
+<DestructiveConfirm
+	bind:open={removeOpen}
+	title="Remove the Discord bot?"
+	description="Its token and every link are deleted. Setting it up again needs the token from the Discord Developer Portal."
+	confirmLabel="Remove bot"
+	onconfirm={() => void remove()}
+/>

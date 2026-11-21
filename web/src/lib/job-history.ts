@@ -4,6 +4,12 @@ import type { Job, JobChange, JobChangeAction, JobStatus } from '#lib/api/types.
 
 const upperFirst = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
+/** A job's own message as a sentence, whatever case the step that wrote it used. */
+export const jobMessage = (message: string) => upperFirst(message.trim());
+
+/** Kinds whose own name is not what the panel calls them. */
+const KIND_NAMES: Record<string, string> = { chain: 'Sequence' };
+
 /**
  * A readable name for a job kind: the kind in words, so a kind this build does not know still
  * reads tidily. A mod install that only moves installed packages to newer versions is an
@@ -13,13 +19,16 @@ export function jobLabel(kind: string, changes?: JobChange[]): string {
 	if (kind === 'mod_install' && changes?.length && changes.every((c) => c.action === 'update')) {
 		return 'Mod update';
 	}
+	if (Object.hasOwn(KIND_NAMES, kind)) return KIND_NAMES[kind];
 	const words = kind.replaceAll('_', ' ').trim();
 	return words ? upperFirst(words) : 'Operation';
 }
 
-/** Who started a job: the schedule clock, the person, or the panel itself. */
+/** Who started a job: the schedule clock, a person running a schedule by hand, the person, or
+ * the panel itself. */
 export function jobActor(job: Pick<Job, 'requested_by_name' | 'scheduled'>): string {
-	if (job.scheduled) return 'Schedule';
+	if (job.scheduled)
+		return job.requested_by_name ? `Schedule, run by ${job.requested_by_name}` : 'Schedule';
 	return job.requested_by_name || 'Panel';
 }
 
@@ -28,10 +37,15 @@ export function jobOutcome(status: JobStatus): AuditOutcome {
 	return status === 'queued' || status === 'running' ? 'requested' : status;
 }
 
-/** A span of milliseconds as "8s", "2m 5s" or "1h 3m". */
+/** A span of milliseconds as "8s", "2m 5s", "1h 3m" or "2d 4h". */
 export function formatDuration(ms: number): string {
 	const total = Math.round(ms / 1000);
 	if (total < 1) return 'under 1s';
+	const days = Math.floor(total / 86400);
+	if (days) {
+		const rest = Math.floor((total % 86400) / 3600);
+		return rest ? `${days}d ${rest}h` : `${days}d`;
+	}
 	const hours = Math.floor(total / 3600);
 	const minutes = Math.floor((total % 3600) / 60);
 	const seconds = total % 60;

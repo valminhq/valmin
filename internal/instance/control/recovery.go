@@ -68,6 +68,44 @@ func (s *Recovery) sweepBackupPart(ctx context.Context, j *store.Job) {
 	}
 }
 
+// sweepStopArchive removes what an interrupted stop or restart left of the archive it planned: the
+// partial file, and the published file when no catalogue row names it, which is a stop that died
+// between writing the archive and committing its row. It acts on the one path the job's payload
+// names, and only directly inside the instance's own backup directory, where the panel writes it.
+// A row it cannot read leaves the file where it is.
+func (s *Recovery) sweepStopArchive(ctx context.Context, j *store.Job) {
+	if j.InstanceID == nil || *j.InstanceID == "" {
+		return
+	}
+	var plan ArchivePlan
+	if err := json.Unmarshal([]byte(j.Payload), &plan); err != nil || plan.ArchivePath == "" || plan.ArchiveID == "" {
+		return
+	}
+	root := filepath.Join(instance.BackupsDir(s.DataRoot), *j.InstanceID)
+	if !fsutil.Within(root, plan.ArchivePath) || filepath.Dir(plan.ArchivePath) != root {
+		slog.ErrorContext(ctx, "interrupted stop names an archive outside the instance's backups; not removing",
+			slog.String("job_id", j.ID), slog.String("path", plan.ArchivePath), slog.String("backups_root", root))
+		return
+	}
+	if err := os.Remove(plan.ArchivePath + backup.PartSuffix); err != nil && !os.IsNotExist(err) {
+		slog.WarnContext(ctx, "interrupted stop: partial archive not removed",
+			slog.String("job_id", j.ID), slog.Any("error", err))
+	}
+	row, err := s.DB.BackupByID(ctx, *j.InstanceID, plan.ArchiveID)
+	if err != nil {
+		slog.WarnContext(ctx, "interrupted stop: could not check the catalogue, archive left in place",
+			slog.String("job_id", j.ID), slog.Any("error", err))
+		return
+	}
+	if row != nil {
+		return
+	}
+	if err := os.Remove(plan.ArchivePath); err != nil && !os.IsNotExist(err) {
+		slog.WarnContext(ctx, "interrupted stop: uncatalogued archive not removed",
+			slog.String("job_id", j.ID), slog.Any("error", err))
+	}
+}
+
 // sweepCloneStaging removes an unpublished clone archive and resolves its world swap.
 func (s *Recovery) sweepCloneStaging(ctx context.Context, j *store.Job) {
 	if j.InstanceID == nil {

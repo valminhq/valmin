@@ -323,6 +323,38 @@ func TestRunThrowawayRemovesTheContainerAfterCancellation(t *testing.T) {
 	}
 }
 
+// Traffic is the sum over every interface, and a container with none reports zero.
+func TestNetworkTotals(t *testing.T) {
+	tests := []struct {
+		name           string
+		networks       map[string]container.NetworkStats
+		wantRx, wantTx uint64
+	}{
+		{name: "no networks"},
+		{
+			name:     "one interface",
+			networks: map[string]container.NetworkStats{"eth0": {RxBytes: 1500, TxBytes: 900}},
+			wantRx:   1500, wantTx: 900,
+		},
+		{
+			name: "two interfaces",
+			networks: map[string]container.NetworkStats{
+				"eth0": {RxBytes: 1500, TxBytes: 900},
+				"eth1": {RxBytes: 500, TxBytes: 100},
+			},
+			wantRx: 2000, wantTx: 1000,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rx, tx := networkTotals(tt.networks)
+			if rx != tt.wantRx || tx != tt.wantTx {
+				t.Errorf("networkTotals = %d, %d, want %d, %d", rx, tx, tt.wantRx, tt.wantTx)
+			}
+		})
+	}
+}
+
 // E11, Q24: docker stats reports memory.current less inactive_file, and the cgroup v1
 // key is spelled differently. Measured at 1122111488 − 1204224 = 1120907264.
 func TestWorkingSet(t *testing.T) {
@@ -447,6 +479,21 @@ func TestInspectNetwork(t *testing.T) {
 					tc.mode, disabled, network, tc.disabled, tc.network)
 			}
 		})
+	}
+}
+
+// Docker names the default runtime on a container that never asked for one; that reads back
+// as the empty spec field, and a named runtime reads back as itself.
+func TestInspectOCIRuntime(t *testing.T) {
+	for name, want := range map[string]string{
+		"":                      "",
+		"runc":                  "",
+		"runsc":                 "runsc",
+		"io.containerd.kata.v2": "io.containerd.kata.v2",
+	} {
+		if got := inspectOCIRuntime(name); got != want {
+			t.Errorf("inspectOCIRuntime(%q) = %q, want %q", name, got, want)
+		}
 	}
 }
 

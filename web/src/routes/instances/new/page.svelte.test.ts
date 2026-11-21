@@ -89,6 +89,15 @@ describe('the create wizard', () => {
 		expect(gameplay?.textContent).toContain('World modifiers');
 	});
 
+	it('says which fields a held submit is waiting for', async () => {
+		await open();
+		expect(
+			screen.getByText('Still needed: panel name, server name, world name, server password.')
+		).toBeTruthy();
+		await fillIn();
+		expect(screen.queryByText(/Still needed/)).toBeNull();
+	});
+
 	it('marks a password that breaks the rules beside the password, and holds the submit', async () => {
 		await open();
 		await fillIn();
@@ -98,6 +107,7 @@ describe('the create wizard', () => {
 		expect(password.getAttribute('aria-invalid')).toBe('true');
 		expect(text(document.getElementById('password-error'))).toBe('At least 5 characters.');
 		expect(create().disabled).toBe(true);
+		expect(screen.getByText('Fix the fields marked above.')).toBeTruthy();
 	});
 
 	it('renders a field the daemon rejected beside it, and moves focus there', async () => {
@@ -147,7 +157,7 @@ describe('the create wizard', () => {
 			progress: 100,
 			message: 'Ready'
 		});
-		await vi.waitFor(() => expect(goto).toHaveBeenCalledWith('/'));
+		await vi.waitFor(() => expect(goto).toHaveBeenCalledWith('/instances/inst-new'));
 	});
 
 	it('stays on the job when provisioning fails', async () => {
@@ -328,7 +338,7 @@ describe('the create wizard can start from an existing world', () => {
 		expect(screen.queryByLabelText('World folder')).toBeNull();
 	});
 
-	it('creating without a world keeps the start and goes straight to the list', async () => {
+	it('creating without a world keeps the start and goes straight to the new server', async () => {
 		await open(withWorld);
 		daemon.on('POST', '/instances', () =>
 			Response.json(job({ instance_id: 'inst-new' }), { status: 202 })
@@ -338,7 +348,7 @@ describe('the create wizard can start from an existing world', () => {
 		await click(create());
 		await finish('job-1');
 
-		await vi.waitFor(() => expect(goto).toHaveBeenCalledWith('/'));
+		await vi.waitFor(() => expect(goto).toHaveBeenCalledWith('/instances/inst-new'));
 		expect(creates()[0].body).toMatchObject({ start_after_provision: true });
 		expect(daemon.requests('POST', '/instances/inst-new/worlds/import')).toHaveLength(0);
 	});
@@ -370,7 +380,7 @@ describe('the create wizard can start from an existing world', () => {
 		expect(daemon.requests('POST', '/instances/inst-new/start')).toHaveLength(0);
 
 		await finish('job-2');
-		await vi.waitFor(() => expect(goto).toHaveBeenCalledWith('/'));
+		await vi.waitFor(() => expect(goto).toHaveBeenCalledWith('/instances/inst-new'));
 		expect(daemon.requests('POST', '/instances/inst-new/start')).toHaveLength(1);
 	});
 

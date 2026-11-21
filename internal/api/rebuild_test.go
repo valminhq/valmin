@@ -9,6 +9,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
@@ -72,6 +73,29 @@ func TestStartAppliesAnEditedLimit(t *testing.T) {
 	}
 	if got := currentContainer(t, db, fake).Spec.NanoCPUs; got != 1_500_000_000 {
 		t.Errorf("running container's CPU limit = %d NanoCPUs, want 1500000000", got)
+	}
+}
+
+// TestStartMovesAContainerToTheGameRuntime asserts that a container created under Docker's
+// default runtime is rebuilt under game.runtime, with the game resolv.conf, at its next start.
+func TestStartMovesAContainerToTheGameRuntime(t *testing.T) {
+	t.Parallel()
+	rt, db, fake, admin, _ := lifecycleWorld(t, func(cfg *config.Config) {
+		cfg.Game.Runtime, cfg.Game.DNS = "runsc", []string{"1.1.1.1"}
+	})
+	seeded := seedInstance(t, rt, db, fake, "stopped")
+
+	startAndWait(t, rt, admin)
+
+	c := currentContainer(t, db, fake)
+	if c.ID == seeded {
+		t.Fatal("the default-runtime container was reused under game.runtime runsc")
+	}
+	if c.Spec.OCIRuntime != "runsc" {
+		t.Errorf("rebuilt container runtime = %q, want runsc", c.Spec.OCIRuntime)
+	}
+	if !slices.Equal(c.Spec.Binds[len(c.Spec.Binds)-1:], rt.instances.Cfg.GameResolvBinds()) {
+		t.Errorf("rebuilt container binds = %+v, want the game resolv.conf last", c.Spec.Binds)
 	}
 }
 

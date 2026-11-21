@@ -269,9 +269,7 @@ func (r *Reader) append(l Line) {
 // the line says about who is connected. ts is Docker's receive time, never the reader's
 // clock — after a re-open the two differ by the length of the gap (14 §4.1).
 func (r *Reader) matched(ev LogEvent, ts time.Time) {
-	if ts.IsZero() || !ts.Before(r.bootAt) {
-		r.latch().note(ev.Kind)
-	}
+	r.noteBoot(ev, ts)
 	if ev.Kind == EventReady {
 		r.Ring.Seal()
 	}
@@ -300,6 +298,49 @@ func (r *Reader) matched(ev LogEvent, ts time.Time) {
 		r.restate = false
 		r.observed(PlayerObservation{TS: ts, Players: players})
 	}
+}
+
+// noteBoot records a recognised line in the current boot's record: that its kind was logged, and
+// when, for the periodic status line. A line stamped before the boot belongs to an earlier one.
+func (r *Reader) noteBoot(ev LogEvent, ts time.Time) {
+	if !ts.IsZero() && ts.Before(r.bootAt) {
+		return
+	}
+	r.latch().note(ev.Kind)
+	if ev.Kind == EventConnections {
+		r.latch().heartbeat(receivedOr(ts, time.Now()))
+	}
+}
+
+// Pulse is what a reader knows about whether a server's main thread is alive. The game writes a
+// periodic status line every ten minutes from that thread, so a long silence from a running
+// server means the thread has stopped, provided the panel could read the log meanwhile. Every
+// field is zero while unknown, and all come from one reading, so they describe the same boot.
+type Pulse struct {
+	// Boot is when the container boot being read began.
+	Boot time.Time
+	// Beat is the receive time of the newest status line this boot, zero when it has logged none.
+	Beat time.Time
+	// Open is when the log stream now being followed was opened, zero while no stream is open: a
+	// silence that began before it, or while it was closed, is not known to be the server's.
+	Open time.Time
+}
+
+// Pulse reports what the reader knows about the server's liveness this boot.
+func (r *Reader) Pulse() Pulse { return r.latch().pulse() }
+
+// streamOpened records that the reader began following a log stream at at.
+func (r *Reader) streamOpened(at time.Time) { r.latch().streamOpened(at) }
+
+// streamClosed records that the reader no longer follows a log stream.
+func (r *Reader) streamClosed() { r.latch().streamClosed() }
+
+// receivedOr is ts, or fallback for a line that carried no timestamp.
+func receivedOr(ts, fallback time.Time) time.Time {
+	if ts.IsZero() {
+		return fallback
+	}
+	return ts
 }
 
 // matchNames feeds a live line to the name matcher and reports the guesses it makes. A re-read
@@ -508,7 +549,10 @@ func (r *Reader) run(ctx context.Context, rt runtime.Runtime, instanceID, contai
 		}
 		r.readBoot = r.bootAt
 		r.opened(time.Now())
-		if err := r.read(ctx, rt, containerID, opts); err != nil && ctx.Err() == nil {
+		r.streamOpened(time.Now())
+		err = r.read(ctx, rt, containerID, opts)
+		r.streamClosed()
+		if err != nil && ctx.Err() == nil {
 			slog.WarnContext(ctx, "log stream ended, will re-open",
 				slog.String("instance_id", instanceID),
 				slog.String("container_id", containerID), slog.Any("error", err))

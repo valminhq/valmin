@@ -2,6 +2,7 @@
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { page } from '$app/state';
 	import { Button } from '#lib/components/ui/button/index.js';
+	import CopyButton from '#lib/components/copy-button.svelte';
 
 	/** One server's published status, as the unauthenticated route serves it. Fetched with a
 	 * plain request rather than through the API client: this route is not under `/api/v1`, it
@@ -16,6 +17,12 @@
 		connect_info?: string;
 		/** Panel work keeping the server down, such as "updating"; absent when there is none. */
 		activity?: string;
+		/** How to join and the profile code, present only when the administrator shows them. */
+		join_address?: string;
+		steam_join_url?: string;
+		join_code?: string;
+		modpack_code?: string;
+		modpack_registry?: string;
 	}
 
 	/** Two reads a minute, well inside the route's own per-IP limit. */
@@ -97,6 +104,7 @@
 		<label class="flex items-center gap-2 text-sm">
 			<input
 				type="checkbox"
+				class="size-4 accent-primary"
 				checked={autoRefresh}
 				onchange={(event) => setAutoRefresh(event.currentTarget.checked)}
 			/>
@@ -159,12 +167,89 @@
 					? `Player count observed ${formatInstant(status.observed_at)}.`
 					: 'Player observation time is unavailable.'}
 			</p>
-			{#if status.connect_info}
-				<div class="grid gap-1">
+			{#if status.connect_info || status.join_address || status.join_code || status.modpack_code}
+				<div class="grid gap-3">
 					<h2 class="text-sm font-medium">How to join</h2>
-					<p class="text-sm break-words whitespace-pre-line" data-testid="connect-info">
-						{status.connect_info}
-					</p>
+					{#if status.modpack_code}
+						<div class="grid gap-1 text-sm">
+							<p class="text-muted-foreground">
+								Install
+								<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+								<a
+									class="underline underline-offset-4"
+									href="https://thunderstore.io/c/valheim/p/Kesomannen/GaleModManager/"
+									target="_blank"
+									rel="noreferrer">Gale</a
+								>{#if status.modpack_registry !== 'hexium'}
+									or
+									<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+									<a
+										class="underline underline-offset-4"
+										href="https://thunderstore.io/c/valheim/p/ebkr/r2modman/"
+										target="_blank"
+										rel="noreferrer">r2modman</a
+									>{/if}, create a Valheim profile, and import this profile code:
+							</p>
+							<div class="flex flex-wrap items-center gap-2">
+								<code class="rounded-md bg-muted px-2 py-0.5 font-mono text-sm break-all select-all"
+									>{status.modpack_code}</code
+								>
+								<CopyButton
+									value={status.modpack_code}
+									ariaLabel="Copy profile code"
+									variant="ghost"
+									size="sm"
+								/>
+							</div>
+						</div>
+					{/if}
+					{#if status.join_code}
+						<div class="flex flex-wrap items-center gap-2 text-sm">
+							<span class="text-muted-foreground">Join code</span>
+							<code
+								class="rounded-md bg-muted px-2 py-0.5 font-mono text-sm font-semibold tracking-wider select-all"
+								>{status.join_code}</code
+							>
+							<CopyButton
+								value={status.join_code}
+								ariaLabel="Copy join code"
+								variant="ghost"
+								size="sm"
+							/>
+						</div>
+					{/if}
+					{#if status.join_address}
+						<div class="grid gap-1 text-sm">
+							<div class="flex flex-wrap items-center gap-2">
+								<span class="text-muted-foreground">Address</span>
+								<code class="rounded-md bg-muted px-2 py-0.5 font-mono text-sm break-all select-all"
+									>{status.join_address}</code
+								>
+								<CopyButton
+									value={status.join_address}
+									ariaLabel="Copy join address"
+									variant="ghost"
+									size="sm"
+								/>
+							</div>
+							{#if status.steam_join_url}
+								<div>
+									<Button variant="outline" size="sm" href={status.steam_join_url}
+										>Join with Steam</Button
+									>
+								</div>
+								<p class="text-xs text-muted-foreground">
+									Close the game first: the link starts it and connects, and does nothing while the
+									game is already running.
+								</p>
+							{/if}
+						</div>
+					{/if}
+					{#if status.connect_info}
+						<p class="text-sm break-words whitespace-pre-line" data-testid="connect-info">
+							{status.connect_info}
+						</p>
+					{/if}
 				</div>
 			{/if}
 		</div>

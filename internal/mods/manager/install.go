@@ -136,9 +136,10 @@ func (i *Installer) Submit(ctx context.Context, sub *InstallSubmission) (*store.
 	return job, nil
 }
 
-// runModInstallThen is runModInstall with a continuation that runs only on success.
-// Starting the server after a failed install would create the world unmodded, which is the
-// outcome installing before first boot exists to prevent.
+// runModInstallThen is runModInstall with a continuation that runs only on success, after the
+// install's own configuration of what it placed. Starting the server after a failed install
+// would create the world unmodded, which is the outcome installing before first boot exists to
+// prevent.
 func (i *Installer) runModInstallThen(
 	inst *store.Instance, payload *InstallPayload, afterFinish func(context.Context),
 ) jobs.Runner {
@@ -149,7 +150,13 @@ func (i *Installer) runModInstallThen(
 	return func(ctx context.Context, h *jobs.Handle) jobs.Outcome {
 		out := run(ctx, h)
 		if out.Status == jobs.StatusSucceeded {
-			out.AfterFinish = afterFinish
+			own := out.AfterFinish
+			out.AfterFinish = func(ctx context.Context) {
+				if own != nil {
+					own(ctx)
+				}
+				afterFinish(ctx)
+			}
 		}
 		return out
 	}

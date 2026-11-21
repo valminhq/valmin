@@ -1,13 +1,11 @@
 <script lang="ts">
+	import ServerControls from '#lib/components/server-controls.svelte';
+	import { NativeSelect } from '#lib/components/ui/native-select/index.js';
+	import EmptyState from '#lib/components/empty-state.svelte';
+	import { pageWide } from '#lib/layout.js';
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { resolve } from '$app/paths';
-	import {
-		actions,
-		instances,
-		isTransient,
-		stateSentence,
-		type Instance
-	} from '#lib/api/instances.js';
+	import { actions, stateSentence, type Instance } from '#lib/api/instances.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { instanceList } from '#lib/state/instances.svelte.js';
 	import { orphans, type Orphan } from '#lib/api/instances.js';
@@ -25,9 +23,6 @@
 	import HostConditions from '#lib/components/host-conditions.svelte';
 	import StateBadge from '#lib/components/state-badge.svelte';
 	import JoinCode from '#lib/components/join-code.svelte';
-	import Play from '@lucide/svelte/icons/play';
-	import Square from '@lucide/svelte/icons/square';
-	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Upload from '@lucide/svelte/icons/upload';
@@ -36,7 +31,6 @@
 	let failure = $state<unknown>(null);
 	let conditionFailure = $state<unknown>(null);
 	let orphanFailure = $state<unknown>(null);
-	let busy = $state<string | null>(null);
 	let orphaned = $state<Orphan[]>([]);
 	let inboxItems = $state<InboxItem[]>([]);
 	let checkedAt = $state<Date | null>(null);
@@ -55,6 +49,11 @@
 			? filterServers(instanceList.items, inboxItems, query, stateFilter)
 			: instanceList.items
 	);
+
+	/** The name of a server whose port pair overlaps an unclaimed container's, if any. */
+	function clash(basePort: number): string | undefined {
+		return instanceList.items.find((instance) => Math.abs(instance.base_port - basePort) < 2)?.name;
+	}
 
 	// Conditions are rendered where the thing they are about already is: a server's own go on
 	// its card, and only those the card does not already state (ADR-195). What has no card to
@@ -159,22 +158,10 @@
 	// A reconnect re-reads the list: the socket cannot say what changed while it was gone
 	// (`14 §7.2`), and the state topics were re-subscribed from scratch (ADR-041).
 	$effect(() => socket.onConnected(() => void refresh()));
-
-	async function run(instance: Instance, action: () => Promise<unknown>) {
-		busy = instance.id;
-		failure = null;
-		try {
-			await action();
-		} catch (err) {
-			failure = err;
-		} finally {
-			busy = null;
-		}
-	}
 </script>
 
 <div>
-	<main class="mx-auto grid max-w-4xl gap-4 p-6">
+	<main class={pageWide}>
 		<div class="flex flex-wrap items-center justify-between gap-4">
 			<h1 class="text-2xl font-semibold tracking-tight">Servers</h1>
 			{#if canCreate && !empty}
@@ -229,7 +216,14 @@
 						</p>
 						{#each orphaned as orphan (orphan.container_id)}
 							<div class="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2">
-								<span>{orphan.name} · udp {orphan.base_port}–{orphan.base_port + 1}</span>
+								<span>
+									{orphan.name} · udp {orphan.base_port}–{orphan.base_port + 1}
+									{#if clash(orphan.base_port)}
+										<span class="text-muted-foreground">
+											· same ports as {clash(orphan.base_port)}
+										</span>
+									{/if}
+								</span>
 								<Button
 									variant="outline"
 									size="sm"
@@ -254,23 +248,17 @@
 				>Retry loading servers</Button
 			>
 		{:else if instanceList.items.length === 0}
-			<div class="grid justify-items-center gap-2 rounded-lg border border-dashed p-8 text-center">
-				<p class="font-medium">No servers yet</p>
-				<p class="text-sm text-muted-foreground">
-					{canCreate
-						? 'Create a server from scratch, or start from a template someone shared.'
-						: 'Servers you are given access to show here.'}
-				</p>
-				{#if canCreate}
-					<div class="mt-2 flex flex-wrap justify-center gap-2">
-						<Button href={resolve('instances/new')}><Plus />New server</Button>
-
-						<Button variant="outline" href={resolve('instances/import')}
-							><Upload />New from template</Button
-						>
-					</div>
-				{/if}
-			</div>
+			{#snippet createActions()}
+				<Button href={resolve('instances/new')}><Plus />New server</Button>
+				<Button variant="outline" href={resolve('instances/import')}
+					><Upload />New from template</Button
+				>
+			{/snippet}
+			<EmptyState title="No servers yet" actions={canCreate ? createActions : undefined}>
+				{canCreate
+					? 'Create a server from scratch, or start from a template someone shared.'
+					: 'Servers you are given access to show here.'}
+			</EmptyState>
 		{:else}
 			{#if filterable}
 				<div class="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
@@ -280,16 +268,12 @@
 					</div>
 					<div class="grid gap-2">
 						<Label for="server-state">State</Label>
-						<select
-							id="server-state"
-							class="h-8 rounded-lg border border-input bg-background px-2.5 text-sm focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
-							bind:value={stateFilter}
-						>
+						<NativeSelect id="server-state" bind:value={stateFilter}>
 							<option value="all">All</option>
 							<option value="running">Running</option>
 							<option value="stopped">Stopped</option>
 							<option value="attention">Needs attention</option>
-						</select>
+						</NativeSelect>
 					</div>
 				</div>
 				<p class="text-sm text-muted-foreground" role="status">
@@ -304,7 +288,10 @@
 						<!-- Identity and state own the title row at every width. Conditions sit on
 						     their own line below it, where no number of them can squeeze the name. -->
 						<Card.Title class="flex items-center justify-between gap-3">
-							<a class="hover:underline" href={resolve('/instances/[id]', { id: instance.id })}>
+							<a
+								class="min-w-0 wrap-anywhere hover:underline"
+								href={resolve('/instances/[id]', { id: instance.id })}
+							>
 								{instance.name}
 							</a>
 							<StateBadge
@@ -339,55 +326,16 @@
 						>
 							Open server
 						</Button>
-						{#if allowed.includes(actions.start)}
-							<Button
-								variant={instance.state === 'stopped' ? 'default' : 'outline'}
-								size="sm"
-								disabled={busy === instance.id ||
-									isTransient(instance.state) ||
-									instance.state !== 'stopped'}
-								onclick={() => run(instance, () => instances.start(instance.id))}
-							>
-								<Play />
-								{instance.state === 'starting' ? 'Starting…' : 'Start'}
-							</Button>
-						{/if}
-						{#if allowed.includes(actions.stop)}
-							<Button
-								variant="outline"
-								size="sm"
-								disabled={busy === instance.id ||
-									isTransient(instance.state) ||
-									instance.state !== 'running'}
-								onclick={() => run(instance, () => instances.stop(instance.id))}
-							>
-								<Square />
-								{instance.state === 'stopping' ? 'Stopping…' : 'Stop'}
-							</Button>
-						{/if}
-						{#if allowed.includes(actions.restart)}
-							<Button
-								variant="outline"
-								size="sm"
-								disabled={busy === instance.id ||
-									isTransient(instance.state) ||
-									instance.state !== 'running'}
-								onclick={() => run(instance, () => instances.restart(instance.id))}
-							>
-								<RotateCw />
-								Restart
-							</Button>
-						{/if}
+						<ServerControls {instance} {allowed} onfailure={(error) => (failure = error)} />
 					</Card.Footer>
 				</Card.Root>
 			{:else}
-				<div
-					class="grid justify-items-center gap-2 rounded-lg border border-dashed p-6 text-center"
-				>
-					<p class="font-medium">No servers match</p>
-					<p class="text-sm text-muted-foreground">No server matches this search and state.</p>
-					<Button variant="outline" size="sm" onclick={clearFilters}>Clear filters</Button>
-				</div>
+				<EmptyState title="No servers match">
+					No server matches this search and state.
+					{#snippet actions()}
+						<Button variant="outline" size="sm" onclick={clearFilters}>Clear filters</Button>
+					{/snippet}
+				</EmptyState>
 			{/each}
 		{/if}
 	</main>

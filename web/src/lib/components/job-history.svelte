@@ -18,7 +18,8 @@
 		jobs,
 		more = false,
 		loadingMore = false,
-		onmore
+		onmore,
+		empty = 'Nothing has run yet.'
 	}: {
 		instanceId: string;
 		/** Newest first. */
@@ -27,6 +28,8 @@
 		more?: boolean;
 		loadingMore?: boolean;
 		onmore?: () => void;
+		/** What the card says when there are no jobs. */
+		empty?: string;
 	} = $props();
 
 	const canAudit = $derived(session.allowedGlobally().includes(actions.auditRead));
@@ -37,7 +40,7 @@
 	<Card.Header>
 		<Card.Title>Operations</Card.Title>
 		<Card.Description>
-			{jobs.length ? 'Newest first. Open one for its details.' : 'Nothing has run yet.'}
+			{jobs.length ? 'Newest first. Open one for its details.' : empty}
 		</Card.Description>
 	</Card.Header>
 	<Card.Content class="grid gap-3">

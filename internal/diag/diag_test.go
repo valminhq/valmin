@@ -82,7 +82,8 @@ func TestAHealthyPanelPassesEveryProbedCheck(t *testing.T) {
 	r := Collect(t.Context(), testInput())
 	for _, c := range r.Checks {
 		switch c.ID {
-		case CheckHostRoot, CheckGameNetwork, CheckDataRootWrite, CheckSteam:
+		case CheckHostRoot, CheckGameNetwork, CheckDataRootWrite, CheckSteam,
+			CheckMetadataEgress, CheckLANEgress, CheckNameLookup:
 			if c.Status != StatusUnknown {
 				t.Errorf("%s: got %s, want unknown with nothing recorded", c.ID, c.Status)
 			}
@@ -442,6 +443,134 @@ func TestARecordedCheckKeepsItsSource(t *testing.T) {
 	}
 }
 
+// TestReachabilityProbesKeepTheirOwnGrade asserts a probe's recorded status and finding are
+// shown as recorded, a warning links to the firewall guide, and an unset LAN address reads as
+// not checked rather than as safe.
+func TestReachabilityProbesKeepTheirOwnGrade(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		address string
+		obs     *Observation
+		status  Status
+		detail  string
+		docs    bool
+	}{
+		{name: "not recorded", address: "192.168.1.1:80", status: StatusUnknown, detail: "Not recorded yet."},
+		{
+			name:   "not configured",
+			obs:    &Observation{Status: StatusWarn, Detail: "stale"},
+			status: StatusUnknown,
+			detail: "Not checked.",
+		},
+		{
+			name:    "reachable",
+			address: "192.168.1.1:80",
+			obs:     &Observation{Status: StatusWarn, Detail: "opened", Target: "192.168.1.1:80"},
+			status:  StatusWarn,
+			detail:  "opened",
+			docs:    true,
+		},
+		{
+			name:    "no answer",
+			address: "192.168.1.1:80",
+			obs:     &Observation{OK: true, Status: StatusOK, Detail: "No answer", Target: "192.168.1.1:80"},
+			status:  StatusOK,
+			detail:  "No answer",
+		},
+		{
+			name:    "address changed since",
+			address: "192.168.1.2:80",
+			obs:     &Observation{OK: true, Status: StatusOK, Detail: "No answer", Target: "192.168.1.1:80"},
+			status:  StatusUnknown,
+			detail:  "Not recorded yet.",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			in := testInput()
+			in.Config.Game.LANProbeAddress = tc.address
+			if tc.obs != nil {
+				tc.obs.CheckedAt = in.Now
+				in.Recorded = map[string]Observation{CheckLANEgress: *tc.obs}
+			}
+
+			r := Collect(t.Context(), in)
+			got := find(t, &r, CheckLANEgress)
+			if got.Status != tc.status || !strings.HasPrefix(got.Detail, tc.detail) {
+				t.Errorf("lan = %s %q, want %s starting %q", got.Status, got.Detail, tc.status, tc.detail)
+			}
+			if (got.Docs != "") != tc.docs {
+				t.Errorf("docs = %q, want a link: %v", got.Docs, tc.docs)
+			}
+		})
+	}
+}
+
+// TestTheGameRuntimeRowSaysWhatGameServersRunUnder asserts the runtime row reads from config,
+// and admits it went unchecked when there was no game network to probe.
+func TestTheGameRuntimeRowSaysWhatGameServersRunUnder(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, runtime, network string
+		status                 Status
+		detail                 string
+	}{
+		{name: "default", network: "valmin-games", status: StatusOK, detail: "Docker's default runtime."},
+		{name: "gvisor", runtime: "runsc", network: "valmin-games", status: StatusOK, detail: "runsc. A container ran"},
+		{name: "no game network", runtime: "runsc", status: StatusUnknown, detail: "runsc. Not checked"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			in := testInput()
+			in.Config.Game.Runtime, in.Config.Game.Network = tc.runtime, tc.network
+
+			r := Collect(t.Context(), in)
+			got := find(t, &r, CheckGameRuntime)
+			if got.Status != tc.status || !strings.HasPrefix(got.Detail, tc.detail) {
+				t.Errorf("runtime = %s %q, want %s starting %q", got.Status, got.Detail, tc.status, tc.detail)
+			}
+		})
+	}
+}
+
+// TestANameLookupIsReportedForTheCurrentSandbox asserts a recorded lookup keeps its grade,
+// links the guide when it failed, and goes stale when game.runtime or game.dns changes.
+func TestANameLookupIsReportedForTheCurrentSandbox(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		dns    []string
+		status Status
+		docs   bool
+	}{
+		{name: "failed for this sandbox", dns: []string{"1.1.1.1"}, status: StatusWarn, docs: true},
+		{name: "recorded before game.dns changed", dns: []string{"9.9.9.9"}, status: StatusUnknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			in := testInput()
+			in.Config.Game.Runtime, in.Config.Game.DNS = "runsc", []string{"1.1.1.1"}
+			obs := Observation{
+				Status: StatusWarn, Detail: "A game server could not resolve api.steampowered.com.",
+				CheckedAt: in.Now, Source: SourceJob, Target: LookupTarget(in.Config),
+			}
+			in.Recorded = map[string]Observation{CheckNameLookup: obs}
+			in.Config.Game.DNS = tc.dns
+
+			r := Collect(t.Context(), in)
+			got := find(t, &r, CheckNameLookup)
+			if got.Status != tc.status {
+				t.Errorf("lookup = %s %q, want %s", got.Status, got.Detail, tc.status)
+			}
+			if (got.Docs != "") != tc.docs || (tc.docs && !strings.Contains(got.Remedy, "game.dns")) {
+				t.Errorf("docs = %q, remedy = %q, want a link and a game.dns remedy: %v", got.Docs, got.Remedy, tc.docs)
+			}
+		})
+	}
+}
+
 // TestTheVerdictCountsServerProblems asserts a server row's problem raises the report's
 // verdict even when every check passes.
 func TestTheVerdictCountsServerProblems(t *testing.T) {
@@ -454,6 +583,7 @@ func TestTheVerdictCountsServerProblems(t *testing.T) {
 		{"a healthy server", Instance{Running: true, LogReaderAttached: true}, StatusOK},
 		{"no console", Instance{Running: true}, StatusWarn},
 		{"another image", Instance{ImageIssue: "runs old"}, StatusWarn},
+		{"another runtime", Instance{RuntimeIssue: "runs under runc"}, StatusWarn},
 		{"an OOM kill", Instance{OOMKilled: new(true)}, StatusWarn},
 		{"an error state", Instance{State: "error"}, StatusFail},
 		{"ports disagree", Instance{PortIssue: "expected [1], engine publishes []"}, StatusFail},

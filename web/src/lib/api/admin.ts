@@ -162,6 +162,8 @@ export interface DiagnosticCheck {
 	/** Verbatim output from whatever was probed. Absent from the support bundle. */
 	diagnostic?: string;
 	remedy?: string;
+	/** A guide explaining the remedy, where there is one. */
+	docs?: string;
 	measured_at?: string;
 	last_successful_sync_at?: string;
 }
@@ -188,6 +190,7 @@ export interface DiagnosticInstance {
 	server_free_bytes: number | null;
 	port_issue?: string;
 	image_issue?: string;
+	runtime_issue?: string;
 }
 
 export interface DiagnosticsReport {

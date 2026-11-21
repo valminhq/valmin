@@ -182,5 +182,5 @@ func (h *Shutdowns) Warn(ctx context.Context, inst *store.Instance, left time.Du
 		}
 	}
 	return h.Instances.say(ctx, inst,
-		fmt.Sprintf("Planned power cut: the server shuts down in %s.", spokenDuration(left)))
+		fmt.Sprintf("Planned power cut: the server shuts down in %s.", control.SpokenDuration(left)))
 }

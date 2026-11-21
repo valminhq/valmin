@@ -43,9 +43,15 @@ var (
 	// KindPowerCutSoon is a planned power cut close enough that every running server is about
 	// to stop.
 	KindPowerCutSoon = Kind{"power_cut_soon"}
+	// KindSignInsBlocked is an account whose sign-ins were refused after repeated failures.
+	KindSignInsBlocked = Kind{"sign_ins_blocked"}
 	// KindServerStarted and KindServerStopped report a start or stop the panel made.
 	KindServerStarted = Kind{"server_started"}
 	KindServerStopped = Kind{"server_stopped"}
+	// KindGameUpdated reports a new game build or mod updates installed on a server.
+	KindGameUpdated = Kind{"game_updated"}
+	// KindUpdateTestFinished reports an update test on a copy of a server that ended.
+	KindUpdateTestFinished = Kind{"update_test_finished"}
 	// KindAlertOpened and KindAlertResolved are the two edges of an operational condition. One
 	// kind per edge rather than per condition: the condition names itself in Summary and
 	// Detail, and a receiver filtering on kind wants "something broke" and "it cleared".
@@ -65,8 +71,8 @@ var (
 func ParseKind(name string) (Kind, bool) {
 	for _, k := range []Kind{
 		KindTest, KindInstanceDown, KindUpdateAvailable, KindBackupFailed,
-		KindAlertOpened, KindAlertResolved, KindPowerCutSoon,
-		KindServerStarted, KindServerStopped,
+		KindAlertOpened, KindAlertResolved, KindPowerCutSoon, KindSignInsBlocked,
+		KindServerStarted, KindServerStopped, KindGameUpdated, KindUpdateTestFinished,
 		KindPlayerJoined, KindPlayerLeft, KindBossDefeated, KindBossFightStarted, KindBossFightEnded,
 		KindRaidStarted, KindRaidEnded,
 	} {
@@ -79,42 +85,48 @@ func ParseKind(name string) (Kind, bool) {
 
 // headline is what each kind says. A receiver gets a sentence, not a code.
 var headline = map[Kind]string{
-	KindTest:             "Test notification",
-	KindInstanceDown:     "Server stopped unexpectedly",
-	KindUpdateAvailable:  "Server update available",
-	KindBackupFailed:     "Backup failed",
-	KindAlertOpened:      "Something needs attention",
-	KindAlertResolved:    "Resolved",
-	KindPowerCutSoon:     "Power cut soon: servers are stopping",
-	KindServerStarted:    "Server started",
-	KindServerStopped:    "Server stopped",
-	KindPlayerJoined:     "Player joined",
-	KindPlayerLeft:       "Player left",
-	KindBossDefeated:     "Boss defeated",
-	KindBossFightStarted: "Boss fight started",
-	KindBossFightEnded:   "Boss fight ended",
-	KindRaidStarted:      "Raid started",
-	KindRaidEnded:        "Raid ended",
+	KindTest:               "Test notification",
+	KindInstanceDown:       "Server stopped unexpectedly",
+	KindUpdateAvailable:    "Server update available",
+	KindBackupFailed:       "Backup failed",
+	KindAlertOpened:        "Something needs attention",
+	KindAlertResolved:      "Resolved",
+	KindPowerCutSoon:       "Power cut soon: servers are stopping",
+	KindSignInsBlocked:     "Sign-ins blocked after repeated failures",
+	KindServerStarted:      "Server started",
+	KindServerStopped:      "Server stopped",
+	KindGameUpdated:        "Server updated",
+	KindUpdateTestFinished: "Update test finished",
+	KindPlayerJoined:       "Player joined",
+	KindPlayerLeft:         "Player left",
+	KindBossDefeated:       "Boss defeated",
+	KindBossFightStarted:   "Boss fight started",
+	KindBossFightEnded:     "Boss fight ended",
+	KindRaidStarted:        "Raid started",
+	KindRaidEnded:          "Raid ended",
 }
 
 // accent is the provider colour a Discord embed carries, by severity rather than by kind.
 var accent = map[Kind]int{
-	KindTest:             0x95A5A6,
-	KindInstanceDown:     0xD83C3E,
-	KindUpdateAvailable:  0x5865F2,
-	KindBackupFailed:     0xD83C3E,
-	KindAlertOpened:      0xD83C3E,
-	KindAlertResolved:    0x2ECC71,
-	KindPowerCutSoon:     0xF1C40F,
-	KindServerStarted:    0x2ECC71,
-	KindServerStopped:    0x95A5A6,
-	KindPlayerJoined:     0x2ECC71,
-	KindPlayerLeft:       0x95A5A6,
-	KindBossDefeated:     0xF1C40F,
-	KindBossFightStarted: 0xE67E22,
-	KindBossFightEnded:   0x5865F2,
-	KindRaidStarted:      0xD83C3E,
-	KindRaidEnded:        0x2ECC71,
+	KindTest:               0x95A5A6,
+	KindInstanceDown:       0xD83C3E,
+	KindUpdateAvailable:    0x5865F2,
+	KindBackupFailed:       0xD83C3E,
+	KindAlertOpened:        0xD83C3E,
+	KindAlertResolved:      0x2ECC71,
+	KindPowerCutSoon:       0xF1C40F,
+	KindSignInsBlocked:     0xD83C3E,
+	KindServerStarted:      0x2ECC71,
+	KindServerStopped:      0x95A5A6,
+	KindGameUpdated:        0x5865F2,
+	KindUpdateTestFinished: 0x5865F2,
+	KindPlayerJoined:       0x2ECC71,
+	KindPlayerLeft:         0x95A5A6,
+	KindBossDefeated:       0xF1C40F,
+	KindBossFightStarted:   0xE67E22,
+	KindBossFightEnded:     0x5865F2,
+	KindRaidStarted:        0xD83C3E,
+	KindRaidEnded:          0x2ECC71,
 }
 
 // Detail bounds. A receiver's body limit is not the panel's to discover at delivery time,

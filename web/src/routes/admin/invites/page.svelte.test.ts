@@ -1,3 +1,4 @@
+import { formatInstant } from '#lib/api/schedules.js';
 import { render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Invite } from '#lib/api/admin.js';
@@ -16,7 +17,7 @@ vi.mock('$app/state', () => app);
 const hour = 3_600_000;
 const day = 24 * hour;
 const at = (offset: number) => new Date(Date.now() + offset).toISOString();
-const shown = (iso: string) => new Date(iso).toLocaleString();
+const shown = (iso: string) => formatInstant(iso);
 
 function user(id: string, username: string): User {
 	return {
@@ -27,6 +28,7 @@ function user(id: string, username: string): User {
 		owner: false,
 		created_at: '2026-09-01T00:00:00Z',
 		last_login_at: null,
+		password_change_required: false,
 		timezone: '',
 		hour_cycle: '',
 		date_order: ''
@@ -185,7 +187,7 @@ describe('active invite expiry', () => {
 
 		const soonLine = within(soon).getByText(/^Expires/);
 		expect(text(soonLine).trim()).toMatch(/^Expires in (1|2) hours? \(/);
-		expect(soonLine.className).toContain('text-amber-800');
+		expect(soonLine.className).toContain('amber');
 	});
 });
 

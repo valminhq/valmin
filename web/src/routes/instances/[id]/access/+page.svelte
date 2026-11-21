@@ -1,4 +1,6 @@
 <script lang="ts">
+	import EmptyState from '#lib/components/empty-state.svelte';
+	import PageHeader from '#lib/components/page-header.svelte';
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
@@ -18,6 +20,7 @@
 	import { Badge } from '#lib/components/ui/badge/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import * as Select from '#lib/components/ui/select/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import { unsaved } from '#lib/state/dirty.svelte.js';
@@ -36,6 +39,8 @@
 	let conflicts = $state<Record<string, Conflict>>({});
 	let loading = $state(true);
 	let busy = $state<string | null>(null);
+	let revokeOpen = $state(false);
+	let revoking = $state<Grant | null>(null);
 	let failure = $state<unknown>(null);
 	let newUser = $state('');
 	let newRole = $state<GrantRole>('viewer');
@@ -268,12 +273,9 @@
 {/snippet}
 
 <div class="grid max-w-3xl gap-6">
-	<header class="grid gap-1">
-		<h2 class="text-2xl font-semibold tracking-tight">Panel access</h2>
-		<p class="text-sm text-muted-foreground">
-			Choose what each person can see and change on {instance?.name ?? 'this server'}.
-		</p>
-	</header>
+	<PageHeader title="Panel access" level={2}>
+		Choose what each person can see and change on {instance?.name ?? 'this server'}.
+	</PageHeader>
 
 	<Problem error={failure} />
 
@@ -288,9 +290,7 @@
 				Grants given on this server. Administrators are listed separately below.
 			</p>
 			{#if catalogue.items.length === 0}
-				<div class="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-					Nobody has been given access to this server.
-				</div>
+				<EmptyState>Nobody has been given access to this server.</EmptyState>
 			{/if}
 
 			{#each catalogue.items as grant (grant.user_id)}
@@ -368,7 +368,10 @@
 							<Button
 								variant="ghost"
 								disabled={busy === grant.user_id}
-								onclick={() => remove(grant)}
+								onclick={() => {
+									revoking = grant;
+									revokeOpen = true;
+								}}
 							>
 								<Trash2 /> Revoke access
 							</Button>
@@ -391,10 +394,10 @@
 				>
 			{/if}
 			{#if availablePeople.length === 0}
-				<div class="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+				<EmptyState>
 					There is nobody to give access to: administrators already have it and every other user has
 					a grant.
-				</div>
+				</EmptyState>
 			{:else}
 				<Card.Root>
 					<Card.Content class="grid gap-5">
@@ -447,3 +450,14 @@
 		</section>
 	{/if}
 </div>
+
+{#if revoking}
+	{@const grant = revoking}
+	<DestructiveConfirm
+		bind:open={revokeOpen}
+		title="Revoke {nameOf(grant.user_id)}'s access?"
+		description="They lose this server at once and it disappears from their list. Their account stays."
+		confirmLabel="Revoke access"
+		onconfirm={() => void remove(grant)}
+	/>
+{/if}

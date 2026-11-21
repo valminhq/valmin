@@ -11,10 +11,8 @@ import (
 	"io/fs"
 	"os"
 	"sort"
-	"strings"
 	"unicode/utf8"
 
-	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/mods/installer"
@@ -116,7 +114,7 @@ func readSetupConfigs(inst *store.Instance) ([]ManifestConfig, error) {
 	out := []ManifestConfig{}
 	for _, entry := range entries {
 		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".cfg") || name == command.ConfigFile {
+		if entry.IsDir() || !CarriedConfig(name) {
 			continue
 		}
 		f, _, err := fsutil.OpenRegularIn(root, name)

@@ -127,6 +127,11 @@ func ValidateAdoptionLaunch(
 			"the container is on network %q and this panel creates instances on %q",
 			c.Spec.Network, expected.Network))
 	}
+	if expected.OCIRuntime != "" && expected.OCIRuntime != c.Spec.OCIRuntime {
+		return adoptionMismatch(fmt.Sprintf(
+			"the container runs under runtime %q and this panel creates instances under %q",
+			RuntimeName(c.Spec.OCIRuntime), RuntimeName(expected.OCIRuntime)))
+	}
 	if expected.Labels[LabelSpecHash] != c.Labels[LabelSpecHash] {
 		return adoptionMismatch("the supplied launch settings do not describe this container")
 	}
@@ -164,6 +169,11 @@ func adoptionSpecsEqual(
 	effective.Binds = sortedAdoptionBinds(effective.Binds)
 	actual := *observed
 	actual.Binds = sortedAdoptionBinds(actual.Binds)
+	// The daemon's default runtime reads back under its own name, which the panel cannot learn;
+	// the spec hash already covers the runtime a container was created with.
+	if expected.OCIRuntime == "" {
+		actual.OCIRuntime = ""
+	}
 	return reflect.DeepEqual(effective, actual)
 }
 

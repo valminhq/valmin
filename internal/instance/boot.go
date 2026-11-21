@@ -15,8 +15,12 @@ import (
 // stream has ended. A waiter takes a channel per event kind and is woken the moment the reader
 // matches the line, so nothing polls the log.
 type bootLatch struct {
-	mu     sync.Mutex
-	boot   time.Time
+	mu   sync.Mutex
+	boot time.Time
+	// beat is the receive time of the newest periodic status line this boot logged, and open is
+	// when the stream the reader now follows was opened, zero while none is.
+	beat   time.Time
+	open   time.Time
 	seen   map[EventKind]chan struct{}
 	fired  map[EventKind]bool
 	exited chan struct{}
@@ -58,6 +62,38 @@ func (b *bootLatch) note(kind EventKind) {
 	}
 	b.fired[kind] = true
 	close(b.channelLocked(kind))
+}
+
+// heartbeat records the receive time of a periodic status line. An older time than the one held
+// is ignored, so a re-read of history cannot move the record backwards.
+func (b *bootLatch) heartbeat(at time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if at.After(b.beat) {
+		b.beat = at
+	}
+}
+
+// streamOpened records that the log stream of this boot was opened at at.
+func (b *bootLatch) streamOpened(at time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.open = at
+}
+
+// streamClosed records that the log stream of this boot is no longer being read.
+func (b *bootLatch) streamClosed() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.open = time.Time{}
+}
+
+// pulse is when this boot began, the receive time of the newest periodic status line it logged,
+// and when its log stream was opened, read together. Each is zero while unknown.
+func (b *bootLatch) pulse() Pulse {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return Pulse{Boot: b.boot, Beat: b.beat, Open: b.open}
 }
 
 // setBoot records when the boot this latch describes began.

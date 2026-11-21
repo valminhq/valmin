@@ -1,5 +1,10 @@
 <script lang="ts">
+	import { unsaved } from '#lib/state/dirty.svelte.js';
+	import { Textarea } from '#lib/components/ui/textarea/index.js';
+	import PageHeader from '#lib/components/page-header.svelte';
+	import { pageNarrow } from '#lib/layout.js';
 	import { goto } from '$app/navigation';
+	import { tick } from 'svelte';
 	import { resolve } from '$app/paths';
 	import { actions, type GameOptions, instances } from '#lib/api/instances.js';
 	import {
@@ -18,20 +23,23 @@
 	import * as Card from '#lib/components/ui/card/index.js';
 	import * as Alert from '#lib/components/ui/alert/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
+	import FileInput from '#lib/components/file-input.svelte';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import { Switch } from '#lib/components/ui/switch/index.js';
 	import Problem from '#lib/components/problem.svelte';
+	import { ApiError } from '#lib/api/errors.js';
+	import Field, { focusFirstInvalid } from '#lib/components/field.svelte';
 	import JobProgress from '#lib/components/job-progress.svelte';
-	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import { warningText } from '#lib/tone.js';
 
 	let options = $state<GameOptions | null>(null);
 	let failure = $state<unknown>(null);
 	let fileError = $state('');
 	let from = $state<ManifestSource | null>(null);
-	let fileName = $state('');
 	let code = $state('');
+	let manifestFiles = $state<FileList | undefined>();
 	let preview = $state<ManifestPreview | null>(null);
 	let busy = $state(false);
 	let job = $state<Job | null>(null);
@@ -93,7 +101,7 @@
 	}
 
 	async function use(template: CatalogueTemplate) {
-		fileName = '';
+		manifestFiles = undefined;
 		fileError = '';
 		code = template.code;
 		await check({ code: template.code });
@@ -103,7 +111,6 @@
 		const file = (event.currentTarget as HTMLInputElement).files?.[0];
 		fileError = '';
 		if (!file) return;
-		fileName = file.name;
 		code = '';
 		let parsed: InstanceManifest;
 		try {
@@ -118,7 +125,7 @@
 	}
 
 	async function pasted() {
-		fileName = '';
+		manifestFiles = undefined;
 		fileError = '';
 		await check({ code: code.trim() });
 	}
@@ -134,10 +141,23 @@
 		reset();
 		from = next;
 		try {
-			preview = await manifest.preview(next);
-			if (!name) name = preview.name ?? '';
+			const [read] = await Promise.all([manifest.preview(next), instanceList.load()]);
+			preview = read;
+			if (!name) name = unusedName(read.name ?? '');
 		} catch (err) {
 			failure = err;
+		}
+	}
+
+	const apiError = $derived(failure instanceof ApiError ? failure : null);
+
+	/** base, or base with the first number after it that no listed server is called, since a
+	 * template usually carries the name of a server that still exists. */
+	function unusedName(base: string): string {
+		const taken = new Set(instanceList.items.map((row) => row.name.toLowerCase()));
+		if (!base || !taken.has(base.toLowerCase())) return base;
+		for (let n = 2; ; n++) {
+			if (!taken.has(`${base} ${n}`.toLowerCase())) return `${base} ${n}`;
 		}
 	}
 
@@ -149,24 +169,38 @@
 			job = await manifest.import(from, name.trim(), password, startAfter);
 		} catch (err) {
 			failure = err;
+			void tick().then(() => focusFirstInvalid());
 		} finally {
 			busy = false;
 		}
 	}
 
+	/** What still keeps the template from being used, as one sentence. */
+	const waiting = $derived.by(() => {
+		if (blocking.length > 0)
+			return 'This template cannot be used until the problems above are fixed.';
+		const missing = [
+			...(name.trim() === '' ? ['a name'] : []),
+			...(password.length < minPassword
+				? [`a server password of at least ${minPassword} characters`]
+				: [])
+		];
+		return missing.length > 0 ? `Still needed: ${missing.join(' and ')}.` : '';
+	});
+
+	// A chosen template or a typed name is lost on leaving; once submitted the daemon owns it.
+	unsaved(() => job === null && (from !== null || name !== '' || password !== ''));
+
 	async function finished(finishedJob: Job) {
 		if (finishedJob.status !== 'succeeded') return;
 		await instanceList.load();
-		await goto(resolve('/'));
+		const id = finishedJob.instance_id;
+		await goto(id ? resolve('/instances/[id]', { id }) : resolve('/'));
 	}
 </script>
 
-<main class="mx-auto grid max-w-2xl gap-4 p-6">
-	<Button variant="ghost" size="sm" class="justify-self-start" href={resolve('/')}>
-		<ArrowLeft /> Servers
-	</Button>
-
-	<h1 class="text-2xl font-semibold tracking-tight">New server from a template</h1>
+<main class={pageNarrow}>
+	<PageHeader title="New server from a template" />
 
 	{#if !canCreate}
 		<p class="text-sm text-muted-foreground">You don't have permission to create servers.</p>
@@ -282,10 +316,12 @@
 			</Card.Header>
 			<Card.Content class="grid gap-2">
 				<Label for="manifest-file">File</Label>
-				<Input id="manifest-file" type="file" accept="application/json,.json" onchange={chose} />
-				{#if fileName}
-					<p class="text-sm text-muted-foreground">{fileName}</p>
-				{/if}
+				<FileInput
+					id="manifest-file"
+					accept="application/json,.json"
+					bind:files={manifestFiles}
+					onchange={chose}
+				/>
 			</Card.Content>
 		</Card.Root>
 
@@ -299,13 +335,14 @@
 			</Card.Header>
 			<Card.Content class="grid gap-2">
 				<Label for="template-code">Template code</Label>
-				<textarea
+				<Textarea
 					id="template-code"
-					rows="4"
+					rows={4}
 					spellcheck="false"
 					placeholder="valmin1:… or a profile code"
-					class="w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs break-all outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-					bind:value={code}></textarea>
+					class="font-mono text-xs break-all md:text-xs"
+					bind:value={code}
+				></Textarea>
 				<Button
 					variant="outline"
 					size="sm"
@@ -387,9 +424,7 @@
 														= {setting.value}
 													</span>
 													{#if setting.secret || setting.suspicious}
-														<span class="shrink-0 text-amber-700 dark:text-amber-300">
-															looks secret
-														</span>
+														<span class={['shrink-0', warningText]}> looks secret </span>
 													{/if}
 												</li>
 											{/each}
@@ -416,10 +451,11 @@
 					</Card.Description>
 				</Card.Header>
 				<Card.Content class="grid gap-4">
-					<div class="grid gap-2">
-						<Label for="name">Name</Label>
-						<Input id="name" bind:value={name} autocomplete="off" />
-					</div>
+					<Field id="name" label="Name" error={apiError?.field('name')}>
+						{#snippet children(field)}
+							<Input id="name" bind:value={name} autocomplete="off" {...field} />
+						{/snippet}
+					</Field>
 					<div class="grid gap-2">
 						<Label for="password">Server password</Label>
 						<Input
@@ -437,9 +473,12 @@
 				</Card.Content>
 			</Card.Root>
 
-			<Button class="justify-self-start" disabled={!ready || busy} onclick={submit}>
-				{busy ? 'Creating…' : 'Create server'}
-			</Button>
+			<div class="flex flex-wrap items-center gap-3">
+				<Button disabled={!ready || busy} onclick={submit}>
+					{busy ? 'Creating…' : 'Create server'}
+				</Button>
+				<p class="text-sm text-muted-foreground" role="status">{busy ? '' : waiting}</p>
+			</div>
 		{/if}
 	{/if}
 </main>

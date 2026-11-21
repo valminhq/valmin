@@ -2,8 +2,8 @@
 
 // The config editor's API leg against a real daemon and the stub image: a mod installed, a
 // server booted once so its settings file is written by something other than the test, and
-// then every write path the panel offers, checked on disk rather than through its own
-// response.
+// then every write path the panel offers, the live file checked on disk rather than through
+// the write's own response.
 package api
 
 import (
@@ -26,7 +26,7 @@ func rawConfigURL(name, file string) string {
 
 // TestConfigEditingRoundTripsThroughTheAPI is the milestone's guarantee stated as a
 // request: read a generated file, change one setting, and find on disk exactly the line that
-// was asked for, the previous bytes in the .bak, and everything else untouched.
+// was asked for, the previous bytes kept as its last version, and everything else untouched.
 //
 // The file is not a fixture. It is written by the stub at boot, one per plugin the installer
 // actually placed, so nothing in this test tells the daemon what it is about to parse.
@@ -81,10 +81,8 @@ func TestConfigEditingRoundTripsThroughTheAPI(t *testing.T) {
 	}
 
 	// B4 and 03 §9 rule 5: the bytes a write replaced are kept, exactly.
-	if kept, err := os.ReadFile(path + ".bak"); err != nil {
-		t.Errorf("no .bak beside the edited file: %v", err)
-	} else if !bytes.Equal(kept, before) {
-		t.Error(".bak does not hold the bytes the write replaced")
+	if kept := keptConfigRaw(t, rt, admin, name, file, "previous"); !bytes.Equal(kept, before) {
+		t.Error("/previous does not hold the bytes the write replaced")
 	}
 
 	// A raw replacement over the same file, on the ETag the read handed out — the escape
@@ -116,18 +114,25 @@ func TestConfigEditingRoundTripsThroughTheAPI(t *testing.T) {
 	if string(final) != replacement {
 		t.Error("the raw put did not land byte for byte")
 	}
-	if kept, err := os.ReadFile(path + ".bak"); err != nil {
-		t.Errorf("no .bak after a raw put: %v", err)
-	} else if !bytes.Equal(kept, after) {
-		t.Error("the raw put's .bak does not hold what it replaced")
+	if kept := keptConfigRaw(t, rt, admin, name, file, "previous"); !bytes.Equal(kept, after) {
+		t.Error("after a raw put, /previous does not hold what it replaced")
 	}
-	// The copy taken before the panel's first write is the one that survives every later
-	// one, which is what makes "compare with the original" mean anything after two saves.
-	if orig, err := os.ReadFile(path + ".orig"); err != nil {
-		t.Errorf("no .orig: %v", err)
-	} else if !bytes.Equal(orig, before) {
-		t.Error(".orig moved with the second write; it must hold the file as first found")
+	// The version found before the panel's first write survives every later one, which is
+	// what makes "compare with the original" mean anything after two saves.
+	if orig := keptConfigRaw(t, rt, admin, name, file, "original"); !bytes.Equal(orig, before) {
+		t.Error("/original moved with the second write; it must hold the file as first found")
 	}
+}
+
+// keptConfigRaw reads the bytes of a file's kept version, "previous" or "original".
+func keptConfigRaw(t *testing.T, rt *Server, admin *store.User, name, file, which string) []byte {
+	t.Helper()
+	rec := as(rt, admin, httptest.NewRequest(http.MethodGet,
+		"/api/v1/instances/"+name+"/configs/"+file+"/"+which+"/raw", http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("read %s = %d, want 200 (%s)", which, rec.Code, rec.Body)
+	}
+	return rec.Body.Bytes()
 }
 
 // installOneMod installs a package from the seeded index and waits for the job.

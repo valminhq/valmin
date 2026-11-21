@@ -26,8 +26,9 @@ This is separate from production's `prepare-host.sh` and `/srv/valmin`.
 Run these Make targets as your own user; do not run the whole target under sudo.
 
 Open `http://localhost:5173`. Vite proxies API and WebSocket traffic to the daemon
-on port 8080. The stub setup exercises panel workflows without downloading or
-running Valheim.
+on `127.0.0.1:8080`. The daemon listens on loopback only; to point a Vite on another
+machine at it with `VALMIN_DEV_PANEL`, widen it with `make dev DEV_LISTEN=0.0.0.0:8080`.
+The stub setup exercises panel workflows without downloading or running Valheim.
 
 To develop against the real game:
 

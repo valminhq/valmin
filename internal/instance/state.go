@@ -33,9 +33,12 @@ const (
 	StateError        State = "error"
 )
 
-// StopPayload is a stop job's payload: why the panel stopped the server.
+// StopPayload is a stop job's payload: why the panel stopped the server, and the archive it may
+// write once the server is down, named when the job is queued so a crash can be cleaned up.
 type StopPayload struct {
-	Reason StopReason `json:"reason,omitempty"`
+	Reason      StopReason `json:"reason,omitempty"`
+	ArchiveID   string     `json:"archive_id,omitempty"`
+	ArchivePath string     `json:"archive_path,omitempty"`
 }
 
 // StopReason is what a stop that nobody asked for by hand was made for. Empty is a person's stop.

@@ -71,7 +71,7 @@ func (s *Schedules) Warn(ctx context.Context, sc *store.Schedule, left time.Dura
 			slog.String("schedule_id", sc.ID), slog.Any("error", err))
 		return true
 	}
-	return s.Instances.say(ctx, inst, playerWarning(steps, left))
+	return s.Instances.say(ctx, inst, control.PlayerWarning(steps, left))
 }
 
 func (h *Instances) say(ctx context.Context, inst *store.Instance, line string) bool {
@@ -94,32 +94,6 @@ func (h *Instances) say(ctx context.Context, inst *store.Instance, line string) 
 }
 
 const warnTimeout = 15 * time.Second
-
-// playerWarning is the line said to players when a run of steps is held for them to leave.
-func playerWarning(steps []control.ChainStep, left time.Duration) string {
-	action := "goes down for maintenance"
-	if len(steps) == 1 {
-		switch steps[0].Type {
-		case control.StepRestart:
-			action = "restarts"
-		case control.StepBackup:
-			action = "restarts for a backup"
-		}
-	}
-	return fmt.Sprintf("The server %s when all players have left, or in %s at the latest.",
-		action, spokenDuration(left))
-}
-
-func spokenDuration(d time.Duration) string {
-	n, unit := int((d+time.Minute-1)/time.Minute), "minute"
-	if n%60 == 0 {
-		n, unit = n/60, "hour"
-	}
-	if n != 1 {
-		unit += "s"
-	}
-	return fmt.Sprintf("%d %s", n, unit)
-}
 
 func occupied(state instance.State, players *int, unknown string) bool {
 	if state != instance.StateRunning {
@@ -175,21 +149,74 @@ func (s *Schedules) submitScheduledGlobal(ctx context.Context, sc *store.Schedul
 	}
 }
 
-// submitScheduledInstance submits what a due instance schedule runs. A chain runs as a chain
-// job; a backup, restart or game update is its one step, submitted as that step's own job.
+// submitScheduledInstance submits what a due instance schedule runs.
 func (s *Schedules) submitScheduledInstance(ctx context.Context, sc *store.Schedule, inst *store.Instance) error {
+	_, err := s.submitSchedule(ctx, sc, inst, control.StepOrigin{ScheduleID: sc.ID})
+	return err
+}
+
+// submitSchedule submits what instance schedule sc runs on inst, attributed to origin. A chain
+// runs as a chain job; a backup, restart or game update is its one step, submitted as that
+// step's own job.
+func (s *Schedules) submitSchedule(
+	ctx context.Context, sc *store.Schedule, inst *store.Instance, origin control.StepOrigin,
+) (*store.Job, error) {
+	if sc.Kind == jobs.KindUpdateTest.String() {
+		return s.submitUpdateTest(ctx, sc, inst, origin)
+	}
 	steps, err := scheduledSteps(sc)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	chainer := s.Instances.ctl.Chainer
 	if sc.Kind == jobs.KindChain.String() {
-		_, err = chainer.Submit(ctx, &control.ChainSubmission{
-			Instance: inst, Steps: steps, ScheduleID: sc.ID,
-			Kind: jobs.KindChain, Payload: control.ChainPayload{Steps: steps},
+		return chainer.Submit(ctx, &control.ChainSubmission{
+			Instance: inst, Steps: steps, ScheduleID: origin.ScheduleID, RequestedBy: origin.RequestedBy,
+			Audit: origin.Audit, Kind: jobs.KindChain, Payload: control.ChainPayload{Steps: steps},
 		})
-		return err
 	}
-	_, err = chainer.SubmitStep(ctx, inst, &steps[0], control.StepOrigin{ScheduleID: sc.ID})
-	return err
+	return chainer.SubmitStep(ctx, inst, &steps[0], origin)
+}
+
+// errNothingToTest is an update test with no game or mod update to try.
+var errNothingToTest = errors.New("no game or mod updates are pending")
+
+// pendingUpdates reports what an update test of inst could try: the game unless the last check
+// found it current, and the mods when any update is pending.
+func pendingUpdates(
+	ctx context.Context, db *store.DB, tester *control.UpdateTester, inst *store.Instance,
+) (game, mods bool, err error) {
+	status, err := observeUpdateStatus(ctx, db, inst)
+	if err != nil {
+		return false, false, err
+	}
+	pending, err := tester.PendingMods(ctx, inst.ID)
+	if err != nil {
+		return false, false, err
+	}
+	return status.UpdateAvailable == nil || *status.UpdateAvailable, len(pending) > 0, nil
+}
+
+// submitUpdateTest queues the update test schedule sc runs on inst: the game unless the last
+// check found it current, and the mods when any update is pending. With neither it refuses with
+// errNothingToTest.
+func (s *Schedules) submitUpdateTest(
+	ctx context.Context, sc *store.Schedule, inst *store.Instance, origin control.StepOrigin,
+) (*store.Job, error) {
+	tester := s.Instances.ctl.UpdateTester
+	game, mods, err := pendingUpdates(ctx, s.DB, tester, inst)
+	if err != nil {
+		return nil, err
+	}
+	if !game && !mods {
+		return nil, errNothingToTest
+	}
+	job, err := tester.Submit(ctx, &control.UpdateTestSubmission{
+		Instance: inst, Game: game, Mods: mods, Apply: scheduledApply(sc),
+		RequestedBy: origin.RequestedBy, ScheduleID: origin.ScheduleID, Audit: origin.Audit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("submit scheduled update test: %w", err)
+	}
+	return job, nil
 }

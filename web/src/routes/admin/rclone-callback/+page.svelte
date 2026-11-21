@@ -1,4 +1,6 @@
 <script lang="ts">
+	import PageHeader from '#lib/components/page-header.svelte';
+	import { pageNarrow } from '#lib/layout.js';
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -42,8 +44,8 @@
 	}
 </script>
 
-<main class="mx-auto grid w-full max-w-3xl gap-6 p-4 sm:p-6">
-	<h1 class="text-2xl font-semibold">Connect storage account</h1>
+<main class={pageNarrow}>
+	<PageHeader title="Connect storage account" />
 	{#if !setupId}
 		<p>This page finishes a storage provider's sign-in. Start from Remote backups.</p>
 

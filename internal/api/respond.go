@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/errcode"
@@ -34,8 +35,8 @@ func Accepted(w http.ResponseWriter, r *http.Request, jobID string, stub any) {
 }
 
 // Decode reads a JSON request body into v. Unknown fields are rejected rather than
-// ignored: a mistyped field that silently does nothing is the failure shape this project
-// designs against.
+// ignored, as malformed_json naming the field: a mistyped field that silently does nothing is
+// the failure shape this project designs against.
 func Decode(r *http.Request, v any) error {
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		if mediaType, _, _ := strings.Cut(ct, ";"); strings.TrimSpace(mediaType) != "application/json" {
@@ -49,6 +50,11 @@ func Decode(r *http.Request, v any) error {
 		var tooLarge *http.MaxBytesError
 		if stderrors.As(err, &tooLarge) {
 			return apierr.New(errcode.PayloadTooLarge).With("limit_bytes", tooLarge.Limit).Wrap(err)
+		}
+		if field, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
+			field = strings.Trim(field, `"`)
+			return apierr.New(errcode.MalformedJSON).With("field", field).
+				Msg(fmt.Sprintf("The request has a field this endpoint does not accept: %s.", field)).Wrap(err)
 		}
 		return apierr.New(errcode.MalformedJSON).Wrap(err)
 	}
@@ -112,6 +118,19 @@ const (
 	DefaultLimit = 50
 	MaxLimit     = 200
 )
+
+// ParseTime reads an RFC 3339 query parameter. An absent parameter is the zero time.
+func ParseTime(r *http.Request, name string) (time.Time, error) {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	at, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, apierr.New(errcode.InvalidParameter).With("parameter", name).Wrap(err)
+	}
+	return at, nil
+}
 
 // ParseLimit reads the limit query parameter. A value over the cap is clamped rather than
 // rejected: a client asking for too much wants as much as it can have.

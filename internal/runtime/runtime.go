@@ -49,6 +49,9 @@ type Runtime interface {
 // container as a fact about the world, not as an error (08 §6.1).
 var ErrNotFound = errors.New("container not found")
 
+// ErrImageNotFound reports that a container exists but the image it was created from does not.
+var ErrImageNotFound = errors.New("container image not found")
+
 // ContainerSpec is everything the panel sets when creating a container. It carries no
 // defaults of its own; the fields the engine must never vary are applied by the
 // implementation and are deliberately absent here:
@@ -86,6 +89,11 @@ type ContainerSpec struct {
 
 	// RestartPolicy is the Docker policy name. Empty means no restart policy.
 	RestartPolicy string
+
+	// OCIRuntime names a runtime registered with the Docker daemon, such as runsc or kata.
+	// Empty is the daemon's default, reads back empty on inspection, and is left out of the
+	// spec hash.
+	OCIRuntime string `json:",omitempty"`
 
 	MemoryBytes int64
 	NanoCPUs    int64
@@ -204,4 +212,8 @@ type Stats struct {
 	// (E11, Q24).
 	MemBytes uint64
 	MemLimit uint64
+	// RxBytes and TxBytes are received and sent since the container started, summed over its
+	// interfaces. They restart from zero with the container.
+	RxBytes uint64
+	TxBytes uint64
 }

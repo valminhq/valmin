@@ -53,12 +53,15 @@ func waitJob(t *testing.T, rt *Server, u *store.User, jobID string) jobView {
 
 // lifecycleWorld is world()'s shape, but it hands the test the *runtime.Fake behind the
 // router so containers can be scripted, and it seeds one instance with a real fake
-// container already attached — every lifecycle handler requires one.
-func lifecycleWorld(t *testing.T) (rt *Server, db *store.DB, fake *runtime.Fake, admin, member *store.User) {
+// container already attached — every lifecycle handler requires one. Each configure func
+// adjusts the config before the server is built.
+func lifecycleWorld(
+	t *testing.T, configure ...func(*config.Config),
+) (rt *Server, db *store.DB, fake *runtime.Fake, admin, member *store.User) {
 	t.Helper()
 	dir := t.TempDir()
 
-	cfg := config.Defaults()
+	cfg := testConfig(t)
 	cfg.Server.ExternalURL = testOrigin
 	cfg.Data.Root = dir
 	cfg.Data.HostRoot = dir
@@ -66,6 +69,9 @@ func lifecycleWorld(t *testing.T) (rt *Server, db *store.DB, fake *runtime.Fake,
 	// every start/restart test here wait it out for real.
 	cfg.Jobs.ReadySettle = config.Duration(20 * time.Millisecond)
 	cfg.Jobs.ReadyTimeout = config.Duration(2 * time.Second)
+	for _, c := range configure {
+		c(&cfg)
+	}
 
 	k, err := crypto.NewKeeper(bytes.Repeat([]byte{7}, crypto.MasterKeyLen), []byte("salt"), "1")
 	if err != nil {
@@ -703,6 +709,49 @@ func TestJobsNobodyRequestedWriteNoAuditEntry(t *testing.T) {
 
 			if got := lifecycleAuditRows(t, db, tc.action); len(got) != 0 {
 				t.Errorf("audit rows = %+v, want none for a job nobody requested", got)
+			}
+		})
+	}
+}
+
+// TestAStartThatSucceedsScansForAlerts asserts a successful start submits an alert scan, so a
+// mod that failed to load is reported at once, and a failed start submits none.
+func TestAStartThatSucceedsScansForAlerts(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		exits bool
+		want  int
+	}{
+		{"start succeeds", false, 1},
+		{"start fails", true, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rt, db, fake, admin, _ := lifecycleWorld(t)
+			seedInstance(t, rt, db, fake, "stopped")
+			if tc.exits {
+				fake.OnStart = func(c *runtime.FakeContainer) { c.Exit(1) }
+			}
+
+			rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/start", http.NoBody))
+			var stub jobView
+			decodeInto(t, rec, &stub)
+			waitJob(t, rt, admin, stub.JobID)
+
+			// The scan is submitted after the start's finish commits, so it may land a moment later.
+			var scans int
+			for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+				if err := db.Reader.QueryRowContext(t.Context(),
+					`SELECT COUNT(*) FROM job_runs WHERE kind = 'alert_scan'`).Scan(&scans); err != nil {
+					t.Fatal(err)
+				}
+				if scans >= tc.want || time.Now().After(deadline) {
+					break
+				}
+			}
+			if scans != tc.want {
+				t.Errorf("alert scans = %d, want %d", scans, tc.want)
 			}
 		})
 	}

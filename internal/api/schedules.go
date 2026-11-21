@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -34,6 +35,8 @@ type scheduleKind struct {
 	// chain is a kind made of steps. It needs action plus the action of each step, and is
 	// player aware when any step stops the server, which forSteps settles.
 	chain bool
+	// applies is a kind that can apply what it tested, which its schedule's apply turns on.
+	applies bool
 }
 
 // forSteps returns k as it applies to a chain with these steps.
@@ -89,6 +92,42 @@ var scheduleKinds = map[string]scheduleKind{
 	jobs.KindPrune.String():       {kind: jobs.KindPrune, action: authz.SchedulesGlobal, global: true},
 	jobs.KindAlertScan.String():   {kind: jobs.KindAlertScan, action: authz.SchedulesGlobal, global: true},
 	jobs.KindChain.String():       {kind: jobs.KindChain, action: authz.InstanceStop, chain: true},
+	jobs.KindUpdateTest.String():  {kind: jobs.KindUpdateTest, action: authz.InstanceUpdate, applies: true},
+}
+
+// updateTestSchedule is the payload of an update_test schedule.
+type updateTestSchedule struct {
+	// Apply applies the tested updates when every mod loaded and nobody is on.
+	Apply bool `json:"apply"`
+}
+
+// scheduledApply reads whether an update_test schedule applies what it tested. An unreadable
+// payload does not.
+func scheduledApply(row *store.Schedule) bool {
+	var p updateTestSchedule
+	_ = json.Unmarshal([]byte(row.Payload), &p)
+	return p.Apply
+}
+
+// applyApplyOption copies a body's apply onto row, which only a kind that applies takes. It
+// reports false after writing the 422.
+func applyApplyOption(
+	w http.ResponseWriter, r *http.Request, body *scheduleRequest, spec scheduleKind, row *store.Schedule,
+) bool {
+	if body.Apply == nil {
+		return true
+	}
+	if !spec.applies {
+		writeFieldError(w, r, "apply", apierr.FieldInvalid, "Only a schedule that tests updates can apply them.")
+		return false
+	}
+	raw, err := json.Marshal(updateTestSchedule{Apply: *body.Apply})
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return false
+	}
+	row.Payload = string(raw)
+	return true
 }
 
 // scheduledSteps is what an instance schedule runs: the one step of a backup, restart or game
@@ -126,6 +165,7 @@ func scheduleRoutes(rt *routeTable, s *Schedules) {
 	rt.Handle("POST /api/v1/schedules", http.HandlerFunc(s.create))
 	rt.Handle("PATCH /api/v1/schedules/{id}", http.HandlerFunc(s.patch))
 	rt.Handle("DELETE /api/v1/schedules/{id}", http.HandlerFunc(s.delete))
+	rt.Handle("POST /api/v1/schedules/{id}/run", http.HandlerFunc(s.run))
 }
 
 // scheduleView is one schedule on the wire.
@@ -157,6 +197,9 @@ type scheduleView struct {
 	UpcomingRuns []time.Time `json:"upcoming_runs"`
 	// Steps is a chain schedule's step list, null for every other kind.
 	Steps []control.ChainStep `json:"steps"`
+	// Apply is whether an update_test schedule applies what it tested when every mod loaded and
+	// nobody is on, null for every other kind.
+	Apply *bool `json:"apply"`
 }
 
 // upcomingRunCount is how many fire times a schedule view lists.
@@ -203,6 +246,10 @@ func toScheduleView(s *store.Schedule, usernames map[string]string) scheduleView
 		if steps, err := control.ParseChainPayload(s.Payload); err == nil {
 			v.Steps = steps
 		}
+	}
+	if scheduleKinds[s.Kind].applies {
+		apply := scheduledApply(s)
+		v.Apply = &apply
 	}
 	if s.CreatedBy != nil {
 		if name, ok := usernames[*s.CreatedBy]; ok {
@@ -285,6 +332,8 @@ type scheduleRequest struct {
 
 	// Steps is a chain's step list. On an edit it replaces the whole list.
 	Steps *[]control.ChainStep `json:"steps"`
+	// Apply is an update_test schedule's apply option.
+	Apply *bool `json:"apply"`
 }
 
 // Bounds of max_deferral_seconds.
@@ -465,7 +514,7 @@ func newScheduleRow(
 		NextRunAt: &next, CreatedBy: &u.ID,
 		MaxDeferral: store.DefaultMaxDeferral, UnknownPlayers: store.UnknownPlayersWait,
 	}
-	if !applyPlayerPolicy(w, r, body, spec, row) {
+	if !applyPlayerPolicy(w, r, body, spec, row) || !applyApplyOption(w, r, body, spec, row) {
 		return nil, false
 	}
 	if !spec.global {
@@ -518,6 +567,9 @@ func (s *Schedules) insert(ctx context.Context, u *store.User, row *store.Schedu
 	if row.Kind == jobs.KindChain.String() {
 		detail["steps"] = json.RawMessage(row.Payload)
 	}
+	if scheduleKinds[row.Kind].applies {
+		detail["apply"] = scheduledApply(row)
+	}
 	if err := s.DB.CreateSchedule(ctx, row, scheduleAudit(ctx, u, row, "schedules.create", detail)); err != nil {
 		return fmt.Errorf("insert schedule: %w", err)
 	}
@@ -549,6 +601,9 @@ func scheduleChanges(before, after *store.Schedule) []change {
 	out = fieldChange(out, "max_deferral_seconds",
 		int64(before.MaxDeferral/time.Second), int64(after.MaxDeferral/time.Second))
 	out = fieldChange(out, "unknown_players", before.UnknownPlayers, after.UnknownPlayers)
+	if scheduleKinds[after.Kind].applies {
+		return fieldChange(out, "apply", scheduledApply(before), scheduledApply(after))
+	}
 	return fieldChange(out, "steps", before.Payload, after.Payload)
 }
 
@@ -591,7 +646,7 @@ func (s *Schedules) patch(w http.ResponseWriter, r *http.Request) {
 	}
 	spec = spec.forSteps(steps)
 	released, ok := applyEdit(w, r, &body, spec, row)
-	if !ok {
+	if !ok || !applyApplyOption(w, r, &body, spec, row) {
 		return
 	}
 	var audit *store.AuditEntry
@@ -731,6 +786,67 @@ func (s *Schedules) delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// run is POST /schedules/{id}/run: it submits what a server schedule runs, now, as its clock
+// would, with the caller named on the job. Running one needs what writing it needs. The
+// schedule's waiting rules, next run and last run are left alone, so a schedule holding a run
+// for players is refused rather than run twice.
+func (s *Schedules) run(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	row, spec, ok := s.mustLoadSchedule(w, r)
+	if !ok {
+		return
+	}
+	if spec.global {
+		if !s.Authz.Can(r.Context(), u, authz.SchedulesGlobal, "") {
+			apierr.Write(w, r, apierr.New(errcode.NotFound))
+			return
+		}
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).Msg("A panel schedule runs only on its own clock."))
+		return
+	}
+	if !s.Authz.Can(r.Context(), u, authz.InstanceView, deref(row.InstanceID)) {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	steps, err := storedSteps(spec, row)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if s.lacksAction(w, r, u, spec, deref(row.InstanceID), steps) {
+		return
+	}
+	if row.DeferredSince != nil {
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).Msg(
+			"This schedule is waiting for players to leave. Turn its waiting off to run it within a minute."))
+		return
+	}
+	inst, ok := s.Instances.mustLoadInstance(w, r, deref(row.InstanceID))
+	if !ok || !checkInstanceState(w, r, inst, spec.kind) {
+		return
+	}
+	detail := struct {
+		Kind string `json:"kind"`
+	}{row.Kind}
+	job, err := s.submitSchedule(r.Context(), row, inst, control.StepOrigin{
+		ScheduleID: row.ID, RequestedBy: u.ID,
+		Audit: scheduleAudit(r.Context(), u, row, "schedules.run", detail),
+	})
+	if errors.Is(err, control.ErrModdedNotConfirmed) {
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).Msg(
+			"A schedule never updates a server with mods installed. Update it by hand, where you can confirm it."))
+		return
+	}
+	if err != nil {
+		writeUpdateTestError(w, r, err)
+		return
+	}
+	Accepted(w, r, job.ID, toJobView(job))
+}
+
 // mustLoadSchedule resolves {id} to a schedule the caller can see. One they cannot see is 404,
 // the same as one that never existed (ADR-038).
 func (s *Schedules) mustLoadSchedule(
@@ -816,7 +932,7 @@ const minStoppingInterval = time.Hour
 // minStoppingInterval, judged over its next two days of runs. It reports false after writing
 // the 422.
 func checkInterval(w http.ResponseWriter, r *http.Request, spec scheduleKind, expr, zone string) bool {
-	if !spec.playerAware && spec.kind != jobs.KindGameUpdate {
+	if !spec.playerAware && spec.kind != jobs.KindGameUpdate && spec.kind != jobs.KindUpdateTest {
 		return true
 	}
 	at := time.Now().UTC()
@@ -831,7 +947,7 @@ func checkInterval(w http.ResponseWriter, r *http.Request, spec scheduleKind, ex
 		}
 		if next.Sub(prev) < minStoppingInterval {
 			writeFieldError(w, r, "cron", apierr.FieldInvalid,
-				"This kind stops the server, so it may run at most once an hour.")
+				"This kind can stop the server, so it may run at most once an hour.")
 			return false
 		}
 		prev = next

@@ -1,13 +1,14 @@
 <script lang="ts">
+	import { formatBytes } from '#lib/format.js';
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import {
 		actions,
 		instances,
-		isTransient,
 		type DiskUsage,
 		type CommandCapabilities,
-		type Instance
+		type Instance,
+		type StatsReading
 	} from '#lib/api/instances.js';
 	import { installOutstanding, operations, type Operation } from '#lib/api/operations.js';
 	import type { Job } from '#lib/api/types.js';
@@ -32,9 +33,6 @@
 	import Sparkline from '#lib/components/sparkline.svelte';
 	import UpdateNotice from '#lib/components/update-notice.svelte';
 	import UpdateTestCard from '#lib/components/update-test-card.svelte';
-	import Play from '@lucide/svelte/icons/play';
-	import Square from '@lucide/svelte/icons/square';
-	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	const id = $derived(page.params.id ?? '');
@@ -163,13 +161,8 @@
 	const parked = $derived(instance?.state === 'error' && !installOutstanding(operation));
 	const failedJob = $derived(lastJob?.status === 'failed' ? lastJob : null);
 
-	/** The control that was pressed, so the button that sent the request is the one that says a
-	 * request is in flight. It clears when the daemon accepts the job; the state the socket then
-	 * reports is what carries the rest of the transition. */
-	let pending = $state('');
-
-	async function run(action: () => Promise<unknown>, label = '') {
-		pending = label;
+	/** Sends one request for this server and shows its error. */
+	async function run(action: () => Promise<unknown>) {
 		busy = true;
 		failure = null;
 		try {
@@ -178,20 +171,21 @@
 			failure = err;
 		} finally {
 			busy = false;
-			pending = '';
 		}
 	}
 
 	function bytes(n: number | null | undefined): string | null {
 		if (n === null || n === undefined) return null;
-		const units = ['B', 'KiB', 'MiB', 'GiB'];
-		let v = n;
-		let u = 0;
-		while (v >= 1024 && u < units.length - 1) {
-			v /= 1024;
-			u += 1;
-		}
-		return `${v.toFixed(u === 0 ? 0 : 1)} ${units[u]}`;
+		return formatBytes(n);
+	}
+
+	const primary = 'var(--color-primary, currentColor)';
+
+	/** Received and sent as rates, or null while either is unknown. */
+	function traffic(r: StatsReading | null): string | null {
+		const rx = bytes(r?.rx_bytes_per_second);
+		const tx = bytes(r?.tx_bytes_per_second);
+		return rx === null || tx === null ? null : `↓ ${rx}/s ↑ ${tx}/s`;
 	}
 
 	function pct(n: number | null | undefined): string | null {
@@ -205,49 +199,6 @@
 	{#if instance}
 		{@const inst = instance}
 		<ConnectionSummary instance={inst} />
-
-		<div
-			aria-label="Server controls"
-			role="group"
-			class="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-3"
-		>
-			{#if allowed.includes(actions.start)}
-				<Button
-					variant={inst.state === 'stopped' ? 'default' : 'outline'}
-					size="sm"
-					disabled={busy ||
-						isTransient(inst.state) ||
-						inst.state !== 'stopped' ||
-						operation !== null}
-					onclick={() => run(() => instances.start(inst.id), 'start')}
-				>
-					<Play />
-					{pending === 'start' || inst.state === 'starting' ? 'Starting…' : 'Start'}
-				</Button>
-			{/if}
-			{#if allowed.includes(actions.stop)}
-				<Button
-					variant="outline"
-					size="sm"
-					disabled={busy || isTransient(inst.state) || inst.state !== 'running'}
-					onclick={() => run(() => instances.stop(inst.id), 'stop')}
-				>
-					<Square />
-					{pending === 'stop' || inst.state === 'stopping' ? 'Stopping…' : 'Stop'}
-				</Button>
-			{/if}
-			{#if allowed.includes(actions.restart)}
-				<Button
-					variant="outline"
-					size="sm"
-					disabled={busy || isTransient(inst.state) || inst.state !== 'running'}
-					onclick={() => run(() => instances.restart(inst.id), 'restart')}
-				>
-					<RotateCw />
-					{pending === 'restart' ? 'Restarting…' : 'Restart'}
-				</Button>
-			{/if}
-		</div>
 
 		{#if parked}
 			<!--
@@ -293,7 +244,7 @@
 			onchange={load}
 		/>
 
-		<RestartNotice instance={inst} />
+		<RestartNotice instance={inst} canRestart={session.allowed(id).includes(actions.restart)} />
 
 		<MaintenanceNotice instanceId={inst.id} />
 
@@ -303,7 +254,9 @@
 		-->
 		{#if !installOutstanding(operation)}
 			<UpdateNotice instance={inst} onchange={load} />
-			<UpdateTestCard instance={inst} onchange={load} />
+			{#if inst.test_of}
+				<UpdateTestCard instance={inst} onchange={load} />
+			{/if}
 		{/if}
 
 		{#if uncleanStop && !parked && operation?.state !== 'interrupted'}
@@ -322,7 +275,7 @@
 			</Alert.Root>
 		{/if}
 
-		<div class="grid gap-4 md:grid-cols-2">
+		<div class="grid gap-4 md:grid-cols-2 {inst.state === 'running' ? '' : 'items-start'}">
 			<Card.Root>
 				<Card.Header>
 					<Card.Title>Resources</Card.Title>
@@ -330,7 +283,7 @@
 						{#if inst.state === 'running'}
 							Sampled every 2 seconds.
 						{:else}
-							CPU, memory and players show here while the server runs.
+							CPU, memory, network and players show here while the server runs.
 						{/if}
 					</Card.Description>
 				</Card.Header>
@@ -341,27 +294,44 @@
 						{#if inst.state === 'running'}
 							<Sparkline
 								samples={stats.samples}
-								pick={(s) => s.cpu}
+								series={[{ key: 'cpu', label: 'CPU', color: primary, pick: (s) => s.cpu }]}
 								label="CPU"
 								value={pct(stats.latest?.cpu_pct)}
 								max={100}
 							/>
 							<Sparkline
 								samples={stats.samples}
-								pick={(s) => s.mem}
+								series={[{ key: 'mem', label: 'Memory', color: primary, pick: (s) => s.mem }]}
 								label="Memory"
 								value={bytes(stats.latest?.mem_bytes)}
 							/>
+							<Sparkline
+								samples={stats.samples}
+								series={[
+									{
+										key: 'rx',
+										label: 'Received',
+										color: 'var(--color-chart-rx)',
+										pick: (s) => s.rx
+									},
+									{ key: 'tx', label: 'Sent', color: 'var(--color-chart-tx)', pick: (s) => s.tx }
+								]}
+								label="Network"
+								value={traffic(stats.latest)}
+							/>
 							<!--
-								Null reads "unknown", never 0: the daemon sends null when it cannot tell, and
+								Null reads as a muted dash, never 0: the daemon sends null when it cannot tell, and
 								drawing that as an empty server is the failure the null exists to prevent (E7).
 								No memory alarm either: the cache term has not been measured (`14 §4.3`).
 							-->
 							<div class="flex items-baseline justify-between">
 								<span class="text-xs text-muted-foreground">Players</span>
-								<span class="text-lg font-semibold tabular-nums">
-									{stats.latest?.players ?? 'unknown'}
-								</span>
+								<span
+									class={[
+										'text-lg tabular-nums',
+										stats.latest?.players == null ? 'text-muted-foreground' : 'font-semibold'
+									]}>{stats.latest?.players ?? '—'}</span
+								>
 							</div>
 						{/if}
 						{#if disk}
@@ -421,6 +391,10 @@
 				onmore={loadOlder}
 			/>
 		</div>
+
+		{#if !installOutstanding(operation) && !inst.test_of}
+			<UpdateTestCard instance={inst} onchange={load} />
+		{/if}
 
 		<Card.Root id="console">
 			<Card.Header>
