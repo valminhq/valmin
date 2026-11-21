@@ -363,6 +363,16 @@ describe('the unclaimed containers', () => {
 		);
 	});
 
+	// A stopped container holds no port, so a new server can take its range and block its recovery.
+	it('say which server holds the same ports', async () => {
+		await open(grants([actions.adopt]), {
+			orphaned: [orphan],
+			servers: [instance({ name: 'Shots demo', base_port: 2470 })]
+		});
+
+		expect(await screen.findByText(/same ports as Shots demo/)).toBeTruthy();
+	});
+
 	// No orphans and no answer are different facts.
 	it('say the scan failed rather than that there are none', async () => {
 		daemon.on('GET', '/instances/orphans', () => envelope(500, 'internal', 'Broken.'));

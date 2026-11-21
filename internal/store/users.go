@@ -45,6 +45,9 @@ type User struct {
 	HourCycle string `json:"hour_cycle"`
 	// DateOrder is "mdy", "dmy", "ymd", or "" to follow their browser.
 	DateOrder string `json:"date_order"`
+	// PasswordChangeRequired is true while the password was chosen or issued by an administrator
+	// and its owner has not replaced it.
+	PasswordChangeRequired bool `json:"password_change_required"`
 }
 
 // Grant is a live per-instance grant: a base role plus the extra capabilities an admin
@@ -106,15 +109,18 @@ func (db *DB) CountUsers(ctx context.Context) (int, error) {
 // CreateUser inserts a user already hashed by the caller — this package never sees a
 // plaintext password (10 §3.4 is the auth package's job, not the store's).
 func (db *DB) CreateUser(ctx context.Context, id, username, passwordHash string, role Role, now time.Time) error {
-	return createUser(ctx, db.Writer, id, username, passwordHash, role, now)
+	return createUser(ctx, db.Writer, id, username, passwordHash, role, now, false)
 }
 
+// createUser inserts a user; changeRequired marks a password the account's owner did not choose.
 func createUser(
 	ctx context.Context, execer execer, id, username, passwordHash string, role Role, now time.Time,
+	changeRequired bool,
 ) error {
 	_, err := execer.ExecContext(ctx, `
-		INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)`,
-		id, username, passwordHash, string(role), FormatTime(now))
+		INSERT INTO users (id, username, password_hash, role, created_at, password_change_required)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		id, username, passwordHash, string(role), FormatTime(now), changeRequired)
 	if isUniqueViolation(err) {
 		return ErrUsernameTaken
 	}
@@ -124,12 +130,13 @@ func createUser(
 	return nil
 }
 
-// CreateUserAudited creates a user and its permanent audit record atomically.
+// CreateUserAudited creates a user an administrator chose the password for, and its permanent
+// audit record, atomically. The account is asked to replace the password at its first sign-in.
 func (db *DB) CreateUserAudited(
 	ctx context.Context, id, username, passwordHash string, role Role, now time.Time, audit *AuditEntry,
 ) error {
 	return db.inTx(ctx, "create user", func(tx *sql.Tx) error {
-		if err := createUser(ctx, tx, id, username, passwordHash, role, now); err != nil {
+		if err := createUser(ctx, tx, id, username, passwordHash, role, now, true); err != nil {
 			return err
 		}
 		return writeAuditLog(ctx, tx, audit, now)
@@ -177,7 +184,7 @@ type AuthRecord struct {
 	PasswordHash string
 }
 
-const userColumns = `id, username, password_hash, role, disabled, owner, created_at, last_login_at, timezone, hour_cycle, date_order`
+const userColumns = `id, username, password_hash, role, disabled, owner, created_at, last_login_at, timezone, hour_cycle, date_order, password_change_required`
 
 // scanUser reads one userColumns row from either *sql.Row or *sql.Rows.
 func scanUser(s scanner) (AuthRecord, error) {
@@ -186,7 +193,7 @@ func scanUser(s scanner) (AuthRecord, error) {
 	var createdAt string
 
 	err := s.Scan(&rec.ID, &rec.Username, &rec.PasswordHash, &rec.Role, &rec.Disabled, &rec.Owner,
-		&createdAt, &lastLogin, &rec.Timezone, &rec.HourCycle, &rec.DateOrder)
+		&createdAt, &lastLogin, &rec.Timezone, &rec.HourCycle, &rec.DateOrder, &rec.PasswordChangeRequired)
 	if err != nil {
 		return AuthRecord{}, fmt.Errorf("scan user row: %w", err)
 	}
@@ -355,8 +362,8 @@ func (db *DB) SetUserPreferences(ctx context.Context, id string, p UserPreferenc
 	return nil
 }
 
-// SetUserPassword overwrites a user's hash — self-service change or admin-issued reset
-// (09 §5: "no SMTP anywhere", so reset is always admin-issued, never a mailed link).
+// SetUserPassword replaces a user's hash and nothing else. It is for re-hashing a password the
+// account already uses with current parameters, which neither chooses nor issues one.
 func (db *DB) SetUserPassword(ctx context.Context, id, passwordHash string) error {
 	return setUserPassword(ctx, db.Writer, id, passwordHash)
 }
@@ -375,21 +382,37 @@ func setUserPassword(ctx context.Context, execer execer, id, passwordHash string
 	return nil
 }
 
-// SetUserPasswordAudited changes a password, revokes every session of the user, and records the
-// change atomically.
+// setPasswordChangeRequired marks whether the account is asked to replace its password.
+func setPasswordChangeRequired(ctx context.Context, execer execer, id string, required bool) error {
+	if _, err := execer.ExecContext(ctx,
+		`UPDATE users SET password_change_required = ? WHERE id = ?`, required, id); err != nil {
+		return fmt.Errorf("set password change for user %s: %w", id, err)
+	}
+	return nil
+}
+
+// ClearPasswordChangeRequired stops asking an account to replace its password. An account that
+// signs in through a trusted proxy never uses the password.
+func (db *DB) ClearPasswordChangeRequired(ctx context.Context, id string) error {
+	return setPasswordChangeRequired(ctx, db.Writer, id, false)
+}
+
+// SetUserPasswordAudited changes a password an administrator issued, revokes every session of
+// the user, and records the change atomically. The account is asked to replace the password.
 func (db *DB) SetUserPasswordAudited(
 	ctx context.Context, id, passwordHash string, audit *AuditEntry,
 ) error {
-	_, err := db.SetUserPasswordKeepingSession(ctx, id, passwordHash, "", audit)
+	_, err := db.SetUserPasswordKeepingSession(ctx, id, passwordHash, "", true, audit)
 	return err
 }
 
 // SetUserPasswordKeepingSession changes a password, revokes every session of the user except
-// keepSessionID, and records the change atomically. Only the owner may change the owner's
+// keepSessionID, and records the change atomically. changeRequired is true when the password was
+// not chosen by the account's owner. Only the owner may change the owner's
 // password; anyone else gets ErrOwnerProtected. It returns the ids of the sessions it
 // revoked, so the caller can close the connections they held.
 func (db *DB) SetUserPasswordKeepingSession(
-	ctx context.Context, id, passwordHash, keepSessionID string, audit *AuditEntry,
+	ctx context.Context, id, passwordHash, keepSessionID string, changeRequired bool, audit *AuditEntry,
 ) ([]string, error) {
 	var revoked []string
 	err := db.inTx(ctx, "set user password", func(tx *sql.Tx) error {
@@ -403,6 +426,9 @@ func (db *DB) SetUserPasswordKeepingSession(
 			}
 		}
 		if err := setUserPassword(ctx, tx, id, passwordHash); err != nil {
+			return err
+		}
+		if err := setPasswordChangeRequired(ctx, tx, id, changeRequired); err != nil {
 			return err
 		}
 		ids, err := otherSessionIDs(ctx, tx, id, keepSessionID)
@@ -450,7 +476,8 @@ func otherSessionIDs(ctx context.Context, tx *sql.Tx, userID, keepSessionID stri
 // so this bypasses the API entirely (09 §6).
 func (db *DB) SetUserPasswordByUsername(ctx context.Context, username, passwordHash string) error {
 	res, err := db.Writer.ExecContext(ctx,
-		`UPDATE users SET password_hash = ? WHERE username = ?`, passwordHash, username)
+		`UPDATE users SET password_hash = ?, password_change_required = 0 WHERE username = ?`,
+		passwordHash, username)
 	if err != nil {
 		return fmt.Errorf("reset password for %s: %w", username, err)
 	}

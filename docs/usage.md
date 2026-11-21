@@ -81,10 +81,11 @@ The **Administration** menu groups its pages under four headings:
 | **Advanced**     | [Export installation](operations.md#move-to-a-new-host), [Encryption keys](operations.md#rotate-encryption-keys)                                                 |
 
 Each page is shown only to accounts that may use it, and a heading appears only when
-the account can see something under it.
+the account can see something under it. Opening one of these pages by its address without
+access shows **Page not found**.
 
 The account menu, named after your username, shows who you are signed in as, then
-**Change password**, **Date and time**, **Report an issue** and **Sign out**.
+**Change password**, **Signed-in devices**, **Date and time**, **Report an issue** and **Sign out**.
 **Report an issue** opens a new issue on the project's GitHub page in a new tab.
 **Sign out** opens the sign-in page. When the panel
 [signs in through a reverse proxy](#sign-in-with-single-sign-on), it opens the SSO gateway's
@@ -95,6 +96,15 @@ logout page if the operator set one, and otherwise the gateway signs you straigh
 A tab that was already open shows **Valmin was updated** at the top of the page. Choose
 **Reload** to use the new version. Until you do, the next link you follow loads the new
 version in full. A form with unsaved changes still asks before you leave.
+
+### How saving works
+
+Full-page editors, such as server settings, mod configuration and the Discord bot, show a
+bar at the bottom of the page while something differs, with **Discard changes** and a save
+button. A card that holds its own settings, such as auto-stop, the watchdog, backup
+settings or a player list, keeps its save button at the card's foot. Once something
+differs, **Unsaved changes** and **Discard changes** appear beside it. Switches that act
+at once, such as pausing a schedule, have no save button.
 
 ## Create a server
 
@@ -199,6 +209,12 @@ server name, world name, password and other launch settings exactly as the conta
 was created. Valmin checks them against the container and refuses values that do not
 match. Recovery never stops, recreates, copies or changes the container or its files.
 
+A container can't be recovered when the image it was created from has been removed, or when
+its server's files are gone from the data directory. The page then says which, and offers
+**Remove container**. Removing it deletes the container and frees its ports; any files left
+in the data directory stay where they are. A running container is refused, since removing it
+would skip the world save: stop it on the host first with `docker stop --time 120 <name>`.
+
 ## Run a server
 
 ### Start, stop and restart
@@ -229,6 +245,10 @@ two different badges:
   restarts.
 - **pending restart**: saved mod configuration, mod changes or a restored setup are
   waiting for the next start. This one is informational and never raises an alert.
+
+**pending restart** shows only on a running server, since a stopped one starts with the saved
+changes. The matching notice on the overview, Mods, Mod config and Settings pages shows only on a
+running server, and only to someone who may restart it.
 
 ### The overview
 
@@ -347,6 +367,9 @@ The overview shows one red alert at a time: while a server needs a check, or its
 did not finish, the unconfirmed-stop alert waits.
 
 ### Search and copy the console log
+
+Each console line starts with its time. The first line, and the first line of each new day,
+also shows the date, so a log that spans several days says where each day begins.
 
 The console has a search box above the log. It matches case-insensitively, as plain
 text, among the lines the browser holds: at most 5,000 rows, which include the startup
@@ -513,7 +536,8 @@ list, and keeps the answer for an hour.
 On a modded server, **Test an update on a copy** on the overview shows what an update would
 do before anything on the server changes. It needs permission to clone, update and manage
 mods, which administrators have. Choose whether to try the new game build, the pending mod
-updates, or both, and choose **Test on a copy**.
+updates, or both, and choose **Test on a copy**. When the chosen parts have nothing to try,
+the test is refused instead of copying the server for nothing.
 
 Valmin then:
 
@@ -614,11 +638,12 @@ current world is backed up first.
 
 ### Worlds on disk
 
-Under the backup history, **Worlds on disk** lists every world in the server's save
-directory with its size. The world the server loads is marked, and a world missing its
-header or data file is marked incomplete. If the world the server is set to load is
-not there, the page says so: backups refuse until the server creates it or you import
-one under that name.
+In its own card under the backup history, **Worlds on disk** lists every world in the
+server's save directory with its size. The world the server loads is marked, and a world
+missing its header or data file is marked incomplete. An empty save directory, as on a server
+that has never started, is simply described as empty. If other worlds are there but not the
+one the server is set to load, the page warns: backups refuse until the server creates it or
+you import one under that name.
 
 **Load this one instead** replaces the loaded world with another world from the list.
 The game's own rolling saves are listed separately under **Game backups**, newest first,
@@ -856,7 +881,8 @@ If the loader says it could not load a mod, that mod's row turns red and shows t
 loader's message, such as a missing dependency or an error from the mod's own
 code. The alert at the top of the page names every mod that failed. **Not loading**
 means the loader did not mention the mod at all. Check the loader log for that
-mod's name.
+mod's name. A mod installed after the server's last start is not judged by that start's
+report; its row says **loads on next start** until the server starts again.
 
 ### Tell players which mods they need
 
@@ -868,7 +894,8 @@ The **Player modpack** tab then lists every mod labelled for clients, with the
 dependencies they need, pinned to the versions the server runs. Unlabelled mods are
 left out and named, so nothing is guessed. If a client mod needs one labelled
 **Server only**, or one that is no longer in the catalogue, the tab names the conflict
-and the list cannot be exported until it is fixed.
+and the list cannot be exported until it is fixed. A list with no mods labelled for clients
+cannot be exported or uploaded either.
 
 **Download client list** saves a profile file that r2modman, Gale and Thunderstore
 Mod Manager can import. It carries package names and versions only. Those managers
@@ -950,8 +977,10 @@ which some mods accept, has to lose its comments to be saved from the panel. Man
 running server often takes effect at once.
 
 The **Raw text** tab edits the whole file as text, for changes the form cannot show,
-such as comments or settings the mod does not describe. It has no validation. It
-compares line by line against the chosen version. Save or discard form changes before
+such as comments or settings the mod does not describe. Saving refuses a line that is not
+a `Key = value` setting, a `[Section]` header or a `#` comment, and names the line. A file
+that already held such lines is a mod's own format and is saved unchecked. A file with
+Windows line endings keeps them. It compares line by line against the chosen version. Save or discard form changes before
 switching to it. Raw editing needs its own permission, `config.raw`.
 
 If the file changed after you opened it, for example because the mod rewrote it,
@@ -1181,7 +1210,7 @@ are installed on the server too, so check the list in the preview.
 The preview lists the server settings, the pinned mods and the config files. For a code,
 each config file is shown with the settings it changes, and a setting that looks like a
 token or a webhook is marked **looks secret**. A mod no longer in the catalogue is marked,
-and problems that block the template are listed at the top. Choose a panel name and password, then choose **Create server**. When setup finishes, the panel opens the new server.
+and problems that block the template are listed at the top. Choose a panel name and password, then choose **Create server**. The name starts as the template's, with a number added when a server already has it. When setup finishes, the panel opens the new server.
 
 Valmin downloads the game, installs each pinned mod in turn, then writes the
 configuration. A code's settings are applied over the config files the mods create; a
@@ -1250,6 +1279,12 @@ already chosen, or says that no servers exist yet. After you create an administr
 says administrators reach every server and need no server access. Resetting a password
 shows only the new password. Only the owner, the account created at first-run setup, can
 reset the owner's password.
+
+A password you generate or reset is chosen by you, not by the account's owner, so that
+person is sent to **Change password** after signing in with it and has to choose their own
+before the panel opens anything else. The panel's pages enforce this; the API does not refuse
+other requests for it. An account created from an invite, one recovered from the command line,
+and a member signed in by a [trusted proxy](#sign-in-with-single-sign-on) are not asked.
 
 Making someone an administrator, disabling their sign-in and resetting their password each
 ask you to confirm first, and each ends that account's sessions. Changing an administrator
@@ -1339,11 +1374,20 @@ minute, whether or not the current password was right. An administrator resettin
 password from **Users** signs you out everywhere, including this browser. If you cannot
 sign in at all, see [reset an account password](troubleshooting.md#reset-an-account-password).
 
+### See where you are signed in
+
+Open the account menu and choose **Signed-in devices**. The page lists each browser or
+device signed in to your account, with its address, its browser as it reported itself, when
+it was last active and when it signed in. This browser is marked. Choose **Sign out** on
+another and confirm: it stops being signed in at once and has to sign in again. By default a session
+lasts up to 30 days, and ends after a day without use. The page is `/account/sessions`.
+
 ### Set your time zone and time format
 
 Open the account menu and choose **Date and time**. Pick a zone from the list, such as
 `Europe/Berlin`, and save. The panel then shows times in that zone, and new schedules run
-in it. Existing schedules keep their zone until you change their time. The page is
+in it. Existing schedules keep their zone until you move them on
+[Maintenance](operations.md#schedule-maintenance). The page is
 `/account/date-time`.
 
 Under the zone, **Clock** chooses a 24-hour or 12-hour clock and **Date** chooses day, month,
@@ -1433,6 +1477,7 @@ Select **Add rule** and choose the event:
 | Server status          | **Stopped unexpectedly**              | A server stopped or restarted on its own: a crash, running out of memory or a host reboot. Also a server the [watchdog](operations.md#restart-a-hung-server) found hung. |
 | Server status          | **Server updated**                    | A game update installed a new build, or applying tested updates updated mods. |
 | Server status          | **Power cut soon**                    | A planned power cut is close: players are being warned. Administration page only. |
+| Server status          | **Sign-ins blocked**                  | An account had too many failed sign-ins from anywhere and the panel is refusing it for a short while. At most once an hour per account, and only for an account that exists. Administration page only. |
 | Problems               | **Crash loop**                        | A server is crashing repeatedly.                                     |
 | Problems               | **Server error**                      | A server is in an error state and needs a check.                     |
 | Problems               | **Unclean stop**                      | A server stopped before its world finished saving.                   |
@@ -1593,7 +1638,7 @@ says so.
 
 `/start` starts a stopped server; with several linked
 servers, pick one from the suggestions. The reply changes to say when the server
-is online, or that it failed; the reason stays in the panel's job history. Together with
+is online, or that it failed; the reason stays under Operations on the server's overview in the panel. Together with
 [auto-stop](operations.md#stop-a-server-when-nobody-plays), players can start
 an empty server themselves when they want to play.
 
@@ -1613,7 +1658,7 @@ allows `/start`. With several linked servers, pick one from the suggestions.
   that the server restarts or stops when all of them have left, or in 5 minutes at the
   latest, and the command waits for that; `wait` sets the minutes, from 0 to 60. The warning
   needs an RCON mod on the server; without one the wait still applies. With `wait:0` the
-  server restarts or stops at once. The wait shows in the panel's job history, where you can
+  server restarts or stops at once. The wait shows under Operations in the panel, where you can
   cancel it.
 - `/backup` backs up the server's world. A stopped server is backed up at once. A running
   server stops for the backup and starts again, so players are warned and waited for first,
@@ -1630,7 +1675,7 @@ allows `/start`. With several linked servers, pick one from the suggestions.
   runs.
 
 A reply follows its job for 14 minutes, the longest Discord lets it be edited. A job that runs
-longer finishes in the panel, where its job history and
+longer finishes in the panel, where Operations on the server's overview and
 [notifications](#get-notified) report it. To keep admins informed in Discord, send
 notifications to a private admin channel: add its webhook as a shared channel under
 **Notifications** and a rule for the events you want, such as failed jobs, alerts or

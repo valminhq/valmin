@@ -747,7 +747,7 @@
 		<!-- ADR-012: the mods on disk and the mods in memory have diverged, and only a restart
 		     closes that. Said here as well as on the server page because this is the screen
 		     that just caused it. -->
-		<RestartNotice {instance} />
+		<RestartNotice {instance} canRestart={session.allowed(id).includes(actions.restart)} />
 	{/if}
 
 	{#if jobId}
@@ -888,7 +888,8 @@
 											class="size-4 transition-transform group-open:rotate-90 motion-reduce:transition-none"
 										/>
 										{dependencies.length}
-										{dependencies.length === 1 ? 'dependency' : 'dependencies'} came with them
+										{dependencies.length === 1 ? 'dependency' : 'dependencies'} came with
+										{chosen.length === 1 ? 'it' : 'them'}
 									</summary>
 									<ul class="divide-y border-t">
 										{#each dependencies as mod (mod.full_name)}
@@ -1271,6 +1272,8 @@
 					<CircleCheck class="size-3" />
 					loaded
 				</span>
+			{:else if mod.load_status === 'pending'}
+				<span class="text-xs text-muted-foreground">loads on next start</span>
 			{/if}
 		</div>
 		{#if mod.load_status === 'failed' && mod.load_error}
@@ -1467,23 +1470,25 @@
 				{#each pending.nodes as node (`${node.full_name}:${node.source}`)}
 					{@const replaces =
 						!node.no_op && node.from_version !== '' && node.from_version !== node.version}
-					<li class="flex flex-wrap items-center gap-2">
-						<span class="font-medium">{node.full_name}</span>
-						<span class={['tabular-nums', sourceText[node.source] ?? 'text-muted-foreground']}>
-							{replaces ? `${node.from_version} → ` : ''}{node.version}
+					<li class="flex flex-wrap items-center gap-x-2 gap-y-1">
+						<span class="font-medium wrap-anywhere">{node.full_name}</span>
+						<span class="inline-flex flex-wrap items-center gap-2">
+							<span class={['tabular-nums', sourceText[node.source] ?? 'text-muted-foreground']}>
+								{replaces ? `${node.from_version} → ` : ''}{node.version}
+							</span>
+							<Badge variant="outline" class={sourceBadge[node.source]}>
+								{sourceLabel[node.source] ?? node.source}
+							</Badge>
+							{#if node.no_op}
+								<Badge variant="secondary">already installed</Badge>
+							{:else if node.change === 'downgrade'}
+								<Badge variant="destructive">downgrade</Badge>
+							{:else if replaces}
+								<Badge variant="outline">update</Badge>
+							{:else if node.transitive}
+								<Badge variant="outline">dependency</Badge>
+							{/if}
 						</span>
-						<Badge variant="outline" class={sourceBadge[node.source]}>
-							{sourceLabel[node.source] ?? node.source}
-						</Badge>
-						{#if node.no_op}
-							<Badge variant="secondary">already installed</Badge>
-						{:else if node.change === 'downgrade'}
-							<Badge variant="destructive">downgrade</Badge>
-						{:else if replaces}
-							<Badge variant="outline">update</Badge>
-						{:else if node.transitive}
-							<Badge variant="outline">dependency</Badge>
-						{/if}
 						{#if replaces && node.change !== 'downgrade'}
 							<div class="basis-full">
 								<ChangelogToggle

@@ -293,7 +293,7 @@ func toInstalledModView(m *store.InstanceMod, pkg *store.ModPackage, load *insta
 	// A disabled mod is not meant to load, so there is nothing to verify (Q37).
 	var status, loadErr *string
 	if m.Enabled {
-		status, loadErr = loadStatus(m.FullName, manifest, load)
+		status, loadErr = loadStatus(m, manifest, load)
 	}
 	configs, configFiles := 0, []string{}
 	for _, e := range manifest {
@@ -329,12 +329,18 @@ func withPack(view *installedModView, row *store.InstanceMod, members map[string
 }
 
 // loadStatus reports whether one mod loaded, and the loader's line when it said it could not.
-// Null means no answer: the package places no plugin, or there is no chainloader run to read yet.
-// An admin who has not restarted since installing must not be told the mod is not loading.
+// Null means no answer: the package places no plugin, or there is no chainloader run to read
+// yet. A plugin installed after the last run is "pending", since that run could not load it.
 func loadStatus(
-	fullName string, manifest []installer.ManifestEntry, load *instance.PluginLoad,
+	m *store.InstanceMod, manifest []installer.ManifestEntry, load *instance.PluginLoad,
 ) (status, reason *string) {
-	st, why := load.ModStatus(fullName, installer.Paths(manifest))
+	paths := installer.Paths(manifest)
+	if load != nil && instance.IsPlugin(paths) {
+		if at, err := store.ParseTime(m.InstalledAt); err == nil && at.After(load.ObservedAt) {
+			return new(loadPending), nil
+		}
+	}
+	st, why := load.ModStatus(m.FullName, paths)
 	if st == "" {
 		return nil, nil
 	}
@@ -344,6 +350,9 @@ func loadStatus(
 	}
 	return &s, nil
 }
+
+// loadPending is the load status of a plugin installed after the last chainloader run.
+const loadPending = "pending"
 
 func toPluginLoadView(load *instance.PluginLoad) *pluginLoadView {
 	if load == nil {

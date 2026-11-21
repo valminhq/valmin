@@ -167,26 +167,71 @@ function offered(f: CronForm): boolean {
 
 /**
  * The builder controls that write expr, or a hand-written expression when none do. Only an
- * expression buildCron writes back character for character is read into the controls, so
- * nothing is ever interpreted that the builder did not produce itself.
+ * expression buildCron writes back is read into the controls, so nothing is interpreted that
+ * the builder could not have produced. A leading zero left off the minute or hour of a daily,
+ * weekly or monthly expression does not matter.
  */
 export function readCron(expr: string): Partial<CronForm> {
 	const pad = (n: string) => n.padStart(2, '0');
 	let read: Partial<CronForm> | null = null;
+	let written = expr;
 	let m: RegExpExecArray | null;
-	if ((m = /^(\d{2}) (\d{2}) \* \* \*$/.exec(expr))) {
-		read = { every: 'day', atTime: `${m[2]}:${m[1]}` };
-	} else if ((m = /^(\d{2}) (\d{2}) \* \* (\d(?:,\d)*)$/.exec(expr))) {
-		read = { every: 'days', atTime: `${m[2]}:${m[1]}`, weekdays: m[3].split(',') };
-	} else if ((m = /^(\d{2}) (\d{2}) (\d{1,2}) \* \*$/.exec(expr))) {
-		read = { every: 'month', atTime: `${m[2]}:${m[1]}`, monthDay: m[3] };
+	if ((m = /^(\d{1,2}) (\d{1,2}) \* \* \*$/.exec(expr))) {
+		read = { every: 'day', atTime: `${pad(m[2])}:${pad(m[1])}` };
+	} else if ((m = /^(\d{1,2}) (\d{1,2}) \* \* (\d(?:,\d)*)$/.exec(expr))) {
+		read = { every: 'days', atTime: `${pad(m[2])}:${pad(m[1])}`, weekdays: m[3].split(',') };
+	} else if ((m = /^(\d{1,2}) (\d{1,2}) (\d{1,2}) \* \*$/.exec(expr))) {
+		read = { every: 'month', atTime: `${pad(m[2])}:${pad(m[1])}`, monthDay: m[3] };
 	} else if ((m = /^(\d{1,2}) (\*|\d{1,2})\/(\d{1,2}) \* \* \*$/.exec(expr))) {
 		const first = m[2] === '*' ? '0' : m[2];
 		read = { every: 'hours', everyHours: m[3], startAt: `${pad(first)}:${pad(m[1])}` };
 	}
+	if (read && read.every !== 'hours' && m)
+		written = `${pad(m[1])} ${pad(m[2])}${expr.slice(m[1].length + m[2].length + 1)}`;
 	const form = { ...defaultCronForm(), ...read };
-	if (read && offered(form) && buildCron(form) === expr) return read;
+	if (read && offered(form) && buildCron(form) === written) return read;
 	return { every: 'custom', custom: expr };
+}
+
+/** A list of words joined as prose: "a", "a and b", "a, b and c". */
+function joinWords(words: string[]): string {
+	return words.length < 2 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`;
+}
+
+/** A day of the month with its ordinal suffix: 1st, 2nd, 11th, 22nd. */
+export function ordinal(n: number): string {
+	const tens = n % 100;
+	const suffix = tens >= 11 && tens <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th');
+	return `${n}${suffix}`;
+}
+
+/** What the builder's controls schedule, in words. It is empty for a written expression, which
+ * only the daemon can interpret. */
+export function describeCron(f: CronForm): string {
+	if (f.every === 'hours') {
+		const n = Number(f.everyHours);
+		const times = Array.from(
+			{ length: 24 / n },
+			(_, i) => `${String(firstHourOf(f) + i * n).padStart(2, '0')}:${f.startAt.slice(3, 5)}`
+		);
+		return `Every ${n} hour${n === 1 ? '' : 's'} — ${times.join(', ')}`;
+	}
+	if (f.every === 'days') {
+		const days = weekdayChoices.filter((d) => f.weekdays.includes(d.value));
+		if (days.length === 0) return 'Choose at least one day';
+		if (days.length === 7) return `Every day at ${f.atTime}`;
+		return `Every ${joinWords(days.map((d) => d.label))} at ${f.atTime}`;
+	}
+	if (f.every === 'month')
+		return `Every month on the ${ordinal(Number(f.monthDay))} at ${f.atTime}`;
+	if (f.every === 'day') return `Every day at ${f.atTime}`;
+	return '';
+}
+
+/** A stored expression in words, or '' when it is not one the builder writes. */
+export function describeExpression(expr: string): string {
+	const read = readCron(expr);
+	return read.every === 'custom' ? '' : describeCron({ ...defaultCronForm(), ...read });
 }
 
 interface Page<T> {

@@ -50,6 +50,40 @@ describe('summaries of recorded actions', () => {
 		],
 		['delete without the flag', 'instances.delete', {}, 'Alex deleted Viking World'],
 		[
+			'clone',
+			'instance.clone',
+			{ destination_name: 'Viking World copy' },
+			'Alex cloned Viking World as Viking World copy'
+		],
+		['password viewed', 'instances.password.read', {}, 'Alex viewed the password of Viking World'],
+		[
+			'user created',
+			'users.create',
+			{ username: 'bjorn', role: 'member' },
+			'Alex created the user bjorn as member'
+		],
+		[
+			'user changed',
+			'users.update',
+			{ username: 'bjorn', role: 'admin', disabled: false },
+			'Alex changed bjorn to admin, enabled'
+		],
+		['user deleted', 'users.delete', { username: 'bjorn' }, 'Alex deleted the user bjorn'],
+		[
+			'password reset',
+			'users.password.reset',
+			{ username: 'bjorn' },
+			'Alex reset the password of bjorn'
+		],
+		['device signed out', 'users.session.revoke', {}, 'Alex signed one of their devices out'],
+		[
+			'blocked sign-ins',
+			'auth.login.blocked',
+			{ username: 'bea' },
+			'Alex blocked sign-ins to bea after repeated failures'
+		],
+		['deep checks', 'panel.settings', { operation: 'deep_checks' }, 'Alex ran the deep checks'],
+		[
 			'create from scratch',
 			'instances.create',
 			{ name: 'Fresh', source: 'new' },
@@ -302,7 +336,7 @@ describe('summaries of recorded actions', () => {
 					}
 				]
 			},
-			'Alex changed the chain schedule on Viking World: steps to "wait 5 minutes → stop"'
+			'Alex changed the sequence schedule on Viking World: steps to "wait 5 minutes → stop"'
 		],
 		[
 			'a removed schedule',
@@ -314,7 +348,7 @@ describe('summaries of recorded actions', () => {
 			'a schedule run by hand',
 			'schedules.run',
 			{ kind: 'chain' },
-			'Alex ran the chain schedule now on Viking World'
+			'Alex ran the sequence schedule now on Viking World'
 		]
 	];
 
@@ -397,8 +431,13 @@ describe('entries the summary cannot read', () => {
 		],
 		[
 			'an old-format entry of an existing action',
-			{ action: 'users.password.reset', detail: '{"target":"u-2"}' },
-			'Alex: Users password reset: {"target":"u-2"}'
+			{ action: 'users.password.change', detail: '{"target":"u-2"}' },
+			'Alex: Password changed: {"target":"u-2"}'
+		],
+		[
+			'a panel operation without a sentence',
+			{ action: 'panel.settings', detail: '{"operation":"export_download"}' },
+			'Alex: Panel settings: {"operation":"export_download"}'
 		]
 	];
 
@@ -542,8 +581,10 @@ describe('action labels', () => {
 		['instances.mods.install', 'Mod installed'],
 		['schedules.delete', 'Schedule deleted'],
 		['schedules.run', 'Schedule run now'],
-		['users.password.reset', 'Users password reset'],
-		['users.password.change', 'Users password changed'],
+		['users.password.reset', 'Password reset'],
+		['users.password.change', 'Password changed'],
+		['users.session.revoke', 'Device signed out'],
+		['auth.login.blocked', 'Sign-ins blocked'],
 		['instance.adopt', 'Instance adopt'],
 		['instances.players.banned_players.write', 'Instances players banned players write'],
 		['', '']

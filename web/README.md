@@ -14,7 +14,7 @@ npm ci
 npm run dev -- --strictPort
 ```
 
-Vite forwards `/api`, including WebSockets, to `http://localhost:8080`. Set
+Vite forwards `/api`, including WebSockets, to `http://127.0.0.1:8080`. Set
 `VALMIN_DEV_PANEL` to change that target. The daemon's
 `VALMIN_SERVER_EXTERNAL_URL` must match the browser origin.
 

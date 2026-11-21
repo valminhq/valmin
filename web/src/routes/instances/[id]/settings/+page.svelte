@@ -1,10 +1,12 @@
 <script lang="ts">
+	import { socket } from '#lib/socket/index.svelte.js';
 	import { Textarea } from '#lib/components/ui/textarea/index.js';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { ApiError } from '#lib/api/errors.js';
+	import { passwordInName, validJoinHost } from '#lib/launch-rules.js';
 	import {
 		actions,
 		GAME_BACKUPS_MAX,
@@ -29,6 +31,7 @@
 	import Field, { focusFirstInvalid } from '#lib/components/field.svelte';
 	import Problem from '#lib/components/problem.svelte';
 	import RestartNotice from '#lib/components/restart-notice.svelte';
+	import SaveBar from '#lib/components/save-bar.svelte';
 	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import {
 		manifest,
@@ -104,6 +107,8 @@
 	$effect(() => {
 		void load();
 	});
+	// A first read that failed while the panel was unreachable is tried again when it comes back.
+	$effect(() => socket.onConnected(() => void (!instance && load())));
 
 	/** Built in the browser rather than served as a file: the endpoint answers JSON, and a
 	 * blob keeps the one download from needing a second representation on the daemon. */
@@ -266,12 +271,18 @@
 
 	unsaved(() => changed.length > 0);
 
-	// The daemon's own rules on names and passwords come back beside each field; only the
-	// minimum length it serves is checked here.
+	// The daemon checks every rule again and its answers come back beside each field; the ones
+	// it serves or that are cheap to copy are checked here first.
 	const localProblems = $derived.by(() => {
 		const problems: Record<string, string> = {};
 		if (password && password.length < minPassword) {
 			problems.password = `At least ${minPassword} characters.`;
+		} else if (passwordInName(password, serverName.trim(), instance?.world_name ?? '')) {
+			problems.password = 'Must not appear inside the server name or the world name.';
+		}
+		if (joinHost.trim() !== '' && !validJoinHost(joinHost.trim())) {
+			problems.join_host =
+				'Enter a host name or IP address without a port or http://, such as play.example.com.';
 		}
 		if (serverName.trim() === '') problems.server_name = 'Players need a name to find.';
 		if (panelName.trim() === '') problems.name = 'Give this server a name.';
@@ -373,9 +384,12 @@
 	{#if loading}
 		<p class="text-sm text-muted-foreground">Loading…</p>
 	{:else if !instance}
-		<p class="text-sm text-muted-foreground">This server is not here.</p>
+		<!-- A failed read is explained by the problem above. -->
+		{#if !failure}
+			<p class="text-sm text-muted-foreground">This server is not here.</p>
+		{/if}
 	{:else}
-		<RestartNotice {instance} />
+		<RestartNotice {instance} canRestart={session.allowed(id).includes(actions.restart)} />
 
 		{#if !canEdit && !canEditLimits}
 			<p class="text-sm text-muted-foreground" data-testid="settings-blocked">
@@ -777,28 +791,16 @@
 			</div>
 
 			{#if (canEdit || canEditLimits) && (changed.length > 0 || saving)}
-				<div
-					class="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t bg-background/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6"
+				<SaveBar
+					busy={saving}
+					disabled={!ready}
+					ondiscard={() => instance && adopt(instance)}
+					onsave={submit}
 				>
-					<p class="text-sm text-muted-foreground">
-						{changed.length}
-						{changed.length === 1 ? 'setting' : 'settings'} changed. The server picks them up on its next
-						start.
-					</p>
-					<div class="flex gap-2">
-						<Button
-							variant="ghost"
-							size="sm"
-							disabled={saving}
-							onclick={() => instance && adopt(instance)}
-						>
-							Discard changes
-						</Button>
-						<Button size="sm" disabled={!ready} onclick={submit}>
-							{saving ? 'Saving…' : 'Save changes'}
-						</Button>
-					</div>
-				</div>
+					{changed.length}
+					{changed.length === 1 ? 'setting' : 'settings'} changed. The server picks
+					{changed.length === 1 ? 'it' : 'them'} up on its next start.
+				</SaveBar>
 			{/if}
 		</div>
 
@@ -807,7 +809,7 @@
 				<Card.Header>
 					<Card.Title>Manage server</Card.Title>
 					<Card.Description
-						>These take effect at once. Save changes does not apply to them.</Card.Description
+						>These take effect at once, apart from the settings above.</Card.Description
 					>
 				</Card.Header>
 				<Card.Content class="grid divide-y">
@@ -978,7 +980,7 @@
 				name={instance.name}
 				title="Delete {instance.name}?"
 				confirmLabel="Delete server"
-				description="The container and this server's settings are removed. Its worlds and backup archives stay on disk, but no server lists them again; copy out what you want to keep."
+				description="The container and this server's settings are removed. Its worlds and backup archives stay on disk. Another server can import a world from these archives under Backups, Import from a backup; the worlds themselves are listed nowhere, so copy out what you want to keep."
 				onconfirm={remove}
 			/>
 		{/if}

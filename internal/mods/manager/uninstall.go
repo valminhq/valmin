@@ -72,7 +72,7 @@ func runUninstall(db *store.DB, inst *store.Instance, payload UninstallPayload) 
 			return rollbackUninstall(ctx, inst, pkgs, configs, backupDir, err)
 		}
 
-		h.Progress(ctx, 100, fmt.Sprintf("removed %d packages", len(pkgs)))
+		h.Progress(ctx, 100, "Removed "+packageCount(len(pkgs)))
 		return jobs.Outcome{
 			Status:   jobs.StatusSucceeded,
 			OnFinish: finishUninstall(inst.ID, payload.FullNames),

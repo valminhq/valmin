@@ -213,6 +213,16 @@ func (h *Instances) adoptionFacts(
 	if errors.Is(err, runtime.ErrNotFound) {
 		return nil, apierr.New(errcode.NotFound)
 	}
+	if errors.Is(err, runtime.ErrImageNotFound) {
+		if claimed, lookupErr := h.DB.InstanceByContainerID(ctx, containerID); lookupErr != nil {
+			return nil, fmt.Errorf("look up adoption container owner: %w", lookupErr)
+		} else if claimed != nil {
+			return nil, store.ErrInstanceIDTaken
+		}
+		return nil, apierr.New(errcode.ContainerMismatch).With("reason", "image_missing").Msg(
+			"The image this container was created from has been removed, so it cannot be recovered. Remove the container instead.").
+			Wrap(err)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("inspect adoption candidate: %w", err)
 	}
@@ -273,8 +283,9 @@ func (h *Instances) adoptionDiskFacts(instanceID, worldName string) (*adoptionDi
 	localDataDir := instance.DataDir(h.Cfg.Data.Root, instanceID)
 	rootInfo, err := os.Lstat(localDataDir)
 	if err != nil || !rootInfo.IsDir() || rootInfo.Mode()&os.ModeSymlink != 0 {
-		return nil, fmt.Errorf("adoption instance directory is missing or invalid: %w",
-			instance.ErrContainerMismatch)
+		return nil, apierr.New(errcode.ContainerMismatch).With("reason", "data_missing").Msg(
+			"This server's files are gone from the data directory, so it cannot be recovered. Remove the container instead.").
+			Wrap(fmt.Errorf("adoption instance directory is missing or invalid: %w", instance.ErrContainerMismatch))
 	}
 	for _, dir := range []string{"server", "worlds", "logs"} {
 		info, err := os.Lstat(filepath.Join(localDataDir, dir))
@@ -360,9 +371,14 @@ func stringPointer(value string) *string {
 	return &value
 }
 
+// writeAdoptionError answers an adoption failure, keeping an error that already names its own
+// code and message.
 func writeAdoptionError(w http.ResponseWriter, r *http.Request, err error) {
 	var conflict *store.JobConflict
+	var answered *apierr.Error
 	switch {
+	case errors.As(err, &answered):
+		apierr.Write(w, r, answered)
 	case errors.As(err, &conflict):
 		writeJobSubmitError(w, r, err)
 	case errors.Is(err, instance.ErrContainerMismatch):

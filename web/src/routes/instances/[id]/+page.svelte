@@ -244,7 +244,7 @@
 			onchange={load}
 		/>
 
-		<RestartNotice instance={inst} />
+		<RestartNotice instance={inst} canRestart={session.allowed(id).includes(actions.restart)} />
 
 		<MaintenanceNotice instanceId={inst.id} />
 
@@ -275,7 +275,7 @@
 			</Alert.Root>
 		{/if}
 
-		<div class="grid gap-4 md:grid-cols-2">
+		<div class="grid gap-4 md:grid-cols-2 {inst.state === 'running' ? '' : 'items-start'}">
 			<Card.Root>
 				<Card.Header>
 					<Card.Title>Resources</Card.Title>
@@ -320,15 +320,18 @@
 								value={traffic(stats.latest)}
 							/>
 							<!--
-								Null reads "unknown", never 0: the daemon sends null when it cannot tell, and
+								Null reads as a muted dash, never 0: the daemon sends null when it cannot tell, and
 								drawing that as an empty server is the failure the null exists to prevent (E7).
 								No memory alarm either: the cache term has not been measured (`14 §4.3`).
 							-->
 							<div class="flex items-baseline justify-between">
 								<span class="text-xs text-muted-foreground">Players</span>
-								<span class="text-lg font-semibold tabular-nums">
-									{stats.latest?.players ?? 'unknown'}
-								</span>
+								<span
+									class={[
+										'text-lg tabular-nums',
+										stats.latest?.players == null ? 'text-muted-foreground' : 'font-semibold'
+									]}>{stats.latest?.players ?? '—'}</span
+								>
 							</div>
 						{/if}
 						{#if disk}

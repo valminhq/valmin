@@ -43,6 +43,8 @@ var (
 	// KindPowerCutSoon is a planned power cut close enough that every running server is about
 	// to stop.
 	KindPowerCutSoon = Kind{"power_cut_soon"}
+	// KindSignInsBlocked is an account whose sign-ins were refused after repeated failures.
+	KindSignInsBlocked = Kind{"sign_ins_blocked"}
 	// KindServerStarted and KindServerStopped report a start or stop the panel made.
 	KindServerStarted = Kind{"server_started"}
 	KindServerStopped = Kind{"server_stopped"}
@@ -69,7 +71,7 @@ var (
 func ParseKind(name string) (Kind, bool) {
 	for _, k := range []Kind{
 		KindTest, KindInstanceDown, KindUpdateAvailable, KindBackupFailed,
-		KindAlertOpened, KindAlertResolved, KindPowerCutSoon,
+		KindAlertOpened, KindAlertResolved, KindPowerCutSoon, KindSignInsBlocked,
 		KindServerStarted, KindServerStopped, KindGameUpdated, KindUpdateTestFinished,
 		KindPlayerJoined, KindPlayerLeft, KindBossDefeated, KindBossFightStarted, KindBossFightEnded,
 		KindRaidStarted, KindRaidEnded,
@@ -90,6 +92,7 @@ var headline = map[Kind]string{
 	KindAlertOpened:        "Something needs attention",
 	KindAlertResolved:      "Resolved",
 	KindPowerCutSoon:       "Power cut soon: servers are stopping",
+	KindSignInsBlocked:     "Sign-ins blocked after repeated failures",
 	KindServerStarted:      "Server started",
 	KindServerStopped:      "Server stopped",
 	KindGameUpdated:        "Server updated",
@@ -112,6 +115,7 @@ var accent = map[Kind]int{
 	KindAlertOpened:        0xD83C3E,
 	KindAlertResolved:      0x2ECC71,
 	KindPowerCutSoon:       0xF1C40F,
+	KindSignInsBlocked:     0xD83C3E,
 	KindServerStarted:      0x2ECC71,
 	KindServerStopped:      0x95A5A6,
 	KindGameUpdated:        0x5865F2,

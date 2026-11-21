@@ -13,6 +13,7 @@
 	import { Label } from '#lib/components/ui/label/index.js';
 	import { Switch } from '#lib/components/ui/switch/index.js';
 	import Problem from '#lib/components/problem.svelte';
+	import SaveFooter from '#lib/components/save-footer.svelte';
 	import JobProgress from '#lib/components/job-progress.svelte';
 
 	let {
@@ -51,18 +52,18 @@
 		[cold, hot, snapshots].every((n) => n !== undefined && Number.isInteger(n) && n >= 0)
 	);
 	unsaved(() => canSetPolicy && fields !== baseline);
-	$effect(() => {
-		enabled = instance.remote_backup_enabled ?? false;
-		cold = instance.remote_keep_cold ?? 10;
-		hot = instance.remote_keep_hot ?? 5;
-		snapshots = instance.remote_keep_snapshots ?? 10;
-		baseline = JSON.stringify([
+	/** Puts the policy form, and its baseline, on the daemon's row. */
+	function resetPolicy() {
+		const row = [
 			instance.remote_backup_enabled ?? false,
 			instance.remote_keep_cold ?? 10,
 			instance.remote_keep_hot ?? 5,
 			instance.remote_keep_snapshots ?? 10
-		]);
-	});
+		] as const;
+		[enabled, cold, hot, snapshots] = row;
+		baseline = JSON.stringify(row);
+	}
+	$effect(resetPolicy);
 	// Re-read on each state message of the server and on a timer: every 5 s while a copy is
 	// waiting or uploading, otherwise every minute.
 	$effect(() => {
@@ -258,12 +259,13 @@
 						0 keeps every copy in that class. Existing local backups are uploaded only when
 						requested. Pending archives stay protected locally for up to 24 hours.
 					</p>
-					<Button
-						type="submit"
-						class="justify-self-start"
-						disabled={!configured || saving || !valid || fields === baseline}
-						>{saving ? 'Saving…' : 'Save remote policy'}</Button
-					>
+					<SaveFooter
+						saveLabel="Save remote policy"
+						changed={configured && fields !== baseline}
+						busy={saving}
+						invalid={!valid}
+						ondiscard={resetPolicy}
+					/>
 				</form>
 			{/if}
 			{#if configured && copies.length === 0}<p class="text-sm text-muted-foreground">

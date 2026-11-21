@@ -48,7 +48,17 @@ const LABELS: Record<string, string> = {
 	'schedules.update': 'Schedule changed',
 	'schedules.delete': 'Schedule deleted',
 	'schedules.run': 'Schedule run now',
-	'users.password.change': 'Users password changed'
+	'users.password.change': 'Password changed',
+	'users.session.revoke': 'Device signed out',
+	'auth.login.blocked': 'Sign-ins blocked',
+	'users.create': 'User created',
+	'users.update': 'User changed',
+	'users.delete': 'User deleted',
+	'users.password.reset': 'Password reset',
+	'instance.clone': 'Server cloned',
+	'instances.password.read': 'Server password viewed',
+	'panel.settings': 'Panel settings',
+	'orphans.remove': 'Orphan container removed'
 };
 
 const OUTCOMES: Record<AuditOutcome, { label: string; variant: BadgeVariant }> = {
@@ -58,7 +68,8 @@ const OUTCOMES: Record<AuditOutcome, { label: string; variant: BadgeVariant }> =
 	cancelled: { label: 'Cancelled', variant: 'outline' }
 };
 
-const spaced = (name: string) => name.replaceAll('_', ' ');
+/** A schedule or job kind in words; a chain is what the schedule form calls a sequence. */
+const spaced = (name: string) => (name === 'chain' ? 'sequence' : name.replaceAll('_', ' '));
 
 /** A table entry by its own key: an action named like an Object method finds nothing. */
 const own = <T>(table: Record<string, T>, key: string): T | undefined =>
@@ -170,12 +181,14 @@ function configPhrase(row: ChangeRow): string {
 const clip = (raw: string, max = 120) => (raw.length > max ? `${raw.slice(0, max)}…` : raw);
 
 /**
- * Builds the phrase that follows the actor. `server` is the name to say for the server the
+ * Builds the phrase that follows the actor, or "" to fall back to the raw detail. `server` is the name to say for the server the
  * entry is about, empty when there is none; `on` is the same as a trailing " on X".
  */
 type Phrase = (d: Detail, server: string, on: string) => string;
 
 const PHRASES: Record<string, Phrase> = {
+	'orphans.remove': (d) =>
+		`removed the unrecoverable container ${text(d.container_name) || ''}`.trim(),
 	'instances.create': (d) => {
 		const name = text(d.name) || 'a server';
 		return d.source === 'manifest' ? `created ${name} from a template` : `created ${name}`;
@@ -271,7 +284,23 @@ const PHRASES: Record<string, Phrase> = {
 	'schedules.delete': (d, _, on) => {
 		const cron = text(d.cron);
 		return `deleted the ${spaced(text(d.kind)) || 'maintenance'} schedule${cron ? ` (${cron})` : ''}${on}`;
-	}
+	},
+	'instance.clone': (d, s) =>
+		`cloned ${s || 'a server'}${text(d.destination_name) ? ` as ${text(d.destination_name)}` : ''}`,
+	'instances.password.read': (_, s) => `viewed the password of ${s || 'a server'}`,
+	'users.create': (d) =>
+		`created the user ${text(d.username) || '(unnamed)'}${text(d.role) ? ` as ${text(d.role)}` : ''}`,
+	'users.update': (d) =>
+		`changed ${text(d.username) || 'a user'} to ${text(d.role) || 'their role'}, ${
+			d.disabled === true ? 'disabled' : 'enabled'
+		}`,
+	'users.delete': (d) => `deleted the user ${text(d.username) || '(unnamed)'}`,
+	'users.password.reset': (d) => `reset the password of ${text(d.username) || 'a user'}`,
+	'users.session.revoke': () => 'signed one of their devices out',
+	'auth.login.blocked': (d) =>
+		`blocked sign-ins to ${text(d.username) || 'an account'} after repeated failures`,
+	// Only operations with a sentence; the rest keep their raw detail, which names them.
+	'panel.settings': (d) => (d.operation === 'deep_checks' ? 'ran the deep checks' : '')
 };
 
 /**
@@ -280,12 +309,14 @@ const PHRASES: Record<string, Phrase> = {
  * the detail as stored.
  */
 export function describe(entry: AuditEntry): string {
-	const actor = upperFirst(actorName(entry));
+	// A username is kept as written; only the stand-ins for a missing one are capitalised.
+	const actor = entry.actor ?? upperFirst(actorName(entry));
 	const phrase = own(PHRASES, entry.action);
 	const detail = phrase ? parse(entry.detail) : null;
 	if (phrase && detail) {
 		const server = entry.instance ?? (entry.instance_id ? 'a deleted server' : '');
-		return `${actor} ${phrase(detail, server, server ? ` on ${server}` : '')}`;
+		const said = phrase(detail, server, server ? ` on ${server}` : '');
+		if (said) return `${actor} ${said}`;
 	}
 	const raw = entry.detail ? `: ${clip(entry.detail)}` : '';
 	return `${actor}: ${label(entry.action)}${raw}`;

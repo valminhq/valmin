@@ -49,6 +49,22 @@ afterEach(() => {
 });
 
 describe('the server settings screen', () => {
+	// A refused read is a problem to retry, not proof that the server is gone.
+	it('explains a throttled read without calling the server missing', async () => {
+		daemon.on('GET', '/instances/inst-a', () => {
+			const response = envelope(429, 'rate_limited', 'Too many requests. Try again shortly.');
+			response.headers.set('Retry-After', '60');
+			return response;
+		});
+		daemon.on('GET', '/game/options', () => Response.json(gameOptions()));
+		session.permissions = permissions('inst-a', [actions.settings]);
+		render(Page);
+
+		await screen.findByText('Too many requests. Try again shortly.');
+		expect(screen.getByText('You can try again in 60 s.')).toBeTruthy();
+		expect(screen.queryByText('This server is not here.')).toBeNull();
+	});
+
 	// PATCH semantics (`11 §1.1`): absent means unchanged. A form that sent every field would
 	// re-encrypt an untouched password on every save and rewrite settings nobody edited.
 	it('sends only the fields the operator changed', async () => {
@@ -195,7 +211,10 @@ describe('the server settings screen', () => {
 	// A saved launch edit applies on the next start, and the screen says so whenever the
 	// daemon reports the running server is behind.
 	it('shows the restart notice only when the daemon says a restart is needed', async () => {
-		await open([actions.settings], instance({ restart_required: true }));
+		await open(
+			[actions.settings, actions.restart],
+			instance({ state: 'running', restart_required: true })
+		);
 		expect(screen.getByText('Restart to apply settings')).toBeTruthy();
 	});
 

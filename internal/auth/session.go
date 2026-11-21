@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -105,7 +106,8 @@ var ErrProxyAdmin = errors.New("admin accounts cannot sign in through the proxy"
 
 // LoginTrusted creates a session for username, whom a trusted reverse proxy has already
 // authenticated. An unknown name is ErrInvalidCredentials, a disabled account
-// ErrAccountDisabled and an admin ErrProxyAdmin.
+// ErrAccountDisabled and an admin ErrProxyAdmin. Such an account never uses its stored
+// password, so it is no longer asked to replace it.
 func (s *Sessions) LoginTrusted(ctx context.Context, username, ip, userAgent string) (*LoggedIn, error) {
 	rec, err := s.db.UserForLogin(ctx, username)
 	switch {
@@ -117,6 +119,12 @@ func (s *Sessions) LoginTrusted(ctx context.Context, username, ip, userAgent str
 		return nil, ErrAccountDisabled
 	case rec.Role == store.RoleAdmin:
 		return nil, ErrProxyAdmin
+	}
+	if rec.PasswordChangeRequired {
+		if err := s.db.ClearPasswordChangeRequired(ctx, rec.ID); err != nil {
+			return nil, fmt.Errorf("clear password change: %w", err)
+		}
+		rec.PasswordChangeRequired = false
 	}
 	return s.open(ctx, rec, ip, userAgent)
 }
@@ -179,6 +187,48 @@ func (s *Sessions) Logout(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// List returns userID's live sessions, most recently used first.
+func (s *Sessions) List(ctx context.Context, userID string) ([]store.Session, error) {
+	sessions, err := s.db.ListSessionsForUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+	return sessions, nil
+}
+
+// Revoke ends userID's session sessionID, records audit with it, and closes the sockets it held.
+// It returns store.ErrSessionNotFound when the user has no such session.
+func (s *Sessions) Revoke(ctx context.Context, userID, sessionID string, audit *store.AuditEntry) error {
+	if err := s.db.DeleteUserSession(ctx, userID, sessionID, audit); err != nil {
+		return fmt.Errorf("revoke session: %w", err)
+	}
+	s.notifyRevoked(sessionID, "")
+	return nil
+}
+
+// RecordBlockedSignIns writes the audit entry for an account whose sign-ins are being refused
+// after repeated failures, from address. It reports false, and writes nothing, for a name no
+// account has.
+func (s *Sessions) RecordBlockedSignIns(ctx context.Context, username, address string) (bool, error) {
+	rec, err := s.db.UserForLogin(ctx, username)
+	if err != nil {
+		return false, fmt.Errorf("look up user: %w", err)
+	}
+	if rec == nil {
+		return false, nil
+	}
+	detail, err := json.Marshal(map[string]string{"username": username, "address": address})
+	if err != nil {
+		return false, fmt.Errorf("encode audit detail: %w", err)
+	}
+	if err := s.db.WriteAuditLog(ctx, &store.AuditEntry{
+		Action: "auth.login.blocked", Detail: string(detail), IP: address,
+	}); err != nil {
+		return false, fmt.Errorf("record blocked sign-ins: %w", err)
+	}
+	return true, nil
+}
+
 // AnnounceUserRevoked closes the user's live sockets, after the transaction that deleted
 // their session rows has committed (10 §4.1, 14 §6). Role change, disabling and deletion
 // all reach open connections this way.
@@ -209,7 +259,7 @@ func (s *Sessions) ChangePassword(
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}
-	revoked, err := s.db.SetUserPasswordKeepingSession(ctx, rec.ID, hash, keepSessionID, audit)
+	revoked, err := s.db.SetUserPasswordKeepingSession(ctx, rec.ID, hash, keepSessionID, false, audit)
 	if err != nil {
 		return fmt.Errorf("set password: %w", err)
 	}

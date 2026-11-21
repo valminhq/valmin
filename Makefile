@@ -244,6 +244,10 @@ DEV_URL  ?= http://localhost:$(DEV_PORT)
 # mismatch, which together look like a login bug.
 DEV_HOST ?= localhost
 
+# DEV_LISTEN is the daemon's address under `make dev`, and vite's proxy target: loopback by
+# default. Set it to 0.0.0.0:8080 to serve a vite on another machine that sets VALMIN_DEV_PANEL.
+DEV_LISTEN ?= 127.0.0.1:8080
+
 # The daemon runs as uid 10000, the same uid every container runs as (08 §2). Container uids
 # are host uids on a bind mount, so a panel writing as anyone else produces a server/ the
 # game cannot write and a build cache SteamCMD cannot write. Running as your login account
@@ -347,13 +351,14 @@ dev: game-network
 #	non-interactive shell does not have, so `kill %1` silently finds no such job. `exec` makes
 #	$$! the pid of vite itself rather than of the subshell around it. If web/package.json's
 #	`dev` script grows past `vite dev`, this line has to follow it.
-	@( cd $(WEB) && exec ./node_modules/.bin/vite dev --strict-port --host $(DEV_HOST) --port $(DEV_PORT) ) & \
+	@( cd $(WEB) && VALMIN_DEV_PANEL=http://$(DEV_LISTEN) exec ./node_modules/.bin/vite dev --strict-port --host $(DEV_HOST) --port $(DEV_PORT) ) & \
 	web=$$!; \
 	trap 'kill $$web 2>/dev/null' EXIT INT TERM; \
 	$(GO) build -o $(DEV_BIN) ./cmd/valmind && \
 	sudo -u $(DEV_USER) -g $(DEV_USER) env \
 	VALMIN_DATA_ROOT=$(DEV_DATA) \
 	VALMIN_DATA_HOST_ROOT=$(DEV_DATA) \
+	VALMIN_SERVER_LISTEN=$(DEV_LISTEN) \
 	VALMIN_SERVER_EXTERNAL_URL=$(DEV_URL) \
 	VALMIN_GAME_IMAGE=$(GAME) \
 	VALMIN_GAME_STEAMCMD_IMAGE=$(STEAMCMD) \

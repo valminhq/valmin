@@ -22,6 +22,7 @@
 	import * as Dialog from '#lib/components/ui/dialog/index.js';
 	import Problem from '#lib/components/problem.svelte';
 	import RestartNotice from '#lib/components/restart-notice.svelte';
+	import SaveBar from '#lib/components/save-bar.svelte';
 	import ConfigSetting from '#lib/components/config-setting.svelte';
 	import ConfigRaw from '#lib/components/config-raw.svelte';
 	import { unsaved } from '#lib/state/dirty.svelte.js';
@@ -433,7 +434,7 @@
 	{/if}
 
 	{#if instance}
-		<RestartNotice {instance} />
+		<RestartNotice {instance} canRestart={session.allowed(id).includes(actions.restart)} />
 	{/if}
 
 	{#if canRaw && !textOnly}
@@ -551,22 +552,16 @@
 
 {#if tab === 'form' && changed.length > 0}
 	<!-- What is about to be written, before it is written. -->
-	<div class="sticky bottom-0 -mx-4 border-t bg-background/95 px-4 backdrop-blur sm:-mx-6 sm:px-6">
-		<div class="flex flex-wrap items-center justify-between gap-3 py-3">
-			<p class="text-sm">
-				{changed.length}
-				{changed.length === 1 ? 'setting' : 'settings'} changed
-			</p>
-			<div class="flex gap-2">
-				<Button variant="ghost" size="sm" onclick={discard} disabled={saving}
-					>Discard changes</Button
-				>
-				<Button size="sm" onclick={() => (reviewing = true)} disabled={!editable}>
-					Review changes
-				</Button>
-			</div>
-		</div>
-	</div>
+	<SaveBar
+		saveLabel="Review changes"
+		busy={saving}
+		disabled={!editable}
+		ondiscard={discard}
+		onsave={() => (reviewing = true)}
+	>
+		{changed.length}
+		{changed.length === 1 ? 'setting' : 'settings'} changed
+	</SaveBar>
 {/if}
 
 <!--

@@ -3,12 +3,16 @@ package instance
 import (
 	"context"
 	"errors"
+	"maps"
 	"net"
 	"os"
+	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/valminhq/valmin/internal/runtime"
+	"github.com/valminhq/valmin/internal/store"
 )
 
 // publishing returns a fake engine holding one container that publishes hostPort on UDP, which
@@ -219,5 +223,103 @@ func TestAHeldPortIsStillTakenWithoutIPv6(t *testing.T) {
 
 	if freeOn(noUDP6, 12461) {
 		t.Error("a port held on udp4 was reported free")
+	}
+}
+
+// reservedPorts is a database that refuses a base port already inserted, as the instances table's
+// UNIQUE column does.
+type reservedPorts struct {
+	mu   sync.Mutex
+	used map[int]bool
+}
+
+func (r *reservedPorts) UsedBasePorts(context.Context) (map[int]bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return maps.Clone(r.used), nil
+}
+
+func (r *reservedPorts) insert(port int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.used[port] {
+		return store.ErrBasePortTaken
+	}
+	r.used[port] = true
+	return nil
+}
+
+// Asserts concurrent reservations each get a port of their own: one creating many servers at once
+// must neither share a port nor be told the host has none left.
+func TestReserveGivesConcurrentCallersDistinctPorts(t *testing.T) {
+	const callers = 15
+	db := &reservedPorts{used: map[int]bool{}}
+	a := NewAllocator(db, nil, 12456, 5)
+
+	var wg sync.WaitGroup
+	ports := make([]int, callers)
+	errs := make([]error, callers)
+	for i := range callers {
+		wg.Go(func() { ports[i], errs[i] = a.Reserve(t.Context(), db.insert) })
+	}
+	wg.Wait()
+
+	seen := map[int]bool{}
+	for i := range callers {
+		if errs[i] != nil {
+			t.Fatalf("caller %d: %v", i, errs[i])
+		}
+		if seen[ports[i]] {
+			t.Errorf("port %d was handed out twice", ports[i])
+		}
+		seen[ports[i]] = true
+	}
+}
+
+// Asserts a collision with a row inserted outside the allocator, which no lock here can prevent,
+// is retried on the next port, and that any other insert failure is the caller's.
+func TestReserveRetriesACollisionAndReturnsOtherFailures(t *testing.T) {
+	db := &reservedPorts{used: map[int]bool{}}
+	a := NewAllocator(db, nil, 12456, 5)
+
+	first := true
+	got, err := a.Reserve(t.Context(), func(port int) error {
+		if first {
+			first = false
+			db.used[port] = true // an adoption took it between the scan and the insert
+		}
+		return db.insert(port)
+	})
+	if err != nil || got != 12461 {
+		t.Errorf("Reserve = %d, %v, want 12461 after one collision", got, err)
+	}
+
+	broken := errors.New("disk full")
+	if _, err := a.Reserve(t.Context(), func(int) error { return broken }); !errors.Is(err, broken) {
+		t.Errorf("Reserve error = %v, want the insert's own", err)
+	}
+}
+
+// Asserts a caller waiting its turn gives up when its context ends, so one reservation that never
+// finishes cannot hold every other create past its own timeout.
+func TestReserveGivesUpWhenItsContextEndsWhileWaiting(t *testing.T) {
+	db := &reservedPorts{used: map[int]bool{}}
+	a := NewAllocator(db, nil, 12456, 5)
+
+	holding, release := make(chan struct{}), make(chan struct{})
+	go func() {
+		_, _ = a.Reserve(context.Background(), func(int) error {
+			close(holding)
+			<-release
+			return nil
+		})
+	}()
+	<-holding
+	defer close(release)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := a.Reserve(ctx, db.insert); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Reserve while another holds the turn = %v, want the context's deadline", err)
 	}
 }

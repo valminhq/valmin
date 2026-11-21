@@ -388,7 +388,7 @@ describe('the backups panel', () => {
 describe('the schedules editor', () => {
 	// The expression is the daemon's to validate and interpret: it answers an invalid one with the
 	// field and its own help. The editor reads an expression back only through readCron, which
-	// accepts nothing the builder would not write itself, so no second parser can drift from the
+	// accepts nothing the builder could not have produced, so no second parser can drift from the
 	// one that runs.
 	it('the cron expression is not parsed in the SPA', () => {
 		expect(
@@ -514,7 +514,9 @@ describe('every page says which page it is', () => {
 			join('src', 'routes', 'instances', '[id]', '+layout.svelte'),
 			'utf8'
 		);
-		expect(serverLayout).toMatch(/<h1 class="[^"]*">\{instance\?\.name \?\? 'Server'\}<\/h1>/);
+		expect(serverLayout).toMatch(
+			/<h1 class="[^"]*">\s*\{instance\?\.name \?\? 'Server'\}\s*<\/h1>/
+		);
 		expect(serverLayout, 'a deep link never ran the dashboard load').toContain(
 			'instanceList.ensure()'
 		);
@@ -622,5 +624,19 @@ describe('confirming a destructive action', () => {
 			.filter(([path, text]) => path !== guard && /(?<!function )\bconfirm\(/.test(text))
 			.map(([path]) => path);
 		expect(offenders).toEqual([]);
+	});
+});
+
+describe('saving edits', () => {
+	// The bar pinned to the bottom of a full-page editor is one component, so its look and its
+	// Discard and Save wording cannot drift between pages.
+	it('pins the unsaved-changes bar only through SaveBar', () => {
+		const bar = join('src', 'lib', 'components', 'save-bar.svelte');
+		const offenders = sources()
+			.filter(
+				([path, text]) => path !== bar && /sticky bottom-0/.test(text) && /changed/.test(text)
+			)
+			.map(([path]) => path);
+		expect(offenders, 'use <SaveBar> instead').toEqual([]);
 	});
 });

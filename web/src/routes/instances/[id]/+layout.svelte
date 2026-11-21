@@ -31,13 +31,16 @@
 	// The socket cannot say what changed while it was gone, so a reconnect re-reads the list.
 	$effect(() => socket.onConnected(() => void instanceList.load()));
 
-	// The job running on this server and the setup steps it still owes, re-read on each state
-	// message, on the subscription's ack, on reconnect and on a slow timer. Only the newest
-	// reply is shown.
+	// Whether this caller's list holds the server. One it cannot see is never read here, so a
+	// stranger's link stops at the section's own 404.
+	const listed = $derived(instanceList.items.some((row) => row.id === id));
+
+	// The job running on this server and the setup steps it still owes, read once, then on each
+	// state message, on reconnect and on a slow timer. Only the newest reply is shown.
 	let working = $state<Job | null>(null);
 	let owed = $state<Operation | null>(null);
 	$effect(() => {
-		if (!session.user || !id) return;
+		if (!session.user || !id || !listed) return;
 		let current = true;
 		let latest = 0;
 		async function read() {
@@ -52,10 +55,10 @@
 				// Each section reports its own failed reads; the header only goes quiet.
 			}
 		}
-		void read();
 		const off = socket.subscribe(topics.state(id), (m: ServerMessage) => {
-			if (m.type === 'state' || m.type === 'subscribed') void read();
+			if (m.type === 'state') void read();
 		});
+		void read();
 		const unhook = socket.onConnected(() => void read());
 		const timer = setInterval(read, 60_000);
 		document.addEventListener('visibilitychange', read);
@@ -102,7 +105,9 @@
 	<div class="border-b bg-card">
 		<div class="mx-auto grid max-w-6xl gap-3 px-4 pt-4 sm:px-6">
 			<div class="flex flex-wrap items-center gap-3">
-				<h1 class="text-2xl font-semibold tracking-tight">{instance?.name ?? 'Server'}</h1>
+				<h1 class="min-w-0 text-2xl font-semibold tracking-tight wrap-anywhere">
+					{instance?.name ?? 'Server'}
+				</h1>
 				{#if instance}
 					<StateBadge
 						state={instance.state}
@@ -137,12 +142,12 @@
 						{/if}
 					</p>
 				{/if}
-				<div class="flex flex-wrap items-center gap-x-4 gap-y-2 sm:ml-auto">
+				<div class="flex w-full items-center gap-x-4 gap-y-2 sm:ml-auto sm:w-auto">
 					{#if instance && instanceList.items.length > 1}
 						<label class="sr-only" for="server-switcher">Switch server</label>
 						<NativeSelect
 							id="server-switcher"
-							class="max-w-48 sm:max-w-64"
+							class="min-w-0 flex-1 sm:max-w-64 sm:flex-none"
 							value={id}
 							onchange={switchTo}
 						>
@@ -153,10 +158,11 @@
 					{/if}
 					{#if offerCompare}
 						<a
-							class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground hover:underline"
+							class="inline-flex min-h-6 min-w-6 items-center justify-center gap-1.5 text-sm text-muted-foreground hover:text-foreground hover:underline"
 							href={compareHref}
 						>
-							<GitCompare class="size-4" aria-hidden="true" /> Compare with another server
+							<GitCompare class="size-4" aria-hidden="true" />
+							<span class="sr-only sm:not-sr-only">Compare with another server</span>
 						</a>
 					{/if}
 				</div>

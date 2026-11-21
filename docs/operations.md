@@ -8,8 +8,8 @@ Open **Backups** on a server. Two buttons make a backup now:
 
 - **Stop and back up** makes a consistent archive. Valmin stops a running server,
   waits for the world save to finish, makes the archive, and starts the server again.
-  The server is offline for the whole backup. A server that was already stopped stays
-  stopped.
+  The server is offline for the whole backup, so on a running server the button asks first,
+  as **Stop** does. A server that was already stopped stays stopped.
 - **Back up without stopping** is best-effort: an active save can produce an
   incomplete archive that may not restore. Use it only when you cannot allow downtime.
 
@@ -40,7 +40,10 @@ many **best-effort** backups to keep. The two counts are separate, so a run of
 best-effort copies never pushes out your consistent ones. A count of `0` keeps all
 backups of that type. Snapshots taken before a restore, import, or update have their own
 limit, equal to the consistent count. Older backups are deleted after the next backup or
-scheduled cleanup.
+scheduled cleanup; the backup's progress line says how many retention removed, and its log
+names them. Before you take a backup by hand, the page says what retention would then
+remove, and **Stop and back up** repeats it in its confirmation. A restore, import or reset
+over a save directory with no files in it takes no snapshot, since there is nothing to keep.
 
 **Back up on restarts and automatic stops** makes a consistent backup after the stop of every
 restart, every [auto-stop](#stop-a-server-when-nobody-plays) and every stop a schedule runs,
@@ -108,7 +111,8 @@ built, explored or destroyed.
   taken in between, and any [world check](#world-check) warning the newer backup has that
   the older did not.
 - **Players** (needs `stats.read`): the peak player count, player-hours, how long at least
-  one player was online, and how much of the period the panel observed. Player counts are
+  one player was online, and how much of the period the panel observed, or that no player
+  counts were observed in the period. Player counts are
   kept for 30 days, so for an older period this section says it is not covered.
 - **Operations**: every job that finished on the server in the period, or started and is
   still running, such as starts, stops, restarts, mod changes, game updates and restores,
@@ -188,8 +192,11 @@ On **Maintenance**, choose **What to run** and **How often**, then choose
 New schedules use the browser's time zone, including across daylight saving changes.
 Existing schedules keep the time zone they were created with (UTC for schedules created
 before this change) until you move them, as described below. Upcoming runs, each
-schedule's next run, and skipped and failed runs are shown in your browser's time zone. A
-schedule whose cron expression uses another zone names it on its row.
+schedule's next run, and skipped and failed runs are shown in your browser's time zone. Each
+row shows its next run, says when it runs in words, such as "Every day at 04:00", with its
+zone in brackets when that is not yours, and keeps its cron expression as the detail below.
+A cron expression you wrote by hand is shown as written when it is not one of the builder's
+daily, weekly, monthly or every-few-hours shapes.
 
 On the days the clocks change, a schedule still runs once. A time in the hour the clocks
 skip runs when they jump past it, and a time in the hour they repeat runs the first time the
@@ -214,7 +221,16 @@ that stops the server, which also turns waiting off.
 The times in the form are in the schedule's own time zone, which the form names. When that
 differs from yours, the form offers a switch, **Run it in** followed by your zone and
 **instead**, that moves the schedule to your zone; the times in the form are then read in
-your zone. A cron expression you wrote by hand opens as **Cron expression**, as written.
+your zone. An expression written by hand that sets one time of day, such as `0 4 * * *`, on
+every day, on listed days from Monday to Sunday in order, or on a day of the month up to the
+28th, opens in the controls; any other expression you wrote opens as **Cron expression**, as
+written.
+
+When some of a server's schedules run in a zone other than yours, a line above the list says
+how many and offers **Move to** your zone, unless a schedule is open in the form below. After you confirm, each keeps its clock times and
+reads them in your zone, so a schedule that ran at 04:00 UTC now runs at 04:00 your time and
+its next run changes. A run already waiting for players stops waiting, as for any change of
+time.
 
 To try a schedule without waiting for its time, choose **Run now** on its row and confirm.
 It runs at once, as saved and as it would on its time: a sequence runs its steps in order,
@@ -261,7 +277,9 @@ for each one, in order. A step is one of:
 Each step runs as the job it normally is and appears in the job history. The next step
 starts when the previous one has finished, and the sequence stops at the first step that
 fails; the sequence then shows as **Failed**, and the server stays as that step left it.
-Stopping a stopped server, or starting a running one, counts as done. Backing up a
+Stopping a stopped server, or starting a running one, counts as done. A step the server
+cannot take, such as a command or a wait on a stopped server, is skipped; the job's last line
+then says how many steps were skipped, and its log says which and why. Backing up a
 running server stops it for the backup and starts it again before the next step. A game
 update needs a stopped server, so put **Stop the server** before it. A sequence with an
 update step is skipped on a modded server, as an update alone is.

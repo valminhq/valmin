@@ -95,7 +95,7 @@ func (i *Installer) commitInstall(
 		h.Log(fmt.Sprintf("warning: the new config files are not in their history: %v", err))
 	}
 
-	h.Progress(ctx, 100, fmt.Sprintf("installed %d packages", len(pkgs)))
+	h.Progress(ctx, 100, "Installed "+packageCount(len(pkgs)))
 	out := jobs.Outcome{
 		Status:   jobs.StatusSucceeded,
 		OnFinish: finishInstall(inst.ID, i.installedBepInEx(ctx, inst, pkgs), removedNames(pkgs)),
@@ -256,4 +256,12 @@ func (i *Installer) writeManifests(ctx context.Context, instanceID string, pkgs 
 		return fmt.Errorf("record the file manifests: %w", err)
 	}
 	return nil
+}
+
+// packageCount is n packages in words, singular for one.
+func packageCount(n int) string {
+	if n == 1 {
+		return "1 package"
+	}
+	return fmt.Sprintf("%d packages", n)
 }

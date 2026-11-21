@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { actions } from '#lib/api/instances.js';
 import { kindLabel, type Schedule } from '#lib/api/schedules.js';
+import { hasUnsaved } from '#lib/state/dirty.svelte.js';
 import { session } from '#lib/state/session.svelte.js';
 import { FakeDaemon, envelope, instance, permissions } from '#lib/testing/daemon.js';
 import { choose, click, text } from '#lib/testing/interact.js';
@@ -267,10 +268,11 @@ describe('the schedules editor', () => {
 			rows: [schedule({ timezone: 'UTC', last_run_at: '2026-09-24T01:15:00Z' })]
 		});
 
-		const line = text(await screen.findByText(/schedule uses UTC/));
-		expect(line).toMatch(/next [^·]*\b0?9:00\b/);
+		// The plain time leads; the cron and its zone are the detail under it.
+		const line = text(await screen.findByText(/times shown in Asia\/Kolkata/));
+		expect(text(screen.getByText(/^next /))).toMatch(/next [^·]*\b0?9:00\b/);
 		expect(line).toMatch(/last [^·]*\b0?6:45\b/);
-		expect(line).toContain('shown in Asia/Kolkata');
+		expect(line).toContain('in UTC');
 		expect(screen.getByText('30 3 * * *')).toBeTruthy();
 	});
 
@@ -289,6 +291,56 @@ describe('the schedules editor', () => {
 		await click(await screen.findByRole('switch', { name: 'Enable Back up this server schedule' }));
 		await vi.waitFor(() => expect(daemon.requests('PATCH', '/schedules/sch-1')).toHaveLength(1));
 		expect(daemon.requests('PATCH', '/schedules/sch-1')[0].body).toEqual({ enabled: false });
+	});
+
+	describe('schedules in another zone than the viewer\u2019s', () => {
+		const rows = () => [
+			schedule({ id: 'sch-1', cron: '0 4 * * *', timezone: 'UTC' }),
+			schedule({ id: 'sch-2', kind: 'restart', cron: '30 5 * * 1', timezone: 'Asia/Kolkata' }),
+			schedule({ id: 'sch-3', cron: '0 6 * * *', timezone: 'UTC' })
+		];
+
+		it('says each in words, with its zone when it is not the viewer\u2019s', async () => {
+			await open([actions.backupsCreate, actions.restart], { rows: rows() });
+
+			const words = (await screen.findAllByTestId('schedule-words')).map(text);
+			expect(words).toEqual([
+				'Every day at 04:00 (UTC)',
+				'Every Monday at 05:30',
+				'Every day at 06:00 (UTC)'
+			]);
+		});
+
+		it('offers to move only those, after a confirmation, keeping their clock times', async () => {
+			await open([actions.backupsCreate, actions.restart], { rows: rows() });
+			for (const id of ['sch-1', 'sch-2', 'sch-3'])
+				daemon.on('PATCH', `/schedules/${id}`, () => Response.json(schedule()));
+
+			expect(await screen.findByText(/2 schedules run in another time zone/)).toBeTruthy();
+			await click(screen.getByRole('button', { name: 'Move to Asia/Kolkata' }));
+			expect(
+				daemon.requests('PATCH', '/schedules/sch-1'),
+				'nothing before the answer'
+			).toHaveLength(0);
+
+			const dialog = await screen.findByRole('dialog');
+			await click(within(dialog).getByRole('button', { name: 'Move to Asia/Kolkata' }));
+
+			await vi.waitFor(() => expect(daemon.requests('PATCH', '/schedules/sch-3')).toHaveLength(1));
+			expect(daemon.requests('PATCH', '/schedules/sch-1')[0].body).toEqual({
+				cron: '00 04 * * *',
+				timezone: 'Asia/Kolkata'
+			});
+			expect(daemon.requests('PATCH', '/schedules/sch-2')).toHaveLength(0);
+		});
+
+		it('offers nothing when every schedule already runs in the viewer\u2019s zone', async () => {
+			await open([actions.backupsCreate], {
+				rows: [schedule({ cron: '0 4 * * *', timezone: 'Asia/Kolkata' })]
+			});
+			await screen.findByTestId('schedule-words');
+			expect(screen.queryByText(/run in another time zone/)).toBeNull();
+		});
 	});
 
 	describe('editing a schedule', () => {
@@ -350,11 +402,19 @@ describe('the schedules editor', () => {
 		});
 
 		it('opens an expression the builder did not write as written', async () => {
-			await editRow(schedule({ cron: '30 3 * * *' }), [actions.backupsCreate]);
+			await editRow(schedule({ cron: '30 3 * * 1-5' }), [actions.backupsCreate]);
 			expect((screen.getByLabelText('Cron expression') as HTMLInputElement).value).toBe(
-				'30 3 * * *'
+				'30 3 * * 1-5'
 			);
 			expect(save().disabled).toBe(true);
+		});
+
+		// An old expression without leading zeros opens in the controls, and opening it is not an edit.
+		it('opens an unpadded daily expression in the controls without counting as changed', async () => {
+			await editRow(schedule({ cron: '30 3 * * *' }), [actions.backupsCreate]);
+			expect(text(document.body)).toContain('Every day at 03:30');
+			expect(save().disabled).toBe(true);
+			expect(hasUnsaved()).toBe(false);
 		});
 
 		it('keeps the schedule’s own zone unless asked to move it', async () => {

@@ -50,6 +50,11 @@
 			: instanceList.items
 	);
 
+	/** The name of a server whose port pair overlaps an unclaimed container's, if any. */
+	function clash(basePort: number): string | undefined {
+		return instanceList.items.find((instance) => Math.abs(instance.base_port - basePort) < 2)?.name;
+	}
+
 	// Conditions are rendered where the thing they are about already is: a server's own go on
 	// its card, and only those the card does not already state (ADR-195). What has no card to
 	// sit on — the host's own, and any whose server is not on this list — goes to one band.
@@ -211,7 +216,14 @@
 						</p>
 						{#each orphaned as orphan (orphan.container_id)}
 							<div class="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2">
-								<span>{orphan.name} · udp {orphan.base_port}–{orphan.base_port + 1}</span>
+								<span>
+									{orphan.name} · udp {orphan.base_port}–{orphan.base_port + 1}
+									{#if clash(orphan.base_port)}
+										<span class="text-muted-foreground">
+											· same ports as {clash(orphan.base_port)}
+										</span>
+									{/if}
+								</span>
 								<Button
 									variant="outline"
 									size="sm"
@@ -276,7 +288,10 @@
 						<!-- Identity and state own the title row at every width. Conditions sit on
 						     their own line below it, where no number of them can squeeze the name. -->
 						<Card.Title class="flex items-center justify-between gap-3">
-							<a class="hover:underline" href={resolve('/instances/[id]', { id: instance.id })}>
+							<a
+								class="min-w-0 wrap-anywhere hover:underline"
+								href={resolve('/instances/[id]', { id: instance.id })}
+							>
 								{instance.name}
 							</a>
 							<StateBadge

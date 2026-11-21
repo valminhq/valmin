@@ -395,6 +395,8 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/auth/logout`                            | Revoke the session and clear its cookies; `204`, or `200` with `redirect_url` when a proxy logout URL is set. |
 | `GET`    | `/me/permissions`                         | Current account's permissions.                                        |
 | `POST`   | `/me/password`                            | Change your own password; returns `204`.                              |
+| `GET`    | `/me/sessions`                            | Your signed-in devices; see below.                                    |
+| `DELETE` | `/me/sessions/{id}`                       | Sign one of your own devices out; returns `204`.                      |
 | `PATCH`  | `/me`                                     | Change your own preferences; returns the account.                     |
 | `GET`    | `/game/options`                           | Launch options and validation limits; any signed-in account.          |
 | `GET`    | `/game/patch-notes`                       | The game's recent patch posts from Steam; any signed-in account.      |
@@ -427,7 +429,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/operation/resume`        | Continue an interrupted operation; returns a job.                     |
 | `POST`   | `/instances/{id}/operation/abandon`       | Drop the steps that never ran; returns the operation.                 |
 | `GET`    | `/instances/{id}/jobs`                    | Server job history; `scheduled=true` lists scheduled runs only, `since`/`until` bound it. |
-| `GET`    | `/instances/{id}/backups`                 | World backup catalog, with each archive's `world_bytes` and `world_attention`. |
+| `GET`    | `/instances/{id}/backups`                 | World backup catalog, with each archive's `world_bytes` and `world_attention`, and `removed_by_next_consistent` and `removed_by_next_best_effort`: the `{id, created_at}` of the archives retention deletes once the next backup of that kind is taken. |
 | `POST`   | `/instances/{id}/backups?mode=quiesced`   | Stop, back up, and resume a previously running server; returns a job. |
 | `POST`   | `/instances/{id}/backups?mode=hot`        | Best-effort backup without stopping; returns a job.                   |
 | `GET`    | `/instances/{id}/backups/{bid}/download`  | Download an archive.                                                  |
@@ -466,7 +468,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/mods/updates`            | Back up the world, then apply those updates; returns a job.           |
 | `GET`    | `/instances/{id}/mods/export`             | Client manifest preview, or the archive with `format=r2z`.            |
 | `GET`    | `/instances/{id}/mods/export/code`        | The stored profile code while the mods still match it.                |
-| `POST`   | `/instances/{id}/mods/export/code`        | Upload the client manifest; returns a profile code.                   |
+| `POST`   | `/instances/{id}/mods/export/code`        | Upload the client manifest; returns a profile code. `409` if empty.   |
 | `GET`    | `/instances/{id}/mods/queue`              | Installs waiting for the server to stop.                              |
 | `POST`   | `/instances/{id}/mods/queue`              | Queue an install for the next stop or restart.                        |
 | `POST`   | `/instances/{id}/mods/updates/queue`      | Queue confirmed updates together, all or none; returns the queue.     |
@@ -490,6 +492,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `GET`    | `/instances/orphans`                      | Containers Valmin created that no server claims.                      |
 | `GET`    | `/orphans/{container_id}`                 | What the panel can prove about one unclaimed container.               |
 | `POST`   | `/orphans/{container_id}`                 | Recover the container as a server; returns a job.                     |
+| `DELETE` | `/orphans/{container_id}`                 | Remove an unclaimed container; its files stay on disk.                |
 | `GET`    | `/jobs/{id}`                              | Job status and result.                                                |
 | `POST`   | `/jobs/{id}/cancel`                       | Request cancellation.                                                 |
 
@@ -560,7 +563,8 @@ in the `stopped` or `running` state.
 
 `POST /api/v1/instances/{id}/update-test` with `{"game": true, "mods": true}` returns a
 `202` `update_test` job. At least one of the two must be true, or the request answers
-`422`. The job copies the server, puts the new game build (`game`) and the pending mod
+`422`. When neither chosen part has anything to try (the last check found the game current,
+and no mod update is pending), it answers `409 invalid_state`. The job copies the server, puts the new game build (`game`) and the pending mod
 updates (`mods`) on the copy, starts it, waits for its world to load and logs what the mod
 loader said about each plugin.
 A running source is copied live, so the copy's world is as of the game's last save and its
@@ -620,7 +624,13 @@ recovery request must send. `POST /api/v1/orphans/{container_id}` takes `name`,
 `extra_args`, `mem_limit_mb` and `cpu_limit`. They must describe the container exactly:
 a mismatch answers `409 container_mismatch`, a taken name `409 name_taken`, and a
 container already claimed `409 invalid_state`. Recovery never stops, recreates or
-changes the container. These three routes answer `403` without the permission.
+changes the container. A container whose image was removed, or whose data directory is gone,
+cannot be recovered: the preview and the recovery answer `409 container_mismatch` with
+`details.reason` `image_missing` or `data_missing`. `DELETE /api/v1/orphans/{container_id}`
+removes a stopped unclaimed container and answers `204`; it leaves the data directory alone, is
+audited as `orphans.remove`, answers `409 invalid_state` while the container runs, and `404` for a
+container that is not an unclaimed Valmin container.
+These four routes answer `403` without the permission.
 
 ### Interrupted operations
 
@@ -761,7 +771,8 @@ from the pin on purpose.
 `update_version`, which is empty unless a strictly newer version exists **in the
 registry the mod was installed from**. Installing the same mod from a second registry
 into one server is not possible; uninstall it first. Each row also has `enabled`, and a
-`load_status` of `loaded`, `not_seen`, `failed`, or `null`. When the status is `failed`,
+`load_status` of `loaded`, `not_seen`, `failed`, `pending`, or `null`. `pending` is a plugin
+installed after the server's last mod loader run, which could not have loaded it. When the status is `failed`,
 `load_error` carries the mod loader's own message. `not_indexed` is `true` for a mod its
 registry no longer lists: the last complete refresh of that registry's catalogue did not
 include it. Such a row has an empty `update_version` and is left out of **Update all**.
@@ -873,7 +884,8 @@ are named after the profile, with the world `Dedicated`. Profile codes use the r
 and takes no body. It uploads the same client mod list as the file export to a registry, stores
 the result as the server's current profile code, and returns `{"code", "registry", "created_at"}`. The registry is `thunderstore` unless a mod in the list exists only
 in Hexium and Hexium is enabled, in which case it is `hexium`, every mod in it names its registry,
-and Gale reads the code but r2modman does not. A list with a conflict answers `409 mod_conflict` and uploads nothing, a list
+and Gale reads the code but r2modman does not. A list with no mods answers `409 invalid_state`, and
+this file export with `format=r2z` does the same. A list with a conflict answers `409 mod_conflict` and uploads nothing, a list
 the registry refuses as too large answers `413`, and a registry that is down answers `503`. A user
 may upload five codes a minute (`429` with `Retry-After` beyond that), counted only when the upload
 is attempted. Each entry in the export preview also has `source`, the registry the installed package
@@ -1063,7 +1075,10 @@ A replacement that breaks a `.json` file's syntax (a leading UTF-8 byte-order ma
 or any document of a `.yaml`/`.yml` file returns `422 validation_failed` with the parser's
 message on the field `content`. The check applies to every write, also when the file on disk
 does not parse, so a file the mod reads leniently (JSON with comments) must be saved as strict
-JSON.
+JSON. A `.cfg` replacement is held to BepInEx's line grammar (blank, `# comment`, `[Section]`,
+`Key = value`) and a broken line returns the same `422` naming it, unless the file on disk
+already broke that grammar. When the file on disk uses CRLF line endings, the replacement is
+stored with CRLF too; if that takes it over 1 MiB it answers `413 payload_too_large`.
 
 `{file}` is a path relative to `BepInEx/config`, with each `/` sent as `%2F`, for example
 `/configs/expand_world%2Fexpand_biomes.yaml/raw`. It may sit up to 8 folders deep and must end
@@ -1299,8 +1314,13 @@ ones; any other is `422` on `webhook_ids`, worded as if it did not exist. The co
 `job_failed`, `job_stuck`, `crash_loop`, `unclean_stop`, `instance_error`,
 `restart_required`, `update_available`, `stale_backup`, `backup_attention`, `mods_failed`,
 `mod_updates` and `low_disk`, plus the one-off events `server_started`, `server_stopped`,
-`instance_down`, `game_updated`, `update_test_finished` and `power_cut`, and the game events
-below.
+`instance_down`, `game_updated`, `update_test_finished`, `power_cut` and `sign_ins_blocked`, and the game
+events below.
+
+`sign_ins_blocked` is sent when an account's failed sign-ins from any address reach the
+limit and the panel starts refusing it. It is sent at most once an hour for each username, and
+only for a username an account has, with the `username` and the `address` of the first refused
+attempt. It is host-wide, like `low_disk` and `power_cut`.
 
 Three events are sent without any rule to every enabled destination with `catch_all` on that
 serves the event's server, which is every shared destination and the server's own:
@@ -1380,6 +1400,7 @@ kept. The names each kind fills:
 | `game_updated`     | `build`, `mods`, `time`                                       |
 | `update_test_finished` | `status`, `build`, `mods`, `failed_mods`, `time`          |
 | `power_cut`        | `power_off`, `stop_at`, `servers`                             |
+| `sign_ins_blocked` | `username`, `address`                                         |
 | Game events        | The event's own fields, as listed for ValminEye above         |
 
 `what_to_do` is empty on `alert_resolved`. A field named in `hidden_fields` is empty too.
@@ -1458,7 +1479,7 @@ is ignored. Creating, changing and deleting a rule writes an audit log entry wit
 operation `alert_rule_create`, `alert_rule_update` or `alert_rule_delete`, and a rule test
 `alert_rule_test`. Under `/admin` its action is `panel.settings`; under a server's prefix it
 is `notifications.manage`, with the server. Destination changes are audited the same way.
-Deleting a rule that does not exist returns `404`. A `low_disk` or `power_cut` rule is
+Deleting a rule that does not exist returns `404`. A `low_disk`, `power_cut` or `sign_ins_blocked` rule is
 host-wide: naming an `instance_id` on one, or creating one under a server's prefix, returns
 `422`.
 
@@ -1504,7 +1525,7 @@ administrator-only, and everyone else gets `404`. Paths are relative to `/api/v1
 | `POST`   | `/invites/{token}/redeem`    | Create an account from an invite. Needs no session.      |
 
 An account has `id`, `username`, `role` (`admin` or `member`), `disabled`, `owner`,
-`created_at` and `last_login_at`. `POST /users` takes `username`, `password` (at least
+`created_at`, `last_login_at` and `password_change_required`. `POST /users` takes `username`, `password` (at least
 eight characters) and `role`; a taken username is `409 name_taken`. The owner, the
 account created at first-run setup, cannot be demoted, disabled or deleted, and only the
 owner can reset its password: those requests answer `403`. Usernames are case-sensitive. A password reset returns `{"password": "..."}` and ends every
@@ -1579,7 +1600,9 @@ API errors use this envelope:
 ```
 
 Some errors also include `error.details`. Use `code` for branching and `message`
-for display. Include `request_id` when investigating the matching daemon log.
+for display. Include `request_id` when investigating the matching daemon log. A request body
+with a field the endpoint does not accept answers `400 malformed_json` with the field in
+`details.field`, as does a refusal that concerns one field, such as `409 name_taken`.
 
 | HTTP status | Common meaning                                                     |
 | ----------- | ------------------------------------------------------------------ |
@@ -1781,6 +1804,20 @@ A successful change writes an audit log entry with action `users.password.change
 detail `{"target_user_id": "USER_ID"}` for the caller's own id, and outcome `succeeded`.
 Neither password is stored in the entry, and a refused request writes none.
 
+## See and end your sessions
+
+`GET /api/v1/me/sessions` lists the signed-in account's own sessions that have not expired,
+most recently used first. Each item has `id`, `created_at`, `last_seen_at`, `ip`,
+`user_agent` and `current`, which is `true` for the session making the request. The
+list has no further pages, so `next_cursor` is `null`.
+
+`DELETE /api/v1/me/sessions/{id}` ends one of them: the session's cookie stops working, its
+WebSockets close, and the call returns `204`. A session that does not exist, or that belongs to
+another account, answers `404 not_found`. Ending the current session signs the caller out
+without clearing their cookies; `POST /auth/logout` is the way to sign out here. Both calls
+need the session cookie, and the `DELETE` needs the CSRF header. A revoke writes an audit
+entry with action `users.session.revoke` and the caller's id as `target_user_id`.
+
 ## Set your time zone and time format
 
 `PATCH /api/v1/me` changes the signed-in account's own preferences and returns the account,
@@ -1808,6 +1845,16 @@ either follows the browser's language settings.
 | `401`  | `unauthenticated`   | There is no valid session.                                                |
 | `422`  | `validation_failed` | `timezone` is `invalid`: not a zone the panel knows, or `Local`.          |
 | `422`  | `validation_failed` | `hour_cycle` or `date_order` is `not_an_option`: not one of those values. |
+
+## Passwords an administrator issued
+
+Every account object, from `GET /auth/me`, the login response, `GET /users`, `POST /users`,
+`PATCH /users/{id}` and `PATCH /me`, carries `password_change_required`. It is `true` for an
+account an administrator created, and after an administrator resets its password, and `false`
+otherwise: for the first administrator, for an account created from an invite, after the
+account's own `POST /me/password`, after `valmind admin reset`, and for a member signed in by a
+trusted proxy. The flag is advisory. The panel's own pages send a signed-in account that has it
+to the change password page, but the API does not refuse any other request because of it.
 
 ## End the session
 

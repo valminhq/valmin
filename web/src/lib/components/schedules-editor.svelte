@@ -11,6 +11,8 @@
 		clockChanges,
 		deferralChoices,
 		firstHourOf,
+		describeCron,
+		describeExpression,
 		hourChoices,
 		inClockChange,
 		inZone,
@@ -18,6 +20,7 @@
 		maxChainSteps,
 		maxWaitSeconds,
 		monthDays,
+		ordinal,
 		readCron,
 		schedules,
 		scheduleKinds,
@@ -67,7 +70,7 @@
 
 	/**
 	 * The builder's controls, which write the expression. An existing expression is read back
-	 * into them only through readCron, which accepts nothing the builder would not write itself;
+	 * into them only through readCron, which accepts nothing the builder could not have produced;
 	 * anything else opens as a written expression.
 	 */
 	let form = $state<CronForm>(defaultCronForm());
@@ -92,43 +95,12 @@
 	/** The first hour of an every-few-hours run, folded into the first step of the day. */
 	const firstHour = $derived(firstHourOf(form));
 	const startMinute = $derived(form.startAt.slice(3, 5));
-	const chosenDays = $derived(weekdayChoices.filter((d) => form.weekdays.includes(d.value)));
 
 	const built = $derived(buildCron(form));
 
 	/** What the built expression means, said from the controls rather than read back off the
-	 * string. Custom has none: the daemon is the only thing that knows what it means. */
-	const meaning = $derived.by(() => {
-		if (form.every === 'hours') {
-			const n = Number(form.everyHours);
-			const times = Array.from(
-				{ length: 24 / n },
-				(_, i) => `${String(firstHour + i * n).padStart(2, '0')}:${startMinute}`
-			);
-			return `Every ${n} hour${n === 1 ? '' : 's'} — ${times.join(', ')}`;
-		}
-		if (form.every === 'days') {
-			if (chosenDays.length === 0) return 'Choose at least one day';
-			if (chosenDays.length === 7) return `Every day at ${form.atTime}`;
-			return `Every ${joinWords(chosenDays.map((d) => d.label))} at ${form.atTime}`;
-		}
-		if (form.every === 'month')
-			return `Every month on the ${ordinal(Number(form.monthDay))} at ${form.atTime}`;
-		if (form.every === 'day') return `Every day at ${form.atTime}`;
-		return '';
-	});
-
-	function joinWords(words: string[]): string {
-		return words.length < 2
-			? words.join('')
-			: `${words.slice(0, -1).join(', ')} and ${words.at(-1)}`;
-	}
-
-	function ordinal(n: number): string {
-		const tens = n % 100;
-		const suffix = tens >= 11 && tens <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] ?? 'th');
-		return `${n}${suffix}`;
-	}
+	 * string. */
+	const meaning = $derived(describeCron(form));
 
 	function toggleDay(value: string) {
 		form.weekdays = form.weekdays.includes(value)
@@ -271,7 +243,8 @@
 	const patchBody = $derived.by((): PatchSchedule => {
 		if (!editBase) return {};
 		const body: PatchSchedule = {};
-		if (built !== editBase.cron || moveZone) body.cron = built;
+		const baseBuilt = buildCron({ ...defaultCronForm(), ...readCron(editBase.cron) });
+		if (built !== baseBuilt || moveZone) body.cron = built;
 		if (moveZone) body.timezone = viewer;
 		if (isChain && JSON.stringify(steps) !== baseSteps) body.steps = steps;
 		if (isUpdateTest && applyTested !== (editBase.apply ?? false)) body.apply = applyTested;
@@ -441,6 +414,31 @@
 		});
 	}
 
+	/** This server's schedules that run in another zone than the viewer's and that they may edit. */
+	const movable = $derived(mine.filter((s) => s.timezone !== viewer && canEdit(s)));
+	let moveOpen = $state(false);
+
+	/** What moving s to the viewer's zone does, in a line: its words or cron, and both zones. */
+	function describeMove(s: Schedule): string {
+		return `${label(s.kind)}, ${describeExpression(s.cron) || s.cron} in ${s.timezone}`;
+	}
+
+	/** Moves each of the movable schedules to the viewer's zone, keeping its clock times as
+	 * written, as the switch on a single schedule does. */
+	function moveAll() {
+		const targets = movable;
+		void act(async () => {
+			try {
+				for (const s of targets) {
+					const cron = buildCron({ ...defaultCronForm(), ...readCron(s.cron) });
+					await schedules.patch(s.id, { cron, timezone: viewer });
+				}
+			} finally {
+				await load();
+			}
+		});
+	}
+
 	const toggle = (s: Schedule, enabled: boolean) =>
 		void act(() => schedules.patch(s.id, { enabled }));
 
@@ -528,7 +526,11 @@
 		{:else}
 			<Problem error={failure} />
 			<p class={['text-sm text-muted-foreground', !started && 'sr-only']} role="status">
-				{started ? `Started “${started}”. Its progress shows in the server’s job history.` : ''}
+				{#if started}
+					Started “{started}”. Its progress shows under
+					<a class="underline" href={resolve('/instances/[id]', { id: instance.id })}>Operations</a> on
+					the overview.
+				{/if}
 			</p>
 
 			{#if !loading && mine.length > 0}
@@ -566,22 +568,49 @@
 			{:else if mine.length === 0}
 				<p class="text-sm text-muted-foreground">Nothing is scheduled for this server.</p>
 			{:else}
+				{#if movable.length > 0}
+					<div
+						class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-dashed p-3"
+					>
+						<p class="text-sm text-muted-foreground">
+							{movable.length === 1 ? '1 schedule runs' : `${movable.length} schedules run`} in another
+							time zone than yours ({viewer}).
+						</p>
+						<Button
+							variant="outline"
+							size="sm"
+							disabled={saving || editBase !== null}
+							onclick={() => (moveOpen = true)}
+						>
+							Move to {viewer}
+						</Button>
+					</div>
+				{/if}
 				<div class="grid gap-2">
 					{#each mine as s (s.id)}
+						{@const words = describeExpression(s.cron)}
 						<div class="flex flex-wrap items-center gap-3 rounded-lg border p-3">
 							<div class="grid min-w-0 grow basis-64 gap-1">
 								<div class="flex flex-wrap items-center gap-2">
 									<span class="text-sm font-medium">{label(s.kind)}</span>
-									<Badge variant="outline" class="font-mono">{s.cron}</Badge>
+									{#if s.enabled}
+										<span class="text-sm">next {when(s.next_run_at)}</span>
+									{/if}
 									{#if !s.enabled}<Badge variant="secondary">paused</Badge>{/if}
 									{#if s.deferred_since}<Badge>waiting for players</Badge>{/if}
 								</div>
+								{#if words}
+									<p class="text-sm" data-testid="schedule-words">
+										{words}{s.timezone !== viewer ? ` (${s.timezone})` : ''}
+									</p>
+								{/if}
 								{#if s.steps}
 									<p class="text-sm" data-testid="chain-steps">{describeSteps(s.steps)}</p>
 								{/if}
+								<!-- Times are in the viewer's zone; the cron is written in the schedule's own. -->
 								<p class="text-sm text-muted-foreground">
-									next {when(s.next_run_at)} · last {when(s.last_run_at)}
-									{#if s.timezone !== viewer}· shown in {viewer}, schedule uses {s.timezone}{/if}
+									last {when(s.last_run_at)} · <span class="font-mono">{s.cron}</span>
+									{#if s.timezone !== viewer}in {s.timezone}, times shown in {viewer}{/if}
 									{#if s.created_by_username}· set up by {s.created_by_username}{/if}
 									{#if s.wait_for_empty}· waits up to {deferral(s.max_deferral_seconds)} for players to
 										leave{/if}
@@ -645,78 +674,84 @@
 					<div class="grid gap-2" data-testid="chain-editor">
 						<Label>Steps, in order</Label>
 						{#each draft as d, i (d.id)}
-							<div class="flex flex-wrap items-center gap-2">
-								<span class="w-5 text-sm text-muted-foreground">{i + 1}.</span>
-								<Select.Root type="single" bind:value={d.type}>
-									<Select.Trigger class="w-56" aria-label="Step {i + 1} type">
-										{chainSteps.find((c) => c.type === d.type)?.label}
-									</Select.Trigger>
-									<Select.Content>
-										{#each offeredSteps as option (option.type)}
-											<Select.Item value={option.type}>{option.label}</Select.Item>
-										{/each}
-									</Select.Content>
-								</Select.Root>
-								{#if d.type === 'command'}
-									<Input
-										bind:value={d.command}
-										class="min-w-48 flex-1 font-mono"
-										autocomplete="off"
-										placeholder="say Restarting in 5 minutes"
-										aria-label="Step {i + 1} command"
-									/>
-								{:else if d.type === 'wait'}
-									<Input
-										inputmode="numeric"
-										autocomplete="off"
-										bind:value={d.seconds}
-										class="w-28"
-										aria-label="Step {i + 1} seconds (1 to {maxWaitSeconds})"
-									/>
-									<span class="text-sm text-muted-foreground">seconds</span>
-								{:else if d.type === 'wait_for'}
-									<Select.Root type="single" bind:value={d.condition}>
-										<Select.Trigger class="w-48" aria-label="Step {i + 1} condition">
-											{waitConditions.find((c) => c.value === d.condition)?.label}
+							<!-- Number, the step's own fields, and a fixed icon group, so every row's controls
+							     line up whatever the step asks for. -->
+							<div class="grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-start gap-2">
+								<span class="pt-2 text-sm text-muted-foreground">{i + 1}.</span>
+								<div class="flex min-w-0 flex-wrap items-center gap-2">
+									<Select.Root type="single" bind:value={d.type}>
+										<Select.Trigger class="w-56 max-w-full" aria-label="Step {i + 1} type">
+											{chainSteps.find((c) => c.type === d.type)?.label}
 										</Select.Trigger>
 										<Select.Content>
-											{#each waitConditions as option (option.value)}
-												<Select.Item value={option.value}>{option.label}</Select.Item>
+											{#each offeredSteps as option (option.type)}
+												<Select.Item value={option.type}>{option.label}</Select.Item>
 											{/each}
 										</Select.Content>
 									</Select.Root>
-									<span class="text-sm text-muted-foreground">for at most</span>
-									<Input
-										inputmode="numeric"
-										autocomplete="off"
-										bind:value={d.seconds}
-										class="w-28"
-										aria-label="Step {i + 1} longest wait in seconds (1 to {maxWaitSeconds})"
-									/>
-									<span class="text-sm text-muted-foreground">seconds</span>
-								{/if}
-								<Button
-									variant="ghost"
-									size="sm"
-									disabled={i === 0}
-									onclick={() => moveStep(i, -1)}
-								>
-									<ArrowUp />
-									<span class="sr-only">Move step {i + 1} up</span>
-								</Button>
-								<Button
-									variant="ghost"
-									size="sm"
-									disabled={i === draft.length - 1}
-									onclick={() => moveStep(i, 1)}
-								>
-									<ArrowDown />
-									<span class="sr-only">Move step {i + 1} down</span>
-								</Button>
-								<Button variant="ghost" size="sm" onclick={() => draft.splice(i, 1)}>
-									<Trash2 />
-									<span class="sr-only">Remove step {i + 1}</span>
-								</Button>
+									{#if d.type === 'command'}
+										<Input
+											bind:value={d.command}
+											class="min-w-48 flex-1 font-mono"
+											autocomplete="off"
+											placeholder="say Restarting in 5 minutes"
+											aria-label="Step {i + 1} command"
+										/>
+									{:else if d.type === 'wait'}
+										<Input
+											inputmode="numeric"
+											autocomplete="off"
+											bind:value={d.seconds}
+											class="w-28"
+											aria-label="Step {i + 1} seconds (1 to {maxWaitSeconds})"
+										/>
+										<span class="text-sm text-muted-foreground">seconds</span>
+									{:else if d.type === 'wait_for'}
+										<Select.Root type="single" bind:value={d.condition}>
+											<Select.Trigger class="w-48" aria-label="Step {i + 1} condition">
+												{waitConditions.find((c) => c.value === d.condition)?.label}
+											</Select.Trigger>
+											<Select.Content>
+												{#each waitConditions as option (option.value)}
+													<Select.Item value={option.value}>{option.label}</Select.Item>
+												{/each}
+											</Select.Content>
+										</Select.Root>
+										<span class="text-sm text-muted-foreground">for at most</span>
+										<Input
+											inputmode="numeric"
+											autocomplete="off"
+											bind:value={d.seconds}
+											class="w-28"
+											aria-label="Step {i + 1} longest wait in seconds (1 to {maxWaitSeconds})"
+										/>
+										<span class="text-sm text-muted-foreground">seconds</span>
+									{/if}
+								</div>
+								<div class="flex items-center">
+									<Button
+										variant="ghost"
+										size="sm"
+										disabled={i === 0}
+										onclick={() => moveStep(i, -1)}
+									>
+										<ArrowUp />
+										<span class="sr-only">Move step {i + 1} up</span>
+									</Button>
+									<Button
+										variant="ghost"
+										size="sm"
+										disabled={i === draft.length - 1}
+										onclick={() => moveStep(i, 1)}
+									>
+										<ArrowDown />
+										<span class="sr-only">Move step {i + 1} down</span>
+									</Button>
+									<Button variant="ghost" size="sm" onclick={() => draft.splice(i, 1)}>
+										<Trash2 />
+										<span class="sr-only">Remove step {i + 1}</span>
+									</Button>
+								</div>
 							</div>
 						{/each}
 						<Button
@@ -963,8 +998,8 @@
 			<Dialog.Title>Delete this schedule?</Dialog.Title>
 			<Dialog.Description>
 				{deleting ? label(deleting.kind) : ''}
-				<span class="font-mono">({deleting?.cron})</span> stops running on its own. Runs already in the
-				job history are kept.
+				<span class="font-mono">({deleting?.cron})</span> stops running on its own. Runs already listed
+				under Operations are kept.
 			</Dialog.Description>
 		</Dialog.Header>
 		<Dialog.Footer>
@@ -983,6 +1018,18 @@
 		: 'another schedule'} replaces them."
 	confirmLabel="Discard changes"
 	onconfirm={discardAndEdit}
+/>
+
+<DestructiveConfirm
+	bind:open={moveOpen}
+	title="Move {movable.length === 1
+		? 'this schedule'
+		: `these ${movable.length} schedules`} to {viewer}?"
+	description="Each keeps its clock times and reads them in {viewer} from now on, so it runs at a different moment than today. {movable
+		.map(describeMove)
+		.join('; ')}."
+	confirmLabel="Move to {viewer}"
+	onconfirm={moveAll}
 />
 
 <DestructiveConfirm

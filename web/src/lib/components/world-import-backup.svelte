@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatInstant } from '#lib/api/schedules.js';
 	import { onMount } from 'svelte';
 	import { ApiError } from '#lib/api/errors.js';
 	import { backups, type Backup, type OrphanedBackup } from '#lib/api/backups.js';
@@ -45,7 +46,7 @@
 					}))
 			: archives.map((b) => ({
 					value: b.id,
-					label: `${new Date(b.created_at).toLocaleString()} · ${b.world_name} · ${formatBytes(b.size_bytes)} · ${b.trigger.replaceAll('_', ' ')}`
+					label: `${formatInstant(b.created_at)} · ${b.world_name} · ${formatBytes(b.size_bytes)} · ${b.trigger.replaceAll('_', ' ')}`
 				}))
 	);
 

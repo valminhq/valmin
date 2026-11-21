@@ -189,10 +189,13 @@ var globalRouteAccess = map[string]string{
 	"POST /api/v1/jobs/{id}/cancel":                       accessMember,
 	"PATCH /api/v1/me":                                    accessMember,
 	"POST /api/v1/me/password":                            accessMember,
+	"GET /api/v1/me/sessions":                             accessMember,
+	"DELETE /api/v1/me/sessions/{id}":                     accessMember,
 	"GET /api/v1/me/permissions":                          accessMember,
 	"GET /api/v1/mods/search":                             accessMember,
 	"POST /api/v1/mods/sync":                              accessHidden,
 	"GET /api/v1/mods/{namespace}/{name}":                 accessMember,
+	"DELETE /api/v1/orphans/{container_id}":               accessAdmin,
 	"GET /api/v1/orphans/{container_id}":                  accessAdmin,
 	"POST /api/v1/orphans/{container_id}":                 accessAdmin,
 	"GET /api/v1/players":                                 accessHidden,
@@ -282,7 +285,9 @@ func TestEveryInstanceRouteAuthorizesItsInstance(t *testing.T) {
 			viewer := as(rt, member, routeAccessRequest(method, target("inst-a")))
 			switch access {
 			case accessView:
-				if viewer.Code == http.StatusForbidden || (plain && viewer.Code >= 300) {
+				// A refusal over the server's state is an answer past the permission check.
+				stateRefusal := viewer.Code == http.StatusConflict && errCode(t, viewer) == "invalid_state"
+				if viewer.Code == http.StatusForbidden || (plain && viewer.Code >= 300 && !stateRefusal) {
 					t.Errorf("viewer = %d %s, want it let through", viewer.Code, viewer.Body)
 				}
 			case accessHidden:

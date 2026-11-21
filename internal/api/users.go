@@ -136,7 +136,9 @@ func (u *Users) create(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	JSON(w, r, http.StatusCreated, store.User{ID: id, Username: body.Username, Role: body.Role, CreatedAt: now})
+	JSON(w, r, http.StatusCreated, store.User{
+		ID: id, Username: body.Username, Role: body.Role, CreatedAt: now, PasswordChangeRequired: true,
+	})
 }
 
 type updateSelfRequest struct {
@@ -237,7 +239,7 @@ func (u *Users) update(w http.ResponseWriter, r *http.Request) {
 
 	revokeSessions := disabled || role != current.Role
 	detail, err := userAuditDetail(map[string]any{
-		auditTargetUser: id, "role": role, "disabled": disabled,
+		auditTargetUser: id, "username": current.Username, "role": role, "disabled": disabled,
 	})
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
@@ -257,6 +259,7 @@ func (u *Users) update(w http.ResponseWriter, r *http.Request) {
 		ID: id, Username: current.Username, Role: role, Disabled: disabled,
 		Owner:     current.Owner,
 		CreatedAt: current.CreatedAt, LastLoginAt: current.LastLoginAt,
+		PasswordChangeRequired: current.PasswordChangeRequired,
 	})
 }
 
@@ -306,7 +309,16 @@ func (u *Users) resetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 
-	detail, err := userAuditDetail(map[string]string{auditTargetUser: id})
+	target, err := u.DB.UserByID(r.Context(), id)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if target == nil {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	detail, err := userAuditDetail(map[string]string{auditTargetUser: id, "username": target.Username})
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return

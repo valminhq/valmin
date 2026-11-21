@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -38,8 +39,11 @@ type Worlds struct {
 func (h *Worlds) Snapshot(
 	ctx context.Context, inst *store.Instance, trigger string,
 ) (func(context.Context, *sql.Tx) error, error) {
-	_, err := os.Stat(instance.WorldsDir(inst.DataDir))
-	if errors.Is(err, os.ErrNotExist) {
+	empty, err := holdsNoFiles(instance.WorldsDir(inst.DataDir))
+	if err != nil {
+		return nil, fmt.Errorf("inspect the worlds of %s: %w", inst.ID, err)
+	}
+	if empty {
 		// Nothing to lose yet — a first import into a fresh instance, which is still a write.
 		return nil, AssertStopped(ctx, h.Runtime, inst)
 	}
@@ -65,6 +69,29 @@ func (h *Worlds) Snapshot(
 		}
 		return nil
 	}, nil
+}
+
+// holdsNoFiles reports whether dir is missing or has no file anywhere below it, which an
+// archive would capture as nothing.
+func holdsNoFiles(dir string) (bool, error) {
+	empty := true
+	err := filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			empty = false
+			return fs.SkipAll
+		}
+		return nil
+	})
+	if errors.Is(err, fs.ErrNotExist) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("walk %s: %w", dir, err)
+	}
+	return empty, nil
 }
 
 // archiveStoppedWorlds archives inst's worlds/ to dest, checking before and after the copy
