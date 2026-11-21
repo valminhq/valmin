@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/valminhq/valmin/internal/authz"
@@ -76,19 +75,23 @@ type RestartSubmission struct {
 	ContainerID string
 	RequestedBy string
 	ScheduleID  string
-	Audit       *store.AuditEntry
+	// ForceStart starts the server again even when the stop had to be force-killed, for a server
+	// that cannot save because its game loop has stopped.
+	ForceStart bool
+	Audit      *store.AuditEntry
 }
 
 // Submit queues a restart with its running-to-stopping claim.
 func (r *Restarter) Submit(ctx context.Context, input *RestartSubmission) (*store.Job, error) {
 	id := input.Instance.ID
+	plan := r.Backupper.planArchive(input.Instance, true)
 	job, err := r.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindRestart, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: input.Instance.Name,
 		RequestedBy: input.RequestedBy, ScheduleID: input.ScheduleID,
-		Payload: struct{}{}, Audit: input.Audit,
+		Payload: plan, Audit: input.Audit,
 		OnClaim: transitionClaim(jobs.KindRestart, id, instance.StateRunning, instance.StateStopping),
-	}, r.Run(input.Instance, input.ContainerID, input.RequestedBy))
+	}, r.Run(input, plan))
 	if err != nil {
 		return nil, fmt.Errorf("submit restart for instance %s: %w", id, err)
 	}
@@ -171,19 +174,26 @@ type StopSubmission struct {
 	RequestedBy string
 	ScheduleID  string
 	Reason      instance.StopReason
-	Audit       *store.AuditEntry
+	// Archive asks for the instance's stop archive, which it takes only when it opted in and
+	// the stop confirmed the world save.
+	Archive bool
+	Audit   *store.AuditEntry
 }
 
 // Submit claims running to stopping and queues the stop.
 func (s *Stopper) Submit(ctx context.Context, input *StopSubmission) (*store.Job, error) {
 	id := input.Instance.ID
+	plan := s.Backupper.planArchive(input.Instance, input.Archive)
 	job, err := s.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindStop, LockKey: jobs.InstanceLockKey(id),
 		InstanceID: &id, InstanceName: input.Instance.Name, RequestedBy: input.RequestedBy,
 		ScheduleID: input.ScheduleID,
-		Payload:    instance.StopPayload{Reason: input.Reason}, Audit: input.Audit,
+		Payload: instance.StopPayload{
+			Reason: input.Reason, ArchiveID: plan.ArchiveID, ArchivePath: plan.ArchivePath,
+		},
+		Audit:   input.Audit,
 		OnClaim: transitionClaim(jobs.KindStop, id, instance.StateRunning, instance.StateStopping),
-	}, s.Run(id, input.ContainerID))
+	}, s.Run(input.Instance, input.ContainerID, plan))
 	if err != nil {
 		return nil, fmt.Errorf("submit stop for instance %s: %w", id, err)
 	}
@@ -352,31 +362,22 @@ func (c *Cloner) Submit(ctx context.Context, run *CloneRun) (*store.Job, error) 
 	return job, nil
 }
 
-// maxPortAttempts bounds how often a clone's port is re-allocated after losing a race for it.
-const maxPortAttempts = 3
-
-// SubmitOnFreePort queues run on a base port from ports, allocating another when it loses the
-// race for one. A job conflict or a taken name reaches the caller unchanged.
+// SubmitOnFreePort queues run on a base port reserved from ports. A job conflict or a taken name
+// reaches the caller unchanged.
 func (c *Cloner) SubmitOnFreePort(
 	ctx context.Context, ports *instance.Allocator, run *CloneRun,
 ) (*store.Job, error) {
-	var lastErr error
-	for range maxPortAttempts {
-		port, err := ports.Allocate(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("allocate clone destination port: %w", err)
-		}
+	var job *store.Job
+	_, err := ports.Reserve(ctx, func(port int) error {
 		run.Destination.BasePort = port
-		job, err := c.Submit(ctx, run)
-		if err == nil {
-			return job, nil
-		}
-		if !errors.Is(err, store.ErrBasePortTaken) {
-			return nil, err
-		}
-		lastErr = err
+		var err error
+		job, err = c.Submit(ctx, run)
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
-	return nil, lastErr
+	return job, nil
 }
 
 // transitionClaim is an OnClaim that moves the instance from one state to another, refusing

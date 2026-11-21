@@ -46,7 +46,7 @@ func runUninstall(db *store.DB, inst *store.Instance, payload UninstallPayload) 
 		configs := configPaths(payload.Configs)
 
 		h.Progress(ctx, 20, fmt.Sprintf("saving the files of %d packages", len(pkgs)))
-		if err := saveRemovals(inst, pkgs, configs, backupDir); err != nil {
+		if err := saveUninstall(ctx, db, inst, pkgs, payload.Configs, backupDir); err != nil {
 			// Nothing has been removed, so there is nothing to put back.
 			return jobs.Failed(errcode.Internal, err)
 		}
@@ -72,7 +72,7 @@ func runUninstall(db *store.DB, inst *store.Instance, payload UninstallPayload) 
 			return rollbackUninstall(ctx, inst, pkgs, configs, backupDir, err)
 		}
 
-		h.Progress(ctx, 100, fmt.Sprintf("removed %d packages", len(pkgs)))
+		h.Progress(ctx, 100, "Removed "+packageCount(len(pkgs)))
 		return jobs.Outcome{
 			Status:   jobs.StatusSucceeded,
 			OnFinish: finishUninstall(inst.ID, payload.FullNames),
@@ -85,6 +85,19 @@ func runUninstall(db *store.DB, inst *store.Instance, payload UninstallPayload) 
 			},
 		}
 	}
+}
+
+// saveUninstall saves everything an uninstall removes into backupDir, and records the config
+// files it removes, named relative to the config directory, in their history.
+func saveUninstall(
+	ctx context.Context, db *store.DB, inst *store.Instance, pkgs []removedPackage, configs []string,
+	backupDir string,
+) error {
+	if err := saveRemovals(inst, pkgs, configPaths(configs), backupDir); err != nil {
+		return err
+	}
+	_, _, err := trackConfigs(ctx, db, inst, configs, backupDir)
+	return err
 }
 
 // saveRemovals copies every file the removal set will remove, from whichever tree it is in, and
@@ -106,7 +119,7 @@ func saveRemovals(inst *store.Instance, pkgs []removedPackage, configs []string,
 // configPaths is the server-relative paths of config files and of the copies the panel keeps of
 // each.
 func configPaths(files []string) []string {
-	suffixes := []string{"", modconfig.BackupSuffix, modconfig.OriginalSuffix, modconfig.PendingSuffix}
+	suffixes := append([]string{""}, modconfig.CopySuffixes()...)
 	paths := make([]string, 0, len(files)*len(suffixes))
 	for _, f := range files {
 		for _, suffix := range suffixes {

@@ -1,4 +1,5 @@
 import { api, type JSONResource } from './client';
+import { ApiError } from './errors';
 
 export type PlayerListKind = 'admins' | 'bans' | 'permitted';
 
@@ -107,3 +108,30 @@ export const playerLists = {
 	): Promise<JSONResource<PlayerList>> =>
 		api.putJSON<PlayerList>(path(instanceId, kind), { ids }, etag)
 };
+
+/** Whether two list entries name one account: equal, or one is the other without its
+ * platform prefix. */
+function sameID(a: string, b: string): boolean {
+	const bare = (id: string) => id.slice(id.indexOf('_') + 1);
+	return a === b || a === bare(b) || bare(a) === b;
+}
+
+/** Adds one id to a server's list through the list's own conditional write. A list changed
+ * between the read and the write is read again and the id appended once more; an append has no
+ * edits of its own to lose. Reports whether the id, in either form, was already there. */
+export async function addToPlayerList(
+	instanceId: string,
+	kind: PlayerListKind,
+	id: string
+): Promise<'added' | 'present'> {
+	for (let attempt = 0; ; attempt++) {
+		const current = await playerLists.get(instanceId, kind);
+		if (current.data.ids.some((listed) => sameID(listed, id))) return 'present';
+		try {
+			await playerLists.put(instanceId, kind, [...current.data.ids, id], current.etag);
+			return 'added';
+		} catch (err) {
+			if (attempt > 0 || !(err instanceof ApiError) || err.code !== 'stale_write') throw err;
+		}
+	}
+}

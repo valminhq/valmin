@@ -29,11 +29,12 @@ func OpenFile(t testing.TB) (db *store.DB, path string) {
 	if err != nil {
 		t.Fatalf("migrate the template database: %v", err)
 	}
-	path = filepath.Join(t.TempDir(), "panel.db")
+	dir := t.TempDir()
+	path = filepath.Join(dir, "panel.db")
 	if err := os.WriteFile(path, image, 0o600); err != nil {
 		t.Fatalf("write test database: %v", err)
 	}
-	db, err = store.Open(t.Context(), "sqlite", "file:"+path)
+	db, err = store.Open(t.Context(), "sqlite", "file:"+path, store.CataloguePath(dir))
 	if err != nil {
 		t.Fatalf("open test database: %v", err)
 	}
@@ -53,7 +54,7 @@ var migrated = sync.OnceValues(func() ([]byte, error) {
 // image migrates a new database at path, closes it and returns the file's bytes. The WAL is
 // checkpointed and must be empty afterwards, so the main file alone is the whole database.
 func image(ctx context.Context, path string) ([]byte, error) {
-	db, err := store.Open(ctx, "sqlite", "file:"+path)
+	db, err := store.Open(ctx, "sqlite", "file:"+path, store.CataloguePath(filepath.Dir(path)))
 	if err != nil {
 		return nil, fmt.Errorf("open: %w", err)
 	}

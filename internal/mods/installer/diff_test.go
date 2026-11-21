@@ -35,7 +35,7 @@ func diffFor(t *testing.T, fullName string, staged, existing map[string]string,
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
-	changes, err = Diff(fullName, placements, serverRoot, nil)
+	changes, err = Diff(fullName, placements, serverRoot, nil, nil)
 	if err != nil {
 		t.Fatalf("Diff: %v", err)
 	}
@@ -100,26 +100,70 @@ func TestDiffNeverOverwritesAnExistingConfig(t *testing.T) {
 	}
 }
 
-// TestDiffSkippedConfigIsNotInTheManifest is the other half of the rule: what install did
-// not write, uninstall must not delete. A user-edited .cfg surviving an uninstall depends
-// entirely on it being absent here.
-func TestDiffSkippedConfigIsNotInTheManifest(t *testing.T) {
+// TestDiffRecordsAKeptConfigInTheManifest: a config left as found stays the package's, marked
+// kept and hashed as shipped, so the next update can tell whether the mod changed it.
+func TestDiffRecordsAKeptConfigInTheManifest(t *testing.T) {
 	changes, _ := diffFor(t, "Ns-Thing",
 		map[string]string{"config/thing.cfg": "shipped default", "Thing.dll": "dll"},
 		map[string]string{"BepInEx/config/thing.cfg": "the operator's edits"})
 
-	manifest, err := Manifest(changes)
-	if err != nil {
-		t.Fatal(err)
+	got := map[string]ManifestEntry{}
+	for _, e := range Manifest(changes) {
+		got[e.Path] = e
 	}
-	for _, e := range manifest {
-		if e.Path == "BepInEx/config/thing.cfg" {
-			t.Fatalf("manifest = %+v, must not name the skipped config", manifest)
-		}
+	want := ManifestEntry{Path: "BepInEx/config/thing.cfg", SHA256: hashOf("shipped default"), Kept: true}
+	if got[want.Path] != want {
+		t.Errorf("config entry = %+v, want %+v", got[want.Path], want)
 	}
-	if len(manifest) != 1 {
-		t.Errorf("manifest = %+v, want only the .dll", manifest)
+	if dll := got["BepInEx/plugins/Ns-Thing/Thing.dll"]; dll.Kept || dll.SHA256 != hashOf("dll") {
+		t.Errorf("dll entry = %+v, want a written file hashed as staged", dll)
 	}
+}
+
+// TestDiffFollowsTheModsConfigOnUpdate covers an existing config file against the hash the
+// installed version shipped: it is overwritten only when the mod changed its file and the
+// file does not hold the new bytes already.
+func TestDiffFollowsTheModsConfigOnUpdate(t *testing.T) {
+	const dest = "BepInEx/config/thing.yaml"
+	tests := []struct {
+		name string
+		live string
+		prev map[string]string
+		want Action
+	}{
+		{"mod changed it, admin edited it", "edited", map[string]string{dest: hashOf("v1")}, ActionOverwrite},
+		{"mod changed it, untouched", "v1", map[string]string{dest: hashOf("v1")}, ActionOverwrite},
+		{"mod did not change it", "edited", map[string]string{dest: hashOf("v2")}, ActionSkip},
+		{"file already holds the new version", "v2", map[string]string{dest: hashOf("v1")}, ActionSkip},
+		{"previous version did not ship it", "edited", map[string]string{}, ActionSkip},
+		{"fresh install or repair", "edited", nil, ActionSkip},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := stage(t, metadataFiles(map[string]string{"config/thing.yaml": "v2"}))
+			placements, err := Plan(dir, "Ns-Thing")
+			if err != nil {
+				t.Fatal(err)
+			}
+			root := server(t, map[string]string{dest: tt.live})
+			changes, err := Diff("Ns-Thing", placements, root, nil, tt.prev)
+			if err != nil {
+				t.Fatal(err)
+			}
+			c := changeFor(t, changes, dest)
+			if c.Action != tt.want || c.Unowned {
+				t.Errorf("change = %s (unowned %v), want %s and owned", c.Action, c.Unowned, tt.want)
+			}
+			if c.Kept != (tt.want == ActionSkip) {
+				t.Errorf("kept = %v, want %v", c.Kept, tt.want == ActionSkip)
+			}
+		})
+	}
+}
+
+func hashOf(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:])
 }
 
 // TestDiffConflictsWithAnotherPackagesClaim is 11 §2.5's mod_conflict: overwriting a path
@@ -133,7 +177,7 @@ func TestDiffConflictsWithAnotherPackagesClaim(t *testing.T) {
 	}
 
 	claims := map[string]string{"BepInEx/plugins/Shared.dll": "Other-Package"}
-	_, err = Diff("Ns-Mine", placements, server(t, nil), claims)
+	_, err = Diff("Ns-Mine", placements, server(t, nil), claims, nil)
 
 	var conflict *ConflictError
 	if !errors.As(err, &conflict) {
@@ -141,6 +185,24 @@ func TestDiffConflictsWithAnotherPackagesClaim(t *testing.T) {
 	}
 	if conflict.Path != "BepInEx/plugins/Shared.dll" || conflict.Owner != "Other-Package" {
 		t.Errorf("conflict = %+v, want the path and the owning package named", conflict)
+	}
+}
+
+// TestDiffKeepsAConfigAnotherPackagePlaces: two packages may ship the same config file, as a
+// modpack and one of its mods do; the second keeps it instead of conflicting.
+func TestDiffKeepsAConfigAnotherPackagePlaces(t *testing.T) {
+	dir := stage(t, metadataFiles(map[string]string{"config/Shared.cfg": "the pack's"}))
+	placements, err := Plan(dir, "Ns-Pack")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := map[string]string{"BepInEx/config/Shared.cfg": "Ns-Mod"}
+	changes, err := Diff("Ns-Pack", placements, server(t, nil), claims, nil)
+	if err != nil {
+		t.Fatalf("Diff = %v, want no conflict on a config path", err)
+	}
+	if c := changeFor(t, changes, "BepInEx/config/Shared.cfg"); c.Action != ActionSkip || !c.Kept {
+		t.Errorf("change = %+v, want kept", c)
 	}
 }
 
@@ -154,7 +216,7 @@ func TestDiffDoesNotConflictWithItsOwnClaim(t *testing.T) {
 	}
 
 	claims := map[string]string{"BepInEx/plugins/Mine.dll": "Ns-Mine"}
-	if _, err := Diff("Ns-Mine", placements, server(t, nil), claims); err != nil {
+	if _, err := Diff("Ns-Mine", placements, server(t, nil), claims, nil); err != nil {
 		t.Fatalf("Diff = %v, want no error for a package's own path", err)
 	}
 }
@@ -169,7 +231,7 @@ func TestDiffRejectsADestinationThatIsADirectory(t *testing.T) {
 	}
 
 	root := server(t, map[string]string{"BepInEx/plugins/Thing.dll/nested": "surprise"})
-	if _, err := Diff("Ns-Thing", placements, root, nil); err == nil {
+	if _, err := Diff("Ns-Thing", placements, root, nil, nil); err == nil {
 		t.Error("Diff = nil, want an error for a destination that exists as a directory")
 	}
 }
@@ -180,15 +242,11 @@ func TestManifestHashesTheBytesThatWillBeWritten(t *testing.T) {
 	const body = "the payload bytes"
 	changes, _ := diffFor(t, "Ns-Thing", map[string]string{"Thing.dll": body}, nil)
 
-	manifest, err := Manifest(changes)
-	if err != nil {
-		t.Fatal(err)
-	}
+	manifest := Manifest(changes)
 	if len(manifest) != 1 {
 		t.Fatalf("manifest = %+v, want one entry", manifest)
 	}
-	sum := sha256.Sum256([]byte(body))
-	if want := hex.EncodeToString(sum[:]); manifest[0].SHA256 != want {
+	if want := hashOf(body); manifest[0].SHA256 != want {
 		t.Errorf("sha256 = %q, want %q", manifest[0].SHA256, want)
 	}
 	if manifest[0].Path != "BepInEx/plugins/Ns-Thing/Thing.dll" {
@@ -204,7 +262,7 @@ func TestDiffRefusesADestinationOutsideTheServerRoot(t *testing.T) {
 	for _, dest := range []string{"../../etc/cron.d/evil", "/etc/cron.d/evil", "..", ""} {
 		t.Run(dest, func(t *testing.T) {
 			placements := []Placement{{Source: "/staging/evil", Dest: dest}}
-			if _, err := Diff("Ns-Evil", placements, server(t, nil), nil); !errors.Is(err, ErrUnsafeDest) {
+			if _, err := Diff("Ns-Evil", placements, server(t, nil), nil, nil); !errors.Is(err, ErrUnsafeDest) {
 				t.Fatalf("Diff(%q) = %v, want ErrUnsafeDest", dest, err)
 			}
 		})

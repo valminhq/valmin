@@ -21,6 +21,8 @@
 		void load(id);
 		return off;
 	});
+	// A first read that failed while the panel was unreachable is tried again when it comes back.
+	$effect(() => socket.onConnected(() => void (!instance && load(id))));
 
 	/** Re-read after a job, because a restore changes the world on disk and retention changes
 	 * the row the panel renders its counts from. */
@@ -46,7 +48,10 @@
 	{#if loading}
 		<p class="text-sm text-muted-foreground">Loading…</p>
 	{:else if !instance}
-		<p class="text-sm text-muted-foreground">This server is not here.</p>
+		<!-- A failed read is explained by the problem above. -->
+		{#if !failure}
+			<p class="text-sm text-muted-foreground">This server is not here.</p>
+		{/if}
 	{:else}
 		<BackupsPanel {instance} onchange={() => load(id)} />
 	{/if}

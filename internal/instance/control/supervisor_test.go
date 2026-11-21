@@ -1,10 +1,13 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -371,6 +374,38 @@ func TestOrphanedContainerIsReportedNotRemoved(t *testing.T) {
 	}
 }
 
+// The observer passes every ten seconds; an orphan is logged when it appears, not on each pass,
+// and again if it disappears and comes back.
+func TestAnOrphanIsLoggedOncePerAppearance(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	// SetDefault also redirects the log package, and restoring the old handler does not undo
+	// that, so later tests would lose their daemon output.
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		log.SetOutput(os.Stderr)
+		log.SetFlags(log.LstdFlags)
+	})
+
+	var s Supervisor
+	orphan := map[string]*runtime.Container{"inst-gone": {ID: "c-orphan"}}
+	claimed := map[string]bool{}
+	warnings := func() int { return strings.Count(buf.String(), "container_id=c-orphan") }
+
+	for range 3 {
+		s.reportOrphans(t.Context(), orphan, claimed)
+	}
+	if got := warnings(); got != 1 {
+		t.Fatalf("three passes over one orphan logged %d warnings, want 1", got)
+	}
+	s.reportOrphans(t.Context(), map[string]*runtime.Container{}, claimed)
+	s.reportOrphans(t.Context(), orphan, claimed)
+	if got := warnings(); got != 2 {
+		t.Fatalf("an orphan that returned logged %d warnings in total, want 2", got)
+	}
+}
+
 // TestReconcileFindsEveryContainerAfterTheDatabaseIsLost is the label join taken to its
 // limit: with no rows at all, every managed container is an orphan and every one is found.
 func TestReconcileFindsEveryContainerAfterTheDatabaseIsLost(t *testing.T) {
@@ -617,6 +652,8 @@ func (n *recordingNotifier) NotifyUnexpectedStop(_ context.Context, _ *store.Ins
 func (n *recordingNotifier) NotifyPublicBuild(context.Context, string, string) func(context.Context, *sql.Tx) error {
 	return nil
 }
+
+func (n *recordingNotifier) NotifyUpdateTest(context.Context, *UpdateTestResult) {}
 
 func incidentCount(t *testing.T, db *store.DB) int {
 	t.Helper()

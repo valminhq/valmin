@@ -12,6 +12,7 @@
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import Problem from '#lib/components/problem.svelte';
+	import SaveFooter from '#lib/components/save-footer.svelte';
 
 	const browser = browserZone();
 	const zones = [...new Set([...Intl.supportedValuesOf('timeZone'), 'UTC'])].sort();
@@ -31,6 +32,7 @@
 	let hourCycle = $state<User['hour_cycle']>(session.user?.hour_cycle ?? '');
 	let dateOrder = $state<User['date_order']>(session.user?.date_order ?? '');
 	let busy = $state(false);
+	let savingWhat = $state<'zone' | 'format' | null>(null);
 	let saved = $state<'zone' | 'format' | null>(null);
 	let failure = $state<unknown>(null);
 
@@ -67,6 +69,7 @@
 
 	async function save(body: Partial<User>, what: 'zone' | 'format') {
 		busy = true;
+		savingWhat = what;
 		saved = null;
 		failure = null;
 		try {
@@ -77,6 +80,7 @@
 			failure = err;
 		} finally {
 			busy = false;
+			savingWhat = null;
 		}
 	}
 
@@ -155,19 +159,25 @@
 						instead of your real zone.
 					</p>
 				</div>
-				<div class="flex flex-wrap gap-2">
-					<Button type="submit" disabled={!ready}>Save</Button>
+				<SaveFooter
+					saveLabel="Save"
+					changed={chosen !== current}
+					{busy}
+					invalid={!known}
+					ondiscard={() => (chosen = current)}
+				>
 					{#if current !== ''}
 						<Button
 							type="button"
 							variant="outline"
+							size="sm"
 							disabled={busy}
 							onclick={() => save({ timezone: '' }, 'zone')}
 						>
 							Follow my browser
 						</Button>
 					{/if}
-				</div>
+				</SaveFooter>
 			</Card.Content>
 		</form>
 	</Card.Root>
@@ -200,9 +210,16 @@
 				<p class="text-sm text-muted-foreground">
 					Times will read like {example(hourCycle, dateOrder)}.
 				</p>
-				<div>
-					<Button type="submit" disabled={!formatChanged || busy}>Save format</Button>
-				</div>
+				<SaveFooter
+					saveLabel="Save format"
+					changed={formatChanged}
+					{busy}
+					saving={savingWhat === 'format'}
+					ondiscard={() => {
+						hourCycle = session.user?.hour_cycle ?? '';
+						dateOrder = session.user?.date_order ?? '';
+					}}
+				/>
 			</Card.Content>
 		</form>
 	</Card.Root>

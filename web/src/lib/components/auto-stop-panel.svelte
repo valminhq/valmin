@@ -8,12 +8,12 @@
 		type Instance
 	} from '#lib/api/instances.js';
 	import { session } from '#lib/state/session.svelte.js';
-	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import { Switch } from '#lib/components/ui/switch/index.js';
 	import Problem from '#lib/components/problem.svelte';
+	import SaveFooter from '#lib/components/save-footer.svelte';
 
 	let { instance, onchange }: { instance: Instance; onchange?: () => void } = $props();
 
@@ -29,11 +29,14 @@
 			session.allowed(instance.id).includes(actions.stop)
 	);
 
-	/** Takes the daemon's row as the form's baseline, and again after the parent re-reads it. */
-	$effect(() => {
+	/** Puts the form back on the daemon's row. */
+	function reset() {
 		enabled = instance.auto_stop_minutes > 0;
 		minutes = instance.auto_stop_minutes > 0 ? instance.auto_stop_minutes : DEFAULT_MINUTES;
-	});
+	}
+
+	/** Takes the daemon's row as the form's baseline, and again after the parent re-reads it. */
+	$effect(reset);
 
 	const wanted = $derived(enabled ? minutes : 0);
 	const valid = $derived(
@@ -104,14 +107,14 @@
 			</div>
 		{/if}
 		{#if canEdit}
-			<Button
-				size="sm"
-				class="justify-self-start"
-				disabled={!valid || !changed || saving}
-				onclick={save}
-			>
-				{saving ? 'Saving…' : 'Save auto-stop'}
-			</Button>
+			<SaveFooter
+				saveLabel="Save auto-stop"
+				{changed}
+				busy={saving}
+				invalid={!valid}
+				ondiscard={reset}
+				onsave={save}
+			/>
 		{/if}
 	</Card.Content>
 </Card.Root>

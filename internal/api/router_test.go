@@ -67,7 +67,7 @@ func routerWithOptionsTimeout(
 ) (*Server, *store.DB) {
 	t.Helper()
 
-	cfg := config.Defaults()
+	cfg := testConfig(t)
 	cfg.Server.ExternalURL = testOrigin
 	cfg.Server.BodyLimitBytes = 64
 	cfg.Server.RequestTimeout = config.Duration(timeout)

@@ -768,14 +768,18 @@ func TestPlayerWarning(t *testing.T) {
 			"The server restarts when all players have left, or in 1 hour at the latest.",
 		},
 		{
+			oneStep(control.StepStop), 5 * time.Minute,
+			"The server stops when all players have left, or in 5 minutes at the latest.",
+		},
+		{
 			[]control.ChainStep{{Type: control.StepStop}, {Type: control.StepStart}},
 			2 * time.Hour,
 			"The server goes down for maintenance when all players have left, or in 2 hours at the latest.",
 		},
 	}
 	for _, tt := range tests {
-		if got := playerWarning(tt.steps, tt.left); got != tt.want {
-			t.Errorf("playerWarning(%v, %s) = %q, want %q", tt.steps, tt.left, got, tt.want)
+		if got := control.PlayerWarning(tt.steps, tt.left); got != tt.want {
+			t.Errorf("PlayerWarning(%v, %s) = %q, want %q", tt.steps, tt.left, got, tt.want)
 		}
 	}
 }

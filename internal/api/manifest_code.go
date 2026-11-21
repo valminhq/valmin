@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 
@@ -119,7 +120,7 @@ func (h *Instances) templateCode(
 	if err != nil {
 		return nil, err
 	}
-	configs, err := readInstanceTweaks(inst, view, choices)
+	configs, err := h.readInstanceTweaks(ctx, inst, view, choices)
 	if err != nil {
 		return nil, err
 	}
@@ -136,12 +137,12 @@ func (h *Instances) templateCode(
 	return view, nil
 }
 
-// readInstanceTweaks is the settings of each portable config that differ from the copy kept
-// before the panel's first write. A file the panel never wrote has no such copy and is skipped.
-// Every file with changed settings is listed in view. An excluded file is left out of the result,
-// and so are secret settings of a file without withSecrets.
-func readInstanceTweaks(
-	inst *store.Instance, view *templateCodeView, choices codeChoices,
+// readInstanceTweaks is the settings of each portable config that differ from its baseline: the
+// version the panel first recorded, or the one a mod install last wrote. A file without one is
+// skipped. Every file with changed settings is listed in view. An excluded file is left out of
+// the result, and so are secret settings of a file without withSecrets.
+func (h *Instances) readInstanceTweaks(
+	ctx context.Context, inst *store.Instance, view *templateCodeView, choices codeChoices,
 ) ([]control.ManifestConfig, error) {
 	full, err := readInstanceConfigs(inst)
 	if err != nil || len(full) == 0 {
@@ -154,12 +155,12 @@ func readInstanceTweaks(
 	defer func() { _ = dir.Close() }()
 	var out []control.ManifestConfig
 	for _, cfg := range full {
-		orig, _, err := fsutil.ReadRegularIn(dir, cfg.File+modconfig.OriginalSuffix)
-		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fsutil.ErrNotRegular) {
-			continue
-		}
+		orig, ok, err := h.tweakBaseline(ctx, inst.ID, dir, cfg.File)
 		if err != nil {
-			return nil, fmt.Errorf("read the original of %s: %w", cfg.File, err)
+			return nil, err
+		}
+		if !ok {
+			continue
 		}
 		all, changed, _ := modconfig.Tweaks(orig, []byte(cfg.Content), true)
 		if changed == 0 {
@@ -179,6 +180,40 @@ func readInstanceTweaks(
 		}
 	}
 	return out, nil
+}
+
+// tweakBaseline is the version a file's tweaks are measured against: its baseline revision once
+// the panel or a setup has written the file, or for a file with no history the `.orig` copy an
+// earlier release kept. ok is false otherwise, so a file only changed outside the panel carries
+// nothing.
+func (h *Instances) tweakBaseline(
+	ctx context.Context, instanceID string, dir *os.Root, file string,
+) (orig []byte, ok bool, err error) {
+	revs, err := h.DB.ConfigRevisions(ctx, instanceID, file)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(revs) > 0 {
+		written := slices.ContainsFunc(revs, func(r store.ConfigRevision) bool {
+			return r.Source == store.ConfigEdit || r.Source == store.ConfigSetup
+		})
+		if !written {
+			return nil, false, nil
+		}
+		rev, err := h.DB.ConfigBaseline(ctx, instanceID, file)
+		if err != nil || rev == nil {
+			return nil, false, err
+		}
+		return rev.Content, true, nil
+	}
+	orig, _, err = fsutil.ReadRegularIn(dir, file+modconfig.OriginalSuffix)
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fsutil.ErrNotRegular) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("read the original of %s: %w", file, err)
+	}
+	return orig, true, nil
 }
 
 // tweakView lists changed settings, marking the names and values that read as credentials.

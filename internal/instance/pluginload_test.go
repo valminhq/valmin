@@ -1,12 +1,16 @@
 package instance
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
 
 // bootLog is the measured boot sequence (03 §5.3), with the padding BepInEx actually emits.
@@ -131,6 +135,42 @@ func TestReadPluginLoadOnAServerThatHasNoLog(t *testing.T) {
 	}
 }
 
+// TestReadPluginLoadRefusesAFileThatIsNotTheInstancesOwn covers a mod replacing the log with a
+// symlink out of the instance or a named pipe: neither is read, and neither blocks.
+func TestReadPluginLoadRefusesAFileThatIsNotTheInstancesOwn(t *testing.T) {
+	outside := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(outside, []byte(bootLog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name   string
+		plant  func(path string) error
+		wantIs error
+	}{
+		{"symlink out of the instance", func(p string) error { return os.Symlink(outside, p) }, nil},
+		{"named pipe", func(p string) error { return syscall.Mkfifo(p, 0o644) }, fsutil.ErrNotRegular},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			p := filepath.Join(dataDir, filepath.FromSlash(bepinexLog))
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := tt.plant(p); err != nil {
+				t.Fatal(err)
+			}
+			load, err := ReadPluginLoad(dataDir, DefaultPatterns)
+			if load != nil || err == nil {
+				t.Fatalf("ReadPluginLoad = %+v, %v; want nil and an error", load, err)
+			}
+			if tt.wantIs != nil && !errors.Is(err, tt.wantIs) {
+				t.Errorf("ReadPluginLoad error = %v, want %v", err, tt.wantIs)
+			}
+		})
+	}
+}
+
 // TestLoadedMatchesAPackageToItsPlugin covers the heuristic and its limits, both stated:
 // the name half of the full name and the base names of the `.dll` files the package's own
 // manifest placed are everything the panel knows about what a plugin will call itself.
@@ -208,6 +248,28 @@ func TestConfigOwnersAssignsEachFileToOnePackage(t *testing.T) {
 	}
 	if got, ok := claims["Gone.Mod.cfg"]; ok {
 		t.Errorf("ConfigClaims[Gone.Mod.cfg] = %v, want no claim", got)
+	}
+}
+
+// TestConfigClaimsMatchTextFilesAndFolders asserts a YAML or JSON file is matched by its name
+// without the extension, and a file in a subfolder by that folder.
+func TestConfigClaimsMatchTextFilesAndFolders(t *testing.T) {
+	manifests := map[string][]string{
+		"Azumatt-AzuAntiCheat": nil,
+		"RandyKnapp-EpicLoot":  nil,
+		"Ns-Json":              nil,
+	}
+	plugins := map[string]string{
+		"Azumatt.AzuAntiCheat_Whitelist.yml": "",
+		"EpicLoot/patches/a.json":            "",
+		"other/x.json":                       "",
+	}
+	want := map[string][]string{
+		"Azumatt.AzuAntiCheat_Whitelist.yml": {"Azumatt-AzuAntiCheat"},
+		"EpicLoot/patches/a.json":            {"RandyKnapp-EpicLoot"},
+	}
+	if got := ConfigClaims(manifests, plugins); !reflect.DeepEqual(got, want) {
+		t.Errorf("ConfigClaims = %v, want %v", got, want)
 	}
 }
 
@@ -299,6 +361,34 @@ func TestAFailureReasonIsBounded(t *testing.T) {
 	}
 	if !utf8.ValidString(reason) {
 		t.Error("the cut split a character")
+	}
+}
+
+// TestCompleteIsTheChainloadersFinishLine asserts a run counts as complete only once the
+// chainloader logged that it finished, and that a later run starts incomplete again.
+func TestCompleteIsTheChainloadersFinishLine(t *testing.T) {
+	t.Parallel()
+	cut := strings.Replace(bootLog, "[Message:   BepInEx] Chainloader startup complete\n", "", 1)
+	tests := []struct {
+		name, log string
+		want      bool
+	}{
+		{"finished", bootLog, true},
+		{"cut off while loading", cut, false},
+		{"a finished run followed by one still loading", bootLog + cut, false},
+		{"two finished runs", bootLog + bootLog, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			load, err := ReadPluginLoad(writeBepInExLog(t, tt.log), DefaultPatterns)
+			if err != nil || load == nil {
+				t.Fatalf("ReadPluginLoad = %v, %v", load, err)
+			}
+			if load.Complete != tt.want {
+				t.Errorf("Complete = %v, want %v", load.Complete, tt.want)
+			}
+		})
 	}
 }
 

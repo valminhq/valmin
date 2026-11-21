@@ -3,7 +3,14 @@
 	import { resolve } from '$app/paths';
 	import type { Job } from '#lib/api/types.js';
 	import { outcomeLabel } from '#lib/audit.js';
-	import { changeLine, jobActor, jobDuration, jobOutcome, nextAction } from '#lib/job-history.js';
+	import {
+		changeLine,
+		jobActor,
+		jobDuration,
+		jobMessage,
+		jobOutcome,
+		nextAction
+	} from '#lib/job-history.js';
 	import { session } from '#lib/state/session.svelte.js';
 
 	let { job }: { job: Job } = $props();
@@ -44,7 +51,7 @@
 		{/if}
 		<dt class="text-muted-foreground">Outcome</dt>
 		<dd class="break-words">
-			{outcomeLabel(jobOutcome(job.status))}{#if job.message}{' · ' + job.message}{/if}
+			{outcomeLabel(jobOutcome(job.status))}{#if job.message}{' · ' + jobMessage(job.message)}{/if}
 		</dd>
 	</dl>
 

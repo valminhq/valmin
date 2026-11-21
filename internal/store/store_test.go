@@ -25,7 +25,7 @@ func open(t *testing.T) *DB {
 	if err := os.WriteFile(path, image, 0o600); err != nil {
 		t.Fatalf("write test database: %v", err)
 	}
-	db, err := Open(t.Context(), "sqlite", "file:"+path)
+	db, err := Open(t.Context(), "sqlite", "file:"+path, CataloguePath(filepath.Dir(path)))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -41,7 +41,7 @@ var migrated = sync.OnceValues(func() ([]byte, error) {
 	defer func() { _ = os.RemoveAll(dir) }()
 	path := filepath.Join(dir, "panel.db")
 	ctx := context.Background()
-	db, err := Open(ctx, "sqlite", "file:"+path)
+	db, err := Open(ctx, "sqlite", "file:"+path, CataloguePath(dir))
 	if err != nil {
 		return nil, err
 	}

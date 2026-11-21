@@ -50,6 +50,47 @@ afterEach(() => {
 });
 
 describe('the public status page', () => {
+	it('shows the profile code, the address and the Steam link when the server shares them', async () => {
+		await open(
+			status({
+				join_address: 'play.example.com:2456',
+				steam_join_url: 'steam://run/892970//+connect%20play.example.com:2456',
+				modpack_code: '01234567-89ab-cdef-0123-456789abcdef',
+				modpack_registry: 'thunderstore'
+			})
+		);
+
+		expect(screen.getByRole('heading', { name: 'How to join' })).toBeTruthy();
+		expect(screen.getByText('01234567-89ab-cdef-0123-456789abcdef').tagName).toBe('CODE');
+		expect(screen.getByRole('button', { name: 'Copy profile code' })).toBeTruthy();
+		expect(screen.getByRole('link', { name: 'r2modman' })).toBeTruthy();
+		expect(screen.getByText('play.example.com:2456').tagName).toBe('CODE');
+		expect(screen.getByRole('button', { name: 'Copy join address' })).toBeTruthy();
+		expect(screen.getByRole('link', { name: 'Join with Steam' }).getAttribute('href')).toBe(
+			'steam://run/892970//+connect%20play.example.com:2456'
+		);
+	});
+
+	it('names Gale alone for a Hexium profile code, and shows a crossplay join code', async () => {
+		await open(
+			status({
+				join_code: '123456',
+				modpack_code: '01234567-89ab-cdef-0123-456789abcdef',
+				modpack_registry: 'hexium'
+			})
+		);
+
+		expect(screen.getByRole('link', { name: 'Gale' })).toBeTruthy();
+		expect(screen.queryByRole('link', { name: 'r2modman' })).toBeNull();
+		expect(screen.getByText('123456').tagName).toBe('CODE');
+		expect(screen.queryByRole('link', { name: 'Join with Steam' })).toBeNull();
+	});
+
+	it('has no join section when the server shares nothing about joining', async () => {
+		await open();
+		expect(screen.queryByRole('heading', { name: 'How to join' })).toBeNull();
+	});
+
 	it('renders the notice and connection guidance as plain text with their line breaks', async () => {
 		await open(
 			status({

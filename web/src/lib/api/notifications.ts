@@ -79,10 +79,12 @@ export type GameKind =
 export type RuleKind =
 	| InboxKind
 	| 'power_cut'
+	| 'sign_ins_blocked'
 	| 'server_started'
 	| 'server_stopped'
 	| 'instance_down'
 	| 'game_updated'
+	| 'update_test_finished'
 	| GameKind;
 
 /** Which destinations hear about one kind of event, on one server or on every server, with the

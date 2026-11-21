@@ -105,7 +105,10 @@ func (n *Notifier) OnJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.Fini
 		InstanceName: fin.InstanceName,
 		Detail: []notify.Field{
 			{Name: "Reason", Value: failureReason(fin.Error)},
-			{Name: "What to do", Value: "Open the server's job history for the full log, then run the backup again."},
+			{
+				Name:  "What to do",
+				Value: "Open Operations on the server's overview for the full log, then run the backup again.",
+			},
 			{Name: "Job ID", Value: fin.ID},
 		},
 	}
@@ -205,6 +208,20 @@ func (n *Notifier) NotifyPowerCutSoon(ctx context.Context, powerOff, stopAt time
 	})
 }
 
+// NotifySignInsBlocked reports to the destinations of the sign_ins_blocked rules that sign-ins to
+// the account username are refused after repeated failures, the first refused attempt coming from address.
+func (n *Notifier) NotifySignInsBlocked(ctx context.Context, username, address string) {
+	n.emitByRules(ctx, alerts.KindSignInsBlocked, "", func(*alerts.ParamsWire) *notify.Event {
+		return &notify.Event{
+			Kind: notify.KindSignInsBlocked,
+			Detail: []notify.Field{
+				{Key: "username", Name: "Account", Value: username},
+				{Key: "address", Name: "Blocked attempt from", Value: address},
+			},
+		}
+	})
+}
+
 // NotifyPublicBuild owes a notification when the observed public build is one the panel has
 // not seen before. An unchanged observation is the common case — the check runs hourly — and
 // says nothing, so a receiver is told about a new build once rather than every hour until
@@ -285,8 +302,17 @@ func downDetail(to, reason string, limitMB int) []notify.Field {
 		status = "Running again"
 		next = "Anyone playing was disconnected. Check the server's console log for why it went down."
 	}
-	if reason == instance.ReasonOOMKilled {
+	switch reason {
+	case instance.ReasonOOMKilled:
 		next = memoryAdvice(limitMB)
+	case instance.ReasonUnresponsive:
+		status = "Not responding; still running"
+		next = "Check the server's console log and any mod you added or updated recently. " +
+			"Restart the server if it stays stuck."
+	case instance.ReasonUnresponsiveRestarting:
+		status = "Being restarted"
+		next = "Anyone playing was disconnected. A hung game cannot save, so the world may go back " +
+			"to its last autosave, up to 30 minutes old."
 	}
 	return []notify.Field{
 		{Key: "status", Name: "Status", Value: status},

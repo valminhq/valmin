@@ -542,7 +542,7 @@ func TestManifestConfigCannotEscapeTheConfigDirectory(t *testing.T) {
 	inst := seedStoppedInstance(t, db, "chain-escape")
 
 	err := control.ApplyManifestConfigs(
-		inst,
+		t.Context(), db, inst,
 		[]control.ManifestConfig{{File: "../../escaped.cfg", Content: "x"}},
 		false,
 	)

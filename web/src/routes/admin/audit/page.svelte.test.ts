@@ -130,8 +130,8 @@ describe('the audit screen filters', () => {
 		expect(await optionsOf('Action')).toEqual([
 			'Any action',
 			'Mod installed',
-			'Server started',
-			'Users password reset'
+			'Password reset',
+			'Server started'
 		]);
 		expect(daemon.requests('GET', '/audit/filters')).toHaveLength(1);
 	});

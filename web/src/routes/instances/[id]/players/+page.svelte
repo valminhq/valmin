@@ -1,9 +1,17 @@
 <script lang="ts">
+	import { socket } from '#lib/socket/index.svelte.js';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
-	import { actions, instances, type Instance } from '#lib/api/instances.js';
+	import {
+		actions,
+		instances,
+		type CommandCapabilities,
+		type Instance
+	} from '#lib/api/instances.js';
+	import { seenPlayers, type PlayerListKind, type SeenPlayer } from '#lib/api/players.js';
 	import { session } from '#lib/state/session.svelte.js';
+	import { instanceList } from '#lib/state/instances.svelte.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Dialog from '#lib/components/ui/dialog/index.js';
 	import JobProgress from '#lib/components/job-progress.svelte';
@@ -20,11 +28,26 @@
 	let loading = $state(true);
 	let restartOpen = $state(false);
 	let restartJob = $state<string | null>(null);
+	let seen = $state<SeenPlayer[]>([]);
+	let seenLoaded = $state(false);
+	let seenFailure = $state<unknown>(null);
+	let capabilities = $state<CommandCapabilities | null>(null);
+	let revisions = $state<Record<PlayerListKind, number>>({ admins: 0, bans: 0, permitted: 0 });
 
 	const allowed = $derived(session.allowed(id));
 	const canManage = $derived(allowed.includes(actions.playersManage));
 	const canRestart = $derived(allowed.includes(actions.restart));
 	const canStats = $derived(allowed.includes(actions.statsRead));
+	// The layout keeps this list live, so Kick follows the server starting and stopping.
+	const running = $derived(
+		(instanceList.items.find((row) => row.id === id) ?? instance)?.state === 'running'
+	);
+	const canKick = $derived(
+		running &&
+			capabilities?.command_channel === 'rcon' &&
+			allowed.includes(actions.commandsSend) &&
+			(capabilities.allowed_commands.length === 0 || capabilities.allowed_commands.includes('kick'))
+	);
 
 	// Waits for the permissions; only the server id re-runs it.
 	$effect(() => {
@@ -32,16 +55,34 @@
 		void id;
 		untrack(() => void load());
 	});
+	// A first read that failed while the panel was unreachable is tried again when it comes back.
+	$effect(() => socket.onConnected(() => void (!instance && load())));
 
 	async function load() {
 		try {
 			if (session.allowed(id).length === 0) await session.refreshPermissions();
 			instance = await instances.get(id);
 			failure = null;
+			const may = session.allowed(id);
+			if (may.includes(actions.playersManage)) void loadSeen();
+			if (may.includes(actions.commandsSend)) {
+				capabilities = await instances.capabilities(id).catch(() => null);
+			}
 		} catch (err) {
 			failure = err;
 		} finally {
 			loading = false;
+		}
+	}
+
+	async function loadSeen() {
+		try {
+			seen = (await seenPlayers.list(id)).items;
+			seenFailure = null;
+		} catch (err) {
+			seenFailure = err;
+		} finally {
+			seenLoaded = true;
 		}
 	}
 
@@ -72,13 +113,24 @@
 	{#if loading}
 		<p class="text-sm text-muted-foreground">Loading…</p>
 	{:else if !instance}
-		<p class="text-sm text-muted-foreground">This server is not here.</p>
+		<!-- A failed read is explained by the problem above. -->
+		{#if !failure}
+			<p class="text-sm text-muted-foreground">This server is not here.</p>
+		{/if}
 	{:else if !canManage}
 		<p class="text-sm text-muted-foreground">
 			You cannot read or change this server’s player lists.
 		</p>
 	{:else}
-		<SeenPlayers instanceId={id} />
+		<SeenPlayers
+			instanceId={id}
+			players={seen}
+			loaded={seenLoaded}
+			failure={seenFailure}
+			{canKick}
+			crossplay={instance.crossplay}
+			onadded={(kind) => revisions[kind]++}
+		/>
 
 		<section class="grid gap-4" aria-labelledby="player-lists">
 			<div class="flex flex-wrap items-end justify-between gap-3">
@@ -122,6 +174,8 @@
 				<PlayerListEditor
 					instanceId={id}
 					kind="admins"
+					players={seen}
+					revision={revisions.admins}
 					title="Admins"
 					description="Players allowed to use in-game administrator commands."
 					hintId="player-lists-hint"
@@ -129,6 +183,8 @@
 				<PlayerListEditor
 					instanceId={id}
 					kind="bans"
+					players={seen}
+					revision={revisions.bans}
 					title="Banned"
 					description="Players refused when they try to join this server."
 					hintId="player-lists-hint"
@@ -136,6 +192,8 @@
 				<PlayerListEditor
 					instanceId={id}
 					kind="permitted"
+					players={seen}
+					revision={revisions.permitted}
 					title="Allowlist"
 					description="When it has anyone on it, only these players may join."
 					hintId="player-lists-hint"

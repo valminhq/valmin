@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 )
 
@@ -109,7 +110,8 @@ func collectConditions(rows *sql.Rows) ([]AlertCondition, error) {
 }
 
 // ReconcileConditions makes the stored set match what a scan observed, in one transaction, and
-// reports the edges. The scan does its filesystem reads before calling this (C1, 10 §4.3).
+// reports the edges. An open condition whose detail is unchanged is not written. The scan does
+// its filesystem reads before calling this, so the transaction holds no slow work.
 func (db *DB) ReconcileConditions(
 	ctx context.Context, observed []ObservedCondition, now time.Time,
 ) (ConditionDiff, error) {
@@ -160,8 +162,8 @@ func openConditionsTx(ctx context.Context, tx *sql.Tx) ([]AlertCondition, error)
 	return collectConditions(rows)
 }
 
-// upsertCondition touches an already-open condition or opens a new one. existing is nil when
-// none is open; the returned row is non-nil only when one opened.
+// upsertCondition updates an already-open condition whose detail changed, or opens a new one.
+// existing is nil when none is open; the returned row is non-nil only when one opened.
 func upsertCondition(
 	ctx context.Context, tx *sql.Tx, o ObservedCondition,
 	existing *AlertCondition, now time.Time,
@@ -172,10 +174,13 @@ func upsertCondition(
 	}
 	stamp := FormatTime(now)
 	if existing != nil {
+		if maps.Equal(existing.Detail, o.Detail) {
+			return nil, nil
+		}
 		if _, err := tx.ExecContext(ctx,
 			`UPDATE alert_conditions SET last_seen_at = ?, detail = ? WHERE id = ?`,
 			stamp, string(detail), existing.ID); err != nil {
-			return nil, fmt.Errorf("touch condition %s: %w", existing.ID, err)
+			return nil, fmt.Errorf("update condition %s: %w", existing.ID, err)
 		}
 		return nil, nil
 	}

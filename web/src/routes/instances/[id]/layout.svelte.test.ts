@@ -76,6 +76,7 @@ beforeEach(() => {
 		owner: false,
 		created_at: '2026-09-01T00:00:00Z',
 		last_login_at: null,
+		password_change_required: false,
 		timezone: '',
 		hour_cycle: '',
 		date_order: ''
@@ -171,6 +172,28 @@ describe('the running job in the server header', () => {
 
 			const running = await screen.findByRole('link', { name: /Backup running/ });
 			expect(running.getAttribute('href')).toBe('/instances/inst-a');
+		} finally {
+			jobs = [];
+		}
+	});
+
+	it('shows a job that starts while the server state stays the same', async () => {
+		try {
+			await open('/instances/inst-a/backups', { 'inst-a': [actions.stop] }, live);
+			await vi.waitFor(() =>
+				expect(daemon.requests('GET', '/instances/inst-a/jobs')).toHaveLength(1)
+			);
+
+			jobs = [job({ job_id: 'job-1', kind: 'backup', status: 'running' })];
+			socket.push('instance.inst-a.state', {
+				type: 'state',
+				instance: 'inst-a',
+				state: 'running',
+				restart_required: false,
+				pending_restart: false
+			});
+
+			expect(await screen.findByRole('link', { name: /Backup running/ })).toBeTruthy();
 		} finally {
 			jobs = [];
 		}

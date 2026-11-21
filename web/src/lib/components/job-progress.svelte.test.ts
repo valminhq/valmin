@@ -51,4 +51,18 @@ describe('job progress', () => {
 
 		expect(await screen.findByText('Disk full.')).toBeTruthy();
 	});
+
+	// A bar left at 100% on a finished job reads as a task still showing, until the page is left.
+	it('draws the bar while the job runs and drops it once the job is finished', async () => {
+		daemon.on('GET', '/jobs/job-1', () =>
+			Response.json(job({ status: 'running', progress: 40, message: 'Copying' }))
+		);
+		render(JobProgress, { jobId: 'job-1' });
+		await screen.findByText(/Copying/);
+		expect(screen.queryByRole('progressbar')).toBeTruthy();
+
+		socket.push('job.job-1', done);
+		await screen.findByText('Done');
+		expect(screen.queryByRole('progressbar')).toBeNull();
+	});
 });

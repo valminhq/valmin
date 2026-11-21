@@ -1,4 +1,5 @@
 import { ApiError, NetworkError, type ErrorEnvelope } from './errors';
+import { trackPageRead } from '#lib/state/busy.svelte.js';
 
 /**
  * The panel's REST client, hand-rolled by decision (`06 §4`, F6). Live state arrives over the
@@ -58,8 +59,8 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
 	else if (options.body !== undefined) headers['Content-Type'] = 'application/json';
 	if (stateChanging(method)) headers[CSRF_HEADER] = csrfToken();
 
-	try {
-		return await fetch(BASE + path, {
+	const transmit = () =>
+		fetch(BASE + path, {
 			method,
 			headers,
 			credentials: 'same-origin',
@@ -69,6 +70,8 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
 				options.text ??
 				(options.body === undefined ? undefined : JSON.stringify(options.body))
 		});
+	try {
+		return await (stateChanging(method) ? transmit() : trackPageRead(transmit));
 	} catch (cause) {
 		throw new NetworkError(cause);
 	}
@@ -92,8 +95,34 @@ function failed(response: Response, payload?: unknown): ApiError {
 			code: 'internal',
 			message: 'Valmin could not complete the request.',
 			request_id: response.headers.get('X-Request-Id') ?? ''
-		}
+		},
+		retryAfter(response)
 	);
+}
+
+/** The whole seconds a 429 asks the client to wait, or 0 when it names none. */
+function retryAfter(response: Response): number {
+	const seconds = Number(response.headers.get('Retry-After'));
+	return Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds) : 0;
+}
+
+/** The longest Retry-After a read waits out on its own before giving the failure to its caller. */
+const MAX_READ_RETRY_SECONDS = 10;
+
+/** Sends one request, and resends a rate-limited read once after the wait the panel asked for. */
+async function sendRetryingRead(path: string, options: RequestOptions): Promise<Response> {
+	const response = await send(path, options);
+	const wait = retryAfter(response);
+	if (
+		response.status !== 429 ||
+		(options.method ?? 'GET') !== 'GET' ||
+		wait > MAX_READ_RETRY_SECONDS ||
+		options.signal?.aborted
+	) {
+		return response;
+	}
+	await new Promise((resolve) => setTimeout(resolve, Math.max(wait, 1) * 1000));
+	return send(path, options);
 }
 
 /**
@@ -105,7 +134,7 @@ async function jsonRequest<T>(
 	path: string,
 	options: RequestOptions = {}
 ): Promise<JSONResource<T>> {
-	const response = await send(path, options);
+	const response = await sendRetryingRead(path, options);
 
 	if (response.status === 204) {
 		return { data: undefined as T, etag: response.headers.get('ETag') ?? '' };
@@ -132,7 +161,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
 /** Sends one request whose success is text and whose failure is still an envelope. */
 async function textRequest(path: string, options: RequestOptions = {}): Promise<TextResource> {
-	const response = await send(path, options);
+	const response = await sendRetryingRead(path, options);
 	if (!response.ok) {
 		const json = (response.headers.get('Content-Type') ?? '').includes('application/json');
 		throw failed(response, json ? await response.json() : undefined);

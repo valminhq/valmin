@@ -48,7 +48,7 @@ describe('condition chips', () => {
 	});
 
 	it('says how long each condition has been open', () => {
-		expect(body([item('unclean_stop')])).toContain('15m');
+		expect(body([item('unclean_stop')])).toContain('open for 15 minutes');
 	});
 
 	it('links a condition to where it is acted on', () => {

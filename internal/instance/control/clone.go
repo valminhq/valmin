@@ -215,6 +215,16 @@ func finishClone(
 		if err := store.TxUpsertInstanceMods(ctx, tx, mods); err != nil {
 			return fmt.Errorf("copy clone mod manifest: %w", err)
 		}
+		// The RCON plugin's history holds the source's console password.
+		if err := store.TxCopyConfigRevisions(
+			ctx,
+			tx,
+			run.Source.ID,
+			run.Destination.ID,
+			command.ConfigFile,
+		); err != nil {
+			return fmt.Errorf("copy config history: %w", err)
+		}
 		if !worldPresent {
 			return nil
 		}

@@ -41,6 +41,20 @@ type backupView struct {
 	WorldAttention []backup.Attention `json:"world_attention"`
 }
 
+// backupRemoval names one archive a coming backup would remove.
+type backupRemoval struct {
+	ID        string    `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// backupList is the catalogue page plus what retention would remove when the next consistent
+// or best-effort backup is taken, so a client can say so before the backup starts.
+type backupList struct {
+	Page[backupView]
+	RemovedByNextConsistent []backupRemoval `json:"removed_by_next_consistent"`
+	RemovedByNextBestEffort []backupRemoval `json:"removed_by_next_best_effort"`
+}
+
 func toBackupView(b *store.Backup) backupView {
 	v := backupView{
 		ID: b.ID, InstanceID: b.InstanceID, SizeBytes: b.SizeBytes, SHA256: b.SHA256,
@@ -101,36 +115,64 @@ func (h *Instances) listBackups(w http.ResponseWriter, r *http.Request) {
 		next = &encoded
 	}
 
-	doomed, err := h.doomedArchives(r.Context(), inst)
+	list, err := h.backupList(r.Context(), inst, rows, next)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
+	JSON(w, r, http.StatusOK, list)
+}
 
+// backupList builds the response for one page of rows, marking each archive retention would
+// remove on its next run and naming what the next backup of each kind would remove.
+func (h *Instances) backupList(
+	ctx context.Context, inst *store.Instance, rows []store.Backup, next *string,
+) (*backupList, error) {
+	retention, err := h.ctl.Pruner.Preview(ctx, inst)
+	if err != nil {
+		return nil, fmt.Errorf("retention for instance %s: %w", inst.ID, err)
+	}
+	doomed := make(map[string]bool, len(retention.Now))
+	for _, a := range retention.Now {
+		doomed[a.ID] = true
+	}
 	views := make([]backupView, 0, len(rows))
 	for i := range rows {
 		v := toBackupView(&rows[i])
 		v.PrunesNext = doomed[v.ID]
 		views = append(views, v)
 	}
-	JSON(w, r, http.StatusOK, NewPage(views, next))
+	consistent, err := h.removals(ctx, inst.ID, retention.AfterConsistent)
+	if err != nil {
+		return nil, err
+	}
+	bestEffort, err := h.removals(ctx, inst.ID, retention.AfterBestEffort)
+	if err != nil {
+		return nil, err
+	}
+	return &backupList{
+		Page:                    NewPage(views, next),
+		RemovedByNextConsistent: consistent,
+		RemovedByNextBestEffort: bestEffort,
+	}, nil
 }
 
-// doomedArchives is the set of archive ids retention would remove on its next run. It runs
-// the selection the prune job runs, over the whole catalogue rather than the page being served,
-// because retention counts each class across every archive an instance has.
-func (h *Instances) doomedArchives(
-	ctx context.Context, inst *store.Instance,
-) (map[string]bool, error) {
-	pruned, err := h.ctl.Pruner.Select(ctx, inst, nil)
-	if err != nil {
-		return nil, fmt.Errorf("retention for instance %s: %w", inst.ID, err)
+// removals names each archive retention would remove, with the time it was taken, newest
+// first. An archive that vanished from the catalogue meanwhile is left out.
+func (h *Instances) removals(
+	ctx context.Context, instanceID string, entries []backup.Entry,
+) ([]backupRemoval, error) {
+	out := make([]backupRemoval, 0, len(entries))
+	for _, e := range entries {
+		row, err := h.DB.BackupByID(ctx, instanceID, e.ID)
+		if err != nil {
+			return nil, fmt.Errorf("read backup %s: %w", e.ID, err)
+		}
+		if row != nil {
+			out = append(out, backupRemoval{ID: row.ID, CreatedAt: row.CreatedAt})
+		}
 	}
-	doomed := make(map[string]bool, len(pruned))
-	for _, a := range pruned {
-		doomed[a.ID] = true
-	}
-	return doomed, nil
+	return out, nil
 }
 
 // downloadBackup is GET /instances/{id}/backups/{bid}/download (04 §3, 11 §8.3). The path

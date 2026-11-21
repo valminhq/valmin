@@ -41,7 +41,8 @@ export class StatsWindow {
 		try {
 			const reading = await api.stats(this.instanceId);
 			// A live sample that arrived first wins: it is newer by construction.
-			if (!this.latest) this.latest = reading;
+			if (this.latest) return;
+			this.latest = reading;
 			if (reading.available && reading.ts) this.record(reading.ts, reading);
 		} catch {
 			// A seed that fails is not an error to show: the socket is the live source and

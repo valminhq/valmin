@@ -36,6 +36,16 @@ func EnsureConsoleLogging(path string) (changed bool, err error) {
 	return true, nil
 }
 
+// WithConsoleLogging is raw as EnsureConsoleLogging would leave it: the console key turned on,
+// or raw itself when there is nothing to change or the key is missing.
+func WithConsoleLogging(raw []byte) []byte {
+	out, changed, err := enableConsole(string(raw))
+	if err != nil || !changed {
+		return raw
+	}
+	return []byte(out)
+}
+
 // enableConsole performs the edit over the file's text. Only a value of `false` is rewritten;
 // anything else comes back untouched.
 func enableConsole(text string) (out string, changed bool, err error) {

@@ -49,7 +49,6 @@ func (s *Scanner) Submit(ctx context.Context, scheduleID string) (*store.Job, er
 
 // run evaluates every condition and reconciles the stored set against it.
 func (s *Scanner) run(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
-	jh.Progress(ctx, 10, "Reading the panel's state")
 	diff, err := s.Scan(ctx)
 	if err != nil {
 		return jobs.Outcome{Status: jobs.StatusFailed, Error: err.Error()}
@@ -84,10 +83,6 @@ func (s *Scanner) Scan(ctx context.Context) (store.ConditionDiff, error) {
 	}
 	if s.Dispatcher != nil {
 		s.Dispatcher.DispatchAlerts(ctx)
-	}
-
-	if _, err := s.DB.SweepIncidents(ctx, time.Now().UTC().Add(-alerts.IncidentRetention)); err != nil {
-		slog.WarnContext(ctx, "sweep incidents", slog.Any("error", err))
 	}
 	return diff, nil
 }

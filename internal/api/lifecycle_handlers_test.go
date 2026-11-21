@@ -61,7 +61,7 @@ func lifecycleWorld(
 	t.Helper()
 	dir := t.TempDir()
 
-	cfg := config.Defaults()
+	cfg := testConfig(t)
 	cfg.Server.ExternalURL = testOrigin
 	cfg.Data.Root = dir
 	cfg.Data.HostRoot = dir

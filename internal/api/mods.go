@@ -12,6 +12,7 @@ import (
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/mods/thunderstore"
+	"github.com/valminhq/valmin/internal/ratelimit"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -24,8 +25,10 @@ type Mods struct {
 	// Clients holds one client per enabled registry (03 §6.1). A registry the operator
 	// disabled is absent rather than flagged, so nothing downstream checks twice.
 	Clients map[source.Source]*thunderstore.Client
-	// Profiles stores profile codes for each enabled registry that offers them.
-	Profiles profileHosts
+	// Profiles stores profile codes for each enabled registry that offers them, and
+	// profileCodeLimit bounds how often each user may upload one.
+	Profiles         profileHosts
+	profileCodeLimit *ratelimit.Limiter
 	// Patterns reads the loader log's plugin lines.
 	Patterns instance.PatternSet
 	plan     *manager.Planner
@@ -79,6 +82,7 @@ func modRoutes(rt *routeTable, m *Mods) {
 	rt.Handle("PATCH /api/v1/instances/{id}/mods/{full_name}", http.HandlerFunc(m.patchMod))
 	rt.Stream("GET /api/v1/instances/{id}/mods/{full_name}/changelog", http.HandlerFunc(m.changelog))
 	rt.Handle("GET /api/v1/instances/{id}/mods/export", http.HandlerFunc(m.exportClientManifest))
+	rt.Handle("GET /api/v1/instances/{id}/mods/export/code", http.HandlerFunc(m.currentClientCode))
 	rt.Handle("POST /api/v1/instances/{id}/mods/export/code", http.HandlerFunc(m.exportClientCode))
 	rt.Handle("POST /api/v1/instances/{id}/mods/code/preview", http.HandlerFunc(m.previewCode))
 	rt.Handle("POST /api/v1/instances/{id}/mods/code/apply", http.HandlerFunc(m.applyCode))

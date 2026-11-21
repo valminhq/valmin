@@ -48,11 +48,17 @@ type Supervisor struct {
 	GameUpdater *GameUpdater
 	// Stopper submits the stops auto-stop owes.
 	Stopper *Stopper
+	// Restarter submits the restarts the watchdog owes.
+	Restarter *Restarter
 	// ModQueue may be nil, in which case queued mod installs wait.
 	ModQueue  *ModQueue
 	idle      idleClock
+	hang      hangWatch
 	crash     *instance.CrashLoop
 	owedStops map[string]string
+	// orphans holds the container ids the last pass reported as orphaned, so each is logged
+	// once rather than on every pass.
+	orphans map[string]bool
 
 	// stops runs protective stops off the observer's goroutine; stopping holds the containers
 	// with one in flight, so a slow stop is not started twice.
@@ -149,8 +155,8 @@ func (s *Supervisor) interruptOperations(ctx context.Context) {
 	}
 }
 
-// Run is the observer loop: the same reconciliation pass, then the auto-stop check, on a timer,
-// for the life of the process. It returns when ctx is cancelled.
+// Run is the observer loop: the same reconciliation pass, then the auto-stop and watchdog
+// checks, on a timer, for the life of the process. It returns when ctx is cancelled.
 func (s *Supervisor) Run(ctx context.Context) {
 	ticker := time.NewTicker(observeInterval)
 	defer ticker.Stop()
@@ -163,13 +169,20 @@ func (s *Supervisor) Run(ctx context.Context) {
 			s.stops.Wait()
 			return
 		case <-ticker.C:
+			reconciled := true
 			if err := s.Reconcile(ctx); err != nil && ctx.Err() == nil {
 				slog.WarnContext(ctx, "observer pass failed, will retry", slog.Any("error", err))
+				reconciled = false
 			}
 			if s.ModQueue != nil {
 				s.ModQueue.Drain(ctx)
 			}
-			s.autoStop(ctx, time.Now())
+			now := time.Now()
+			s.autoStop(ctx, now)
+			// A pass that could not see Docker says nothing about whether a server is quiet.
+			if reconciled {
+				s.watchdog(ctx, now)
+			}
 		}
 	}
 }
@@ -229,6 +242,8 @@ func (s *Supervisor) sweepStaging(ctx context.Context, j *store.Job) {
 		modRecovery.SweepModToggle(ctx, j)
 	case jobs.KindBackup.String():
 		recovery.sweepBackupPart(ctx, j)
+	case jobs.KindStop.String(), jobs.KindRestart.String():
+		recovery.sweepStopArchive(ctx, j)
 	case jobs.KindRestore.String():
 		recovery.sweepRestoreSwap(ctx, j)
 	case jobs.KindGameUpdate.String():
@@ -315,19 +330,34 @@ func (s *Supervisor) Reconcile(ctx context.Context) error {
 		}
 	}
 
-	for instanceID := range byInstanceID {
-		if seen[instanceID] {
+	s.reportOrphans(ctx, byInstanceID, seen)
+	return nil
+}
+
+// reportOrphans logs each managed container no instance row claims, once per container
+// rather than on every pass; one that leaves and returns is logged again.
+func (s *Supervisor) reportOrphans(
+	ctx context.Context,
+	byInstanceID map[string]*runtime.Container,
+	claimed map[string]bool,
+) {
+	orphans := make(map[string]bool)
+	for instanceID, c := range byInstanceID {
+		if claimed[instanceID] {
+			continue
+		}
+		orphans[c.ID] = true
+		if s.orphans[c.ID] {
 			continue
 		}
 		// Do not delete. A container the panel made whose row is gone is what
 		// io.valmin.managed is for: it is surfaced for adoption, and removing it would
 		// destroy a running server to tidy a table.
-		c := byInstanceID[instanceID]
 		slog.WarnContext(ctx, "orphaned container: managed by this panel, no instance row",
 			slog.String("container_id", c.ID), slog.String("instance_id", instanceID),
 			slog.Bool("running", c.Running))
 	}
-	return nil
+	s.orphans = orphans
 }
 
 // stream ties a log reader and a stats sampler to the lifetime of a running container. The ring

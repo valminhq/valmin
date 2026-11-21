@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { HTMLAttributes } from 'svelte/elements';
 	import type { MessageStyle } from '#lib/message.js';
+	import { formatInstant } from '#lib/api/schedules.js';
 
 	/** How one message reads in Discord, laid out as the daemon renders it (notify.discordPayload). */
 	let {
@@ -20,7 +21,7 @@
 
 	const title = $derived(server ? `${server} · ${headline}` : headline);
 	const body = $derived(style.layout === '' ? text : text || headline);
-	const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+	const time = formatInstant(Date.now(), { hour: 'numeric', minute: '2-digit' });
 
 	/** The text split at Discord's bold markers, which is as much markdown as the preview shows. */
 	const parts = $derived(body.split('**').map((part, i) => ({ part, bold: i % 2 === 1 })));

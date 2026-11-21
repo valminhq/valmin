@@ -76,7 +76,7 @@ override should name a digest too.
 | `VALMIN_GAME_LOG_PATTERNS`                  | Log-line pattern overrides; empty. See [log patterns](#override-log-patterns).     |
 | `VALMIN_PORTS_BASE` / `VALMIN_PORTS_STRIDE` | Port allocation start and spacing; `2456` / `5`.                                   |
 | `VALMIN_THUNDERSTORE_BASE_URL`              | Thunderstore host; `https://thunderstore.io`.                                      |
-| `VALMIN_THUNDERSTORE_SYNC_INTERVAL`         | How often every enabled registry is refreshed; `1h`.                               |
+| `VALMIN_THUNDERSTORE_SYNC_INTERVAL`         | How often every enabled registry is refreshed; `6h`.                               |
 | `VALMIN_HEXIUM_BASE_URL`                    | Hexium host; `https://valheim.hexium.gg`.                                          |
 | `VALMIN_HEXIUM_ENABLED`                     | Whether Hexium is searched and installable; `true`.                                |
 | `VALMIN_AUTH_SESSION_IDLE_TTL`              | Sign-out after this long without activity; `24h`.                                  |
@@ -343,7 +343,8 @@ direct variable and its `_FILE` form is an error.
 The panel generates the key only on its first start. Afterwards a missing or
 different key stops startup; see [key recovery](operations.md#recover-from-a-lost-master-key).
 The database defaults to `panel.db` under the same root. Preserve both in
-[installation backups](operations.md#back-up-the-whole-installation).
+[installation backups](operations.md#back-up-the-whole-installation). The mod catalogue
+lives at `cache/catalogue.db` under the data root whatever `db.dsn` says, and needs no backup.
 
 Durations accept values such as `30s`, `24h`, and whole days such as `7d`.
 Environment variables for lists, such as trusted proxy CIDRs, use comma-separated

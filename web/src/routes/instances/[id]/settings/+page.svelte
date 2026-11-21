@@ -1,10 +1,12 @@
 <script lang="ts">
+	import { socket } from '#lib/socket/index.svelte.js';
 	import { Textarea } from '#lib/components/ui/textarea/index.js';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { ApiError } from '#lib/api/errors.js';
+	import { passwordInName, validJoinHost } from '#lib/launch-rules.js';
 	import {
 		actions,
 		GAME_BACKUPS_MAX,
@@ -29,6 +31,7 @@
 	import Field, { focusFirstInvalid } from '#lib/components/field.svelte';
 	import Problem from '#lib/components/problem.svelte';
 	import RestartNotice from '#lib/components/restart-notice.svelte';
+	import SaveBar from '#lib/components/save-bar.svelte';
 	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import {
 		manifest,
@@ -45,6 +48,7 @@
 	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { warningText } from '#lib/tone.js';
+	import ConfigLeftOut from '#lib/components/config-left-out.svelte';
 
 	const id = $derived(page.params.id ?? '');
 	// The whole link, so an operator can copy it out of the panel and send it to a friend.
@@ -69,6 +73,9 @@
 	let statusPublished = $state(false);
 	let statusNotice = $state('');
 	let statusConnectInfo = $state('');
+	let statusShowJoin = $state(false);
+	let statusShowModpack = $state(false);
+	let joinHost = $state('');
 	let crossplay = $state(false);
 	let preset = $state('');
 	let gameBackups = $state<number | undefined>();
@@ -100,6 +107,8 @@
 	$effect(() => {
 		void load();
 	});
+	// A first read that failed while the panel was unreachable is tried again when it comes back.
+	$effect(() => socket.onConnected(() => void (!instance && load())));
 
 	/** Built in the browser rather than served as a file: the endpoint answers JSON, and a
 	 * blob keeps the one download from needing a second representation on the daemon. */
@@ -193,6 +202,9 @@
 		statusPublished = row.status_published;
 		statusNotice = row.status_notice ?? '';
 		statusConnectInfo = row.status_connect_info ?? '';
+		statusShowJoin = row.status_show_join;
+		statusShowModpack = row.status_show_modpack;
+		joinHost = row.join_host;
 		crossplay = row.crossplay;
 		preset = row.preset ?? '';
 		gameBackups = row.game_backups;
@@ -243,6 +255,9 @@
 		if (statusConnectInfo.trim() !== (instance.status_connect_info ?? '')) {
 			fields.push('status_connect_info');
 		}
+		if (statusShowJoin !== instance.status_show_join) fields.push('status_show_join');
+		if (statusShowModpack !== instance.status_show_modpack) fields.push('status_show_modpack');
+		if (joinHost.trim() !== instance.join_host) fields.push('join_host');
 		if (crossplay !== instance.crossplay) fields.push('crossplay');
 		if (preset !== (instance.preset ?? '')) fields.push('preset');
 		if (gameBackups !== instance.game_backups) fields.push('game_backups');
@@ -256,12 +271,18 @@
 
 	unsaved(() => changed.length > 0);
 
-	// The daemon's own rules on names and passwords come back beside each field; only the
-	// minimum length it serves is checked here.
+	// The daemon checks every rule again and its answers come back beside each field; the ones
+	// it serves or that are cheap to copy are checked here first.
 	const localProblems = $derived.by(() => {
 		const problems: Record<string, string> = {};
 		if (password && password.length < minPassword) {
 			problems.password = `At least ${minPassword} characters.`;
+		} else if (passwordInName(password, serverName.trim(), instance?.world_name ?? '')) {
+			problems.password = 'Must not appear inside the server name or the world name.';
+		}
+		if (joinHost.trim() !== '' && !validJoinHost(joinHost.trim())) {
+			problems.join_host =
+				'Enter a host name or IP address without a port or http://, such as play.example.com.';
 		}
 		if (serverName.trim() === '') problems.server_name = 'Players need a name to find.';
 		if (panelName.trim() === '') problems.name = 'Give this server a name.';
@@ -317,6 +338,9 @@
 		if (changed.includes('status_connect_info')) {
 			body.status_connect_info = statusConnectInfo.trim();
 		}
+		if (changed.includes('status_show_join')) body.status_show_join = statusShowJoin;
+		if (changed.includes('status_show_modpack')) body.status_show_modpack = statusShowModpack;
+		if (changed.includes('join_host')) body.join_host = joinHost.trim();
 		if (changed.includes('crossplay')) body.crossplay = crossplay;
 		if (changed.includes('preset')) body.preset = preset;
 		if (changed.includes('game_backups')) body.game_backups = gameBackups;
@@ -360,9 +384,12 @@
 	{#if loading}
 		<p class="text-sm text-muted-foreground">Loading…</p>
 	{:else if !instance}
-		<p class="text-sm text-muted-foreground">This server is not here.</p>
+		<!-- A failed read is explained by the problem above. -->
+		{#if !failure}
+			<p class="text-sm text-muted-foreground">This server is not here.</p>
+		{/if}
 	{:else}
-		<RestartNotice {instance} />
+		<RestartNotice {instance} canRestart={session.allowed(id).includes(actions.restart)} />
 
 		{#if !canEdit && !canEditLimits}
 			<p class="text-sm text-muted-foreground" data-testid="settings-blocked">
@@ -448,6 +475,24 @@
 							<Card.Description>How players find and join this server.</Card.Description>
 						</Card.Header>
 						<Card.Content class="grid gap-4">
+							<Field
+								id="join_host"
+								label="Join address"
+								hint="The host name or IP address players type to join, without the port, such as play.example.com."
+								error={problem('join_host')}
+							>
+								{#snippet children(field)}
+									<Input
+										id="join_host"
+										bind:value={joinHost}
+										disabled={!canEdit}
+										autocomplete="off"
+										spellcheck="false"
+										{...field}
+									/>
+								{/snippet}
+							</Field>
+
 							<div class="flex items-center justify-between gap-4">
 								<div class="grid gap-1">
 									<Label for="public">List publicly</Label>
@@ -544,10 +589,41 @@
 									{/snippet}
 								</Field>
 
+								<div class="flex items-center justify-between gap-4">
+									<div class="grid gap-1">
+										<Label for="status_show_join">Show how to join</Label>
+										<p class="text-sm text-muted-foreground">
+											Adds the join address and the Steam link, or the join code on a crossplay
+											server. Anyone with the link sees them.
+										</p>
+										{#if statusShowJoin && !crossplay && joinHost.trim() === ''}
+											<p class="text-sm text-muted-foreground">
+												Set a join address under Connections, or the page has none to show.
+											</p>
+										{/if}
+									</div>
+									<Switch id="status_show_join" disabled={!canEdit} bind:checked={statusShowJoin} />
+								</div>
+
+								<div class="flex items-center justify-between gap-4">
+									<div class="grid gap-1">
+										<Label for="status_show_modpack">Show the profile code</Label>
+										<p class="text-sm text-muted-foreground">
+											Adds the last profile code created for this server, while its mods still match
+											it. Anyone with the link sees it.
+										</p>
+									</div>
+									<Switch
+										id="status_show_modpack"
+										disabled={!canEdit}
+										bind:checked={statusShowModpack}
+									/>
+								</div>
+
 								<Field
 									id="status_connect_info"
 									label="How to join"
-									hint={`Shown on the status page: the address, where to get the password, and any mods players need. Plain text, up to ${STATUS_TEXT_MAX} characters.`}
+									hint={`Shown on the status page, for example where to get the password. Plain text, up to ${STATUS_TEXT_MAX} characters.`}
 									error={problem('status_connect_info')}
 								>
 									{#snippet children(field)}
@@ -715,28 +791,16 @@
 			</div>
 
 			{#if (canEdit || canEditLimits) && (changed.length > 0 || saving)}
-				<div
-					class="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t bg-background/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6"
+				<SaveBar
+					busy={saving}
+					disabled={!ready}
+					ondiscard={() => instance && adopt(instance)}
+					onsave={submit}
 				>
-					<p class="text-sm text-muted-foreground">
-						{changed.length}
-						{changed.length === 1 ? 'setting' : 'settings'} changed. The server picks them up on its next
-						start.
-					</p>
-					<div class="flex gap-2">
-						<Button
-							variant="ghost"
-							size="sm"
-							disabled={saving}
-							onclick={() => instance && adopt(instance)}
-						>
-							Discard changes
-						</Button>
-						<Button size="sm" disabled={!ready} onclick={submit}>
-							{saving ? 'Saving…' : 'Save changes'}
-						</Button>
-					</div>
-				</div>
+					{changed.length}
+					{changed.length === 1 ? 'setting' : 'settings'} changed. The server picks
+					{changed.length === 1 ? 'it' : 'them'} up on its next start.
+				</SaveBar>
 			{/if}
 		</div>
 
@@ -745,7 +809,7 @@
 				<Card.Header>
 					<Card.Title>Manage server</Card.Title>
 					<Card.Description
-						>These take effect at once. Save changes does not apply to them.</Card.Description
+						>These take effect at once, apart from the settings above.</Card.Description
 					>
 				</Card.Header>
 				<Card.Content class="grid divide-y">
@@ -778,8 +842,9 @@
 									<p class="text-sm font-medium">Share as a template</p>
 									<p class="text-sm text-muted-foreground">
 										The template file holds the launch settings, the mods at their installed
-										versions and every config file. It carries no password and no world, but a mod's
-										config can hold a key or a webhook — read it before you share it.
+										versions and the plugin config files at the top of the config folder. It carries
+										no password and no world, but a mod's config can hold a key or a webhook — read
+										it before you share it.
 									</p>
 								</div>
 								<Button variant="outline" size="sm" disabled={exporting} onclick={downloadManifest}>
@@ -787,6 +852,7 @@
 									{exporting ? 'Preparing…' : 'Download template file'}
 								</Button>
 							</div>
+							<ConfigLeftOut {id} />
 							<div class="grid gap-2">
 								<p class="text-sm text-muted-foreground">
 									A template code is a short text to paste under New from template on another panel.
@@ -914,7 +980,7 @@
 				name={instance.name}
 				title="Delete {instance.name}?"
 				confirmLabel="Delete server"
-				description="The container and this server's settings are removed. Its worlds and backup archives stay on disk, but no server lists them again; copy out what you want to keep."
+				description="The container and this server's settings are removed. Its worlds and backup archives stay on disk. Another server can import a world from these archives under Backups, Import from a backup; the worlds themselves are listed nowhere, so copy out what you want to keep."
 				onconfirm={remove}
 			/>
 		{/if}

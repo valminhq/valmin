@@ -11,7 +11,7 @@ func observed(kind string, instanceID *string) ObservedCondition {
 }
 
 // TestReconcileOpensThenStaysQuiet asserts a condition still true on a later scan does not
-// open again, and that only last_seen_at moves.
+// open again, and is not written while its detail stays the same.
 func TestReconcileOpensThenStaysQuiet(t *testing.T) {
 	t.Parallel()
 	db := open(t)
@@ -42,8 +42,21 @@ func TestReconcileOpensThenStaysQuiet(t *testing.T) {
 	if len(open) != 1 {
 		t.Fatalf("open conditions = %d, want the one row both scans saw", len(open))
 	}
-	if !open[0].LastSeenAt.After(open[0].FirstSeenAt) {
-		t.Error("the second scan must advance last_seen_at without moving first_seen_at")
+	if !open[0].LastSeenAt.Equal(open[0].FirstSeenAt) {
+		t.Errorf("last_seen_at = %v after an unchanged scan, want %v", open[0].LastSeenAt, open[0].FirstSeenAt)
+	}
+
+	changed := observed("low_disk", &id)
+	changed.Detail = map[string]string{"k": "w"}
+	if _, err := db.ReconcileConditions(t.Context(), []ObservedCondition{changed}, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	open, err = db.OpenConditions(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 1 || open[0].Detail["k"] != "w" || !open[0].LastSeenAt.After(open[0].FirstSeenAt) {
+		t.Errorf("after a changed detail = %+v, want detail k=w and last_seen_at advanced", open)
 	}
 }
 

@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { Textarea } from '#lib/components/ui/textarea/index.js';
-	import { configs, type ConfigCopyName } from '#lib/api/configs.js';
+	import { configs } from '#lib/api/configs.js';
 	import { ApiError } from '#lib/api/errors.js';
 	import type { TextResource } from '#lib/api/client.js';
 	import { diffLines, hunks } from '#lib/diff.js';
 	import { Button } from '#lib/components/ui/button/index.js';
+	import SaveFooter from '#lib/components/save-footer.svelte';
 	import * as Alert from '#lib/components/ui/alert/index.js';
 	import { unsaved } from '#lib/state/dirty.svelte.js';
 	import Problem from '#lib/components/problem.svelte';
@@ -20,15 +21,15 @@
 		id,
 		file,
 		editable,
-		compare,
+		revision,
 		onsaved
 	}: {
 		id: string;
 		file: string;
 		editable: boolean;
-		/** Which kept version to diff against, chosen once for the whole screen so this view and
-		 * the form compare against the same one. */
-		compare: ConfigCopyName | 'off';
+		/** The id of the kept version to diff against, or null for none. Chosen once for the whole
+		 * screen so this view and the form compare against the same one. */
+		revision: string | null;
 		/** Called after a save lands, so the typed form re-reads rather than keeping a schema
 		 * parsed from bytes that are gone (F4). */
 		onsaved: () => void;
@@ -63,16 +64,17 @@
 	});
 
 	$effect(() => {
-		void loadReference(compare);
+		void loadReference(revision);
 	});
 
-	async function loadReference(which: ConfigCopyName | 'off') {
-		if (which === 'off') {
+	async function loadReference(rev: string | null) {
+		if (rev === null) {
 			reference = null;
 			return;
 		}
-		const read = await configs.readRawCopy(id, file, which).catch(() => null);
-		reference = read?.text ?? null;
+		const read = await configs.readRawRevision(id, file, rev).catch(() => null);
+		// A later choice may have been made while this one was read.
+		if (rev === revision) reference = read?.text ?? null;
 	}
 
 	function take(read: TextResource) {
@@ -204,18 +206,13 @@
 			bind:value={text}
 		></Textarea>
 
-		<div class="flex flex-wrap items-center justify-between gap-3">
-			<p class="text-sm text-muted-foreground">
-				{changed ? 'Unsaved changes.' : 'Matches the file on disk.'}
-			</p>
-			<div class="flex gap-2">
-				<Button variant="ghost" size="sm" onclick={discard} disabled={!changed || saving}>
-					Discard changes
-				</Button>
-				<Button size="sm" onclick={save} disabled={!editable || !changed || !etag || saving}>
-					{saving ? 'Saving…' : 'Save file'}
-				</Button>
-			</div>
-		</div>
+		<SaveFooter
+			saveLabel="Save file"
+			{changed}
+			busy={saving}
+			invalid={!editable || !etag}
+			ondiscard={discard}
+			onsave={save}
+		/>
 	{/if}
 </div>

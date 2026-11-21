@@ -7,13 +7,14 @@ import (
 	"io"
 	"os"
 	"path"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
 
 // bepinexLog is BepInEx's own log file, relative to an instance's data directory. Load
@@ -44,6 +45,9 @@ type PluginLoad struct {
 	// FirstError is the run's first Error or Fatal line that names no plugin failure, as
 	// failureReason bounds it, or "" if there was none.
 	FirstError string
+	// Complete is whether the chainloader logged that it finished. Until it does, plugins after
+	// the last named one may still load or fail.
+	Complete bool
 	// ObservedAt is when BepInEx last wrote to the log, which is the run these results come
 	// from. The lines themselves carry no timestamp (03 §5.3's captures), so this is the
 	// file's own — near enough to say which boot, and not presented as more than that.
@@ -69,22 +73,30 @@ var bepinexPrefix = regexp.MustCompile(`^\[[^\]]*\]\s*`)
 
 // ReadPluginLoad parses the chainloader run in an instance's BepInEx log. A nil result with a
 // nil error is a server with no such log, never started since BepInEx was installed or never
-// modded: an absence of information rather than a failure to report.
+// modded: an absence of information rather than a failure to report. The game writes the log,
+// so it is opened through an os.Root and must be a regular file: a symlink out of the instance
+// or a named pipe in its place is an error, never read.
 func ReadPluginLoad(dataDir string, patterns PatternSet) (*PluginLoad, error) {
-	p := filepath.Join(dataDir, filepath.FromSlash(bepinexLog))
-	f, err := os.Open(p)
+	root, err := os.OpenRoot(dataDir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("open %s: %w", p, err)
+		return nil, fmt.Errorf("open instance: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
+	f, info, err := fsutil.OpenRegularIn(root, bepinexLog)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read plugin log: %w", err)
 	}
 	defer func() { _ = f.Close() }()
 
 	load := parsePluginLoad(f, patterns)
-	if info, err := f.Stat(); err == nil {
-		load.ObservedAt = info.ModTime()
-	}
+	load.ObservedAt = info.ModTime()
 	return &load, nil
 }
 
@@ -107,7 +119,6 @@ func ClearPluginLog(dataDir string) error {
 // literal is minted here.
 func parsePluginLoad(r io.Reader, patterns PatternSet) PluginLoad {
 	load := PluginLoad{Declared: -1}
-	done := false
 	br := bufio.NewReader(r)
 	for {
 		line, err := readBoundedLine(br)
@@ -123,11 +134,11 @@ func parsePluginLoad(r io.Reader, patterns PatternSet) PluginLoad {
 				if convErr != nil {
 					n = -1
 				}
-				load, done = PluginLoad{Declared: n}, false
-			case done:
+				load = PluginLoad{Declared: n}
+			case load.Complete:
 				// After the chainloader finished, until the next run's count line.
 			case ev.Kind == EventChainloaderDone:
-				done = true
+				load.Complete = true
 			case ev.Kind == EventPluginLoading:
 				load.Plugins = append(load.Plugins, parseLoadedPlugin(ev.Groups[1]))
 			case ev.Kind == EventPluginFailed || ev.Kind == EventPluginSkipped:
@@ -277,6 +288,34 @@ func (l *PluginLoad) Loaded(fullName string, manifestPaths []string) bool {
 	return false
 }
 
+// ModLoad is what a chainloader run said about one installed package.
+type ModLoad string
+
+// ModLoad values. ModNotSeen is a plugin the run said nothing about, which stays the superset
+// for a failure no failure line describes.
+const (
+	ModLoaded  ModLoad = "loaded"
+	ModNotSeen ModLoad = "not_seen"
+	ModFailed  ModLoad = "failed"
+)
+
+// ModStatus reports what this run said about the package fullName whose manifest placed paths,
+// with the loader's line when it failed. "" is no answer: there is no run, or the package places
+// no plugin. A failure line outranks a load line, since a plugin whose load threw was named
+// `Loading [...]` on its way to the exception.
+func (l *PluginLoad) ModStatus(fullName string, paths []string) (status ModLoad, reason string) {
+	if l == nil || !IsPlugin(paths) {
+		return "", ""
+	}
+	if why, failed := l.FailedFor(fullName, paths); failed {
+		return ModFailed, why
+	}
+	if l.Loaded(fullName, paths) {
+		return ModLoaded, ""
+	}
+	return ModNotSeen, ""
+}
+
 // IsPlugin reports whether a package places anything BepInEx would load. A framework package's
 // assemblies live under `BepInEx/core/` and a config-only package ships none, so neither is ever
 // named by a `Loading [...]` line and neither has a load status to report.
@@ -307,9 +346,9 @@ func ConfigOwners(manifests map[string][]string, plugins map[string]string) map[
 }
 
 // ConfigClaims maps each config file to the installed packages that claim it, sorted. A package
-// claims a file its manifest placed, and one whose header plugin, file name or last
-// dot-separated part of the file name matches the aliases Loaded uses. A file no package claims
-// is absent.
+// claims a file its manifest placed, and one whose header plugin, file name, last
+// dot-separated part of the file name or top folder matches the aliases Loaded uses. A file no
+// package claims is absent.
 //
 // manifests maps a full name to its manifest paths; plugins maps a config file name to the
 // plugin its header names, version included, or an empty string.
@@ -338,15 +377,17 @@ func ConfigClaims(manifests map[string][]string, plugins map[string]string) map[
 // configMatches reports whether a config file's names match a package's aliases. Plugins name
 // their file after their GUID, such as `Azumatt.AzuCraftyBoxes.cfg`, their header after the
 // plugin itself, followed by its version, and a side file after the plugin and its purpose, such
-// as `FiresDiscordIntegration_BotToken.cfg`.
+// as `FiresDiscordIntegration_BotToken.cfg`. A file in a subfolder is also matched by the
+// folder directly under the config directory, such as `EpicLoot/patches/x.json`.
 func configMatches(aliases map[string]bool, file, plugin string) bool {
 	if i := strings.LastIndex(plugin, " "); i >= 0 {
 		plugin = plugin[:i]
 	}
-	stem := strings.TrimSuffix(file, ".cfg")
+	stem := strings.TrimSuffix(path.Base(file), path.Ext(file))
 	last := stem[strings.LastIndex(stem, ".")+1:]
 	head, _, _ := strings.Cut(last, "_")
-	for _, name := range []string{plugin, stem, last, head} {
+	top, _, _ := strings.Cut(path.Dir(file), "/")
+	for _, name := range []string{plugin, stem, last, head, top} {
 		if n := normalisePluginName(name); n != "" && aliases[n] {
 			return true
 		}

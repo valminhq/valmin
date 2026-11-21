@@ -285,7 +285,8 @@ func TestManifestImportRefusesABadCode(t *testing.T) {
 }
 
 // TestCodeConfigsSurviveAReshare asserts imported settings merge into the files the mods
-// placed, keep the copies a panel edit keeps, and come back when the new server is shared.
+// placed, record the bytes they replaced in each file's history, and come back when the new
+// server is shared.
 func TestCodeConfigsSurviveAReshare(t *testing.T) {
 	t.Parallel()
 	rt, db, _, src := manifestWorld(t)
@@ -308,7 +309,7 @@ func TestCodeConfigsSurviveAReshare(t *testing.T) {
 		slices.Clone(tmpl.Configs),
 		control.ManifestConfig{File: "Shipped.cfg", Content: "[Other]\nAdded = 1\n"},
 	)
-	if err := control.ApplyManifestConfigs(dest, configs, true); err != nil {
+	if err := control.ApplyManifestConfigs(t.Context(), db, dest, configs, true); err != nil {
 		t.Fatal(err)
 	}
 	dir := filepath.Join(instance.ServerDir(dest.DataDir), filepath.FromSlash(instance.ConfigDir))
@@ -322,8 +323,11 @@ func TestCodeConfigsSurviveAReshare(t *testing.T) {
 	if got := read("Shipped.cfg"); got != shipped+"[Other]\nAdded = 1\n" {
 		t.Errorf("merged Shipped.cfg =\n%s", got)
 	}
-	if read("Shipped.cfg"+modconfig.OriginalSuffix) != shipped || read("Tweaked.cfg"+modconfig.OriginalSuffix) != "" {
-		t.Error("the originals are not the bytes the import replaced")
+	for file, want := range map[string]string{"Shipped.cfg": shipped, "Tweaked.cfg": ""} {
+		base, err := db.ConfigBaseline(t.Context(), dest.ID, file)
+		if err != nil || base == nil || string(base.Content) != want {
+			t.Errorf("baseline of %s = %+v, %v; want the bytes the import replaced", file, base, err)
+		}
 	}
 
 	// The mod's first start fills in the rest of the file around the imported setting.

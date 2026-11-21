@@ -512,7 +512,8 @@ func TestCloneInstanceForUpdateTest(t *testing.T) {
 	db := open(t)
 	sourceID := seedInstance(t, db, NewID(), 2456)
 	exec(t, db.Writer,
-		`UPDATE instances SET state = 'running', public = TRUE, crossplay = TRUE WHERE id = ?`, sourceID)
+		`UPDATE instances SET state = 'running', public = TRUE, crossplay = TRUE,
+			backup_on_restart = TRUE, watchdog = 'restart' WHERE id = ?`, sourceID)
 
 	clone := func(n *NewInstance) error {
 		tx, err := db.Writer.BeginTx(t.Context(), nil)
@@ -552,6 +553,23 @@ func TestCloneInstanceForUpdateTest(t *testing.T) {
 	}
 	if got.AutoStopMinutes != updateTestAutoStopMinutes {
 		t.Errorf("auto_stop_minutes = %d, want %d", got.AutoStopMinutes, updateTestAutoStopMinutes)
+	}
+	if got.BackupOnRestart || got.Watchdog != "off" {
+		t.Errorf("a test copy has backup_on_restart %v and watchdog %q, want off for both: it is thrown away",
+			got.BackupOnRestart, got.Watchdog)
+	}
+
+	exec(t, db.Writer, `UPDATE instances SET state = 'stopped' WHERE id = ?`, sourceID)
+	if err := clone(ordinary); err != nil {
+		t.Fatal(err)
+	}
+	kept, err := db.InstanceByID(t.Context(), ordinary.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !kept.BackupOnRestart || kept.Watchdog != "restart" {
+		t.Errorf("an ordinary clone has backup_on_restart %v and watchdog %q, want the source's (true, restart)",
+			kept.BackupOnRestart, kept.Watchdog)
 	}
 }
 

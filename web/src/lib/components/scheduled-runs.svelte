@@ -20,12 +20,17 @@
 
 	$effect(() => {
 		const id = instanceId;
+		const visible = () => {
+			if (!document.hidden) void load(id);
+		};
 		const unhook = socket.onConnected(() => void load(id));
-		const tick = setInterval(() => void load(id), 60_000);
+		const tick = setInterval(visible, 60_000);
+		document.addEventListener('visibilitychange', visible);
 		void load(id);
 		return () => {
 			unhook();
 			clearInterval(tick);
+			document.removeEventListener('visibilitychange', visible);
 		};
 	});
 

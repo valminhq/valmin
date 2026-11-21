@@ -206,7 +206,7 @@ func TestInstallThenUninstallOverTheCorpusIsByteIdentical(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: Plan: %v", fullName, err)
 		}
-		changes, err := Diff(fullName, placements, serverRoot, claims)
+		changes, err := Diff(fullName, placements, serverRoot, claims, nil)
 		var conflict *ConflictError
 		if errors.As(err, &conflict) {
 			t.Logf("%s: skipped, %s is owned by %s", fullName, conflict.Path, conflict.Owner)
@@ -215,10 +215,7 @@ func TestInstallThenUninstallOverTheCorpusIsByteIdentical(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: Diff: %v", fullName, err)
 		}
-		manifest, err := Manifest(changes)
-		if err != nil {
-			t.Fatalf("%s: Manifest: %v", fullName, err)
-		}
+		manifest := Manifest(changes)
 		if err := Backup(changes, serverRoot, backupDir); err != nil {
 			t.Fatalf("%s: Backup: %v", fullName, err)
 		}
@@ -241,7 +238,13 @@ func TestInstallThenUninstallOverTheCorpusIsByteIdentical(t *testing.T) {
 	// Removed in reverse, which is the order that would expose a package deleting a
 	// directory another one is still using.
 	for i := len(order) - 1; i >= 0; i-- {
-		if err := Remove(Paths(manifests[order[i]]), serverRoot); err != nil {
+		var paths []string
+		for _, e := range manifests[order[i]] {
+			if !UserConfig(e.Path) {
+				paths = append(paths, e.Path)
+			}
+		}
+		if err := Remove(paths, serverRoot); err != nil {
 			t.Errorf("%s: Remove: %v", order[i], err)
 		}
 	}

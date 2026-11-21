@@ -163,6 +163,23 @@ func TestExportLeavesUntaggedPackagesOut(t *testing.T) {
 	}
 }
 
+// TestExportRefusesAnEmptyModpack keeps a profile with nothing in it from being handed to
+// players as if it were their modpack.
+func TestExportRefusesAnEmptyModpack(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, _ := installWorld(t, threeDeep()...)
+	alreadyModded(t, db)
+	installClosure(t, rt, admin, "OdinPlus-OdinArchitect", "1.7.0")
+
+	rec := getExport(t, rt, admin, "?format=r2z")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 (%s)", rec.Code, rec.Body)
+	}
+	if code := errCode(t, rec); code != "invalid_state" {
+		t.Errorf("error code = %q, want invalid_state", code)
+	}
+}
+
 // TestExportIsDeterministicAndCarriesOnlyIdents covers 04 §3's two content rules at once:
 // repeated downloads of unchanged input are byte-identical, and the archive holds package
 // idents and versions and nothing else — no game password, no host path.

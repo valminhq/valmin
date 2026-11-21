@@ -30,6 +30,7 @@
 			await api.post('/me/password', { current_password: current, new_password: next });
 			current = next = repeat = '';
 			changed = true;
+			if (session.user) session.user = { ...session.user, password_change_required: false };
 		} catch (err) {
 			failure = err;
 			if (err instanceof ApiError && err.code === 'invalid_credentials') current = '';
@@ -46,6 +47,19 @@
 	</PageHeader>
 
 	<Problem error={failure} />
+
+	{#if session.user?.password_change_required}
+		<section
+			class="grid gap-1 rounded-lg border border-l-4 border-l-primary bg-muted/40 p-4"
+			role="status"
+		>
+			<h2 class="font-semibold">Choose your own password</h2>
+			<p class="text-sm text-muted-foreground">
+				An administrator chose the password you signed in with. Replace it with one only you know to
+				continue.
+			</p>
+		</section>
+	{/if}
 
 	{#if changed}
 		<section

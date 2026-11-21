@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -9,6 +11,7 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/store"
 )
 
 // updateStatusView compares the installed build with the head of the instance's branch.
@@ -38,11 +41,21 @@ func (h *Instances) updateStatus(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var observed instance.PublicBuild
-	found, err := h.DB.KVGet(r.Context(), instance.PublicBuildKey, &observed)
+	v, err := observeUpdateStatus(r.Context(), h.DB, inst)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
+	}
+	JSON(w, r, http.StatusOK, v)
+}
+
+// observeUpdateStatus is inst's installed build against the last successful observation of its
+// branch.
+func observeUpdateStatus(ctx context.Context, db *store.DB, inst *store.Instance) (updateStatusView, error) {
+	var observed instance.PublicBuild
+	found, err := db.KVGet(ctx, instance.PublicBuildKey, &observed)
+	if err != nil {
+		return updateStatusView{}, fmt.Errorf("read the observed public build: %w", err)
 	}
 	v := updateStatusView{Branch: inst.GameBranch}
 	// The manifest under server/ is what the instance actually runs; the column is a cache of
@@ -74,7 +87,7 @@ func (h *Instances) updateStatus(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	JSON(w, r, http.StatusOK, v)
+	return v, nil
 }
 
 // updateAvailable reports whether head would replace installed. On the instance's own branch

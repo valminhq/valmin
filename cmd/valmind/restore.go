@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/valminhq/valmin/internal/config"
 	"github.com/valminhq/valmin/internal/crypto"
@@ -26,14 +25,14 @@ func runRestore(ctx context.Context, getenv func(string) string, in io.Reader, o
 	if err != nil {
 		return fmt.Errorf("configuration: %w", err)
 	}
-	if running, err := store.DaemonRunning(cfg.Data.Root); err != nil || running {
+	if err := requireRestorePaths(cfg); err != nil {
+		return err
+	}
+	if running, err := store.DaemonRunning(daemonDirs(cfg)...); err != nil || running {
 		if err != nil {
 			return fmt.Errorf("check for a running panel: %w", err)
 		}
 		return errPanelRunning
-	}
-	if err := requireRestorePaths(cfg); err != nil {
-		return err
 	}
 	schema, err := store.SchemaVersion()
 	if err != nil {
@@ -63,9 +62,8 @@ func runRestore(ctx context.Context, getenv func(string) string, in io.Reader, o
 // the rclone configuration away from the place in the data root a restore unpacks it to.
 func requireRestorePaths(cfg *config.Config) error {
 	root := cfg.Data.Root
-	dbPath, _, _ := strings.Cut(strings.TrimPrefix(cfg.DB.DSN, "file:"), "?")
 	for _, p := range []struct{ setting, configured, restored string }{
-		{"db.dsn", filepath.Clean(dbPath), export.DatabaseName},
+		{"db.dsn", filepath.Clean(store.SQLitePath(cfg.DB.DSN)), export.DatabaseName},
 		{"secrets.master_key_file", cfg.Secrets.MasterKeyFile, export.KeyName},
 		{"remote_backups.rclone_config", cfg.RemoteBackups.RcloneConfig, export.RcloneConfigName},
 	} {

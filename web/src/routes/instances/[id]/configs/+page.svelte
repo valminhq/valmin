@@ -5,7 +5,7 @@
 	import { resolve } from '$app/paths';
 	import { actions } from '#lib/api/instances.js';
 	import { configs, type ConfigFile } from '#lib/api/configs.js';
-	import { filterConfigs } from '#lib/config-files.js';
+	import { filterConfigs, hasSettings } from '#lib/config-files.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { Badge } from '#lib/components/ui/badge/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
@@ -32,6 +32,12 @@
 
 	const allowed = $derived(session.allowed(id));
 	const canEdit = $derived(allowed.includes(actions.configEdit));
+	const canRaw = $derived(allowed.includes(actions.configRaw));
+
+	// Deleting a `.cfg` needs config.edit; a text-only file needs config.raw.
+	function canDelete(file: string): boolean {
+		return hasSettings(file) ? canEdit : canRaw;
+	}
 
 	$effect(() => {
 		void load();
@@ -113,23 +119,39 @@
 					<li class="flex items-center">
 						<a
 							class="flex min-w-0 flex-1 items-center gap-3 p-4 hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none"
-							href={resolve('/instances/[id]/configs/[file]', { id, file: file.file })}
+							href={resolve('/instances/[id]/configs/[file]', {
+								id,
+								file: encodeURIComponent(file.file)
+							})}
 						>
 							<div class="grid min-w-0 flex-1 gap-0.5">
 								<span class="truncate font-mono text-sm font-medium">{file.file}</span>
 								<span class="truncate text-sm text-muted-foreground">
-									{file.plugin || 'No plugin named in this file'}
+									{hasSettings(file.file)
+										? file.plugin || 'No plugin named in this file'
+										: 'Edited as text'}
 								</span>
 							</div>
 							{#if file.dir === ''}
 								<Badge variant="outline" class="shrink-0">Server root</Badge>
+							{/if}
+							{#if file.mod_replaced_edits}
+								{@const by = file.mod_replaced_edits}
+								<Badge
+									variant="outline"
+									class="max-w-40 min-w-0 truncate sm:max-w-64"
+									title="A mod update replaced this file while it held edits; the history keeps them."
+								>
+									Replaced by {by.mod}
+									{by.version}
+								</Badge>
 							{/if}
 							{#if file.installed_mods.length === 0}
 								<Badge variant="outline" class="shrink-0">No installed mod</Badge>
 							{/if}
 							<ChevronRight class="size-4 shrink-0 text-muted-foreground" />
 						</a>
-						{#if canEdit}
+						{#if canDelete(file.file)}
 							<Button
 								variant="ghost"
 								size="sm"

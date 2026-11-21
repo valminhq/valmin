@@ -34,6 +34,7 @@ func newWorld(t *testing.T) *world {
 	cfg := config.Defaults()
 	cfg.Data.Root = dir
 	cfg.Data.HostRoot = dir
+	cfg.Data.FreeSpaceFloorBytes = 0
 	cfg.Jobs.ReadySettle = config.Duration(20 * time.Millisecond)
 	cfg.Jobs.ReadyTimeout = config.Duration(2 * time.Second)
 

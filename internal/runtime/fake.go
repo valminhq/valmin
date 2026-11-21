@@ -389,11 +389,19 @@ func (f *Fake) Inspect(ctx context.Context, id string) (Container, error) {
 	return c.Container, nil
 }
 
-// InspectWithImageDefaults is Inspect: a fake container's image adds nothing.
+// InspectWithImageDefaults is Inspect: a fake container's image adds nothing. An image missing
+// from Images is ErrImageNotFound.
 func (f *Fake) InspectWithImageDefaults(ctx context.Context, id string) (Container, error) {
 	c, err := f.Inspect(ctx, id)
 	if err != nil {
 		return Container{}, err
+	}
+	present, err := f.ImageExists(ctx, c.Image)
+	if err != nil {
+		return Container{}, err
+	}
+	if !present {
+		return Container{}, fmt.Errorf("inspect image %s of container %s: %w", c.Image, id, ErrImageNotFound)
 	}
 	c.ImageDefaults = &ContainerImageDefaults{}
 	return c, nil

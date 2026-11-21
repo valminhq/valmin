@@ -7,6 +7,7 @@
 	import { session } from '#lib/state/session.svelte.js';
 	import { instanceList } from '#lib/state/instances.svelte.js';
 	import { socket } from '#lib/socket/index.svelte.js';
+	import { topics, type ServerMessage } from '#lib/socket/messages.js';
 	import ServerNav from '#lib/components/server-nav.svelte';
 	import StateBadge from '#lib/components/state-badge.svelte';
 	import ServerControls from '#lib/components/server-controls.svelte';
@@ -30,31 +31,41 @@
 	// The socket cannot say what changed while it was gone, so a reconnect re-reads the list.
 	$effect(() => socket.onConnected(() => void instanceList.load()));
 
-	// The job running on this server and the setup steps it still owes. Polled, because the
-	// socket has a topic per job and none for a server's jobs; a state change re-reads at once.
-	const serverState = $derived(instance?.state);
+	// Whether this caller's list holds the server. One it cannot see is never read here, so a
+	// stranger's link stops at the section's own 404.
+	const listed = $derived(instanceList.items.some((row) => row.id === id));
+
+	// The job running on this server and the setup steps it still owes, read once, then on each
+	// state message, on reconnect and on a slow timer. Only the newest reply is shown.
 	let working = $state<Job | null>(null);
 	let owed = $state<Operation | null>(null);
 	$effect(() => {
-		if (!session.user || !id) return;
-		void serverState;
+		if (!session.user || !id || !listed) return;
 		let current = true;
+		let latest = 0;
 		async function read() {
 			if (document.hidden) return;
+			const seq = ++latest;
 			try {
 				const [jobs, operation] = await Promise.all([instances.jobs(id), operations.get(id)]);
-				if (!current) return;
+				if (!current || seq !== latest) return;
 				working = jobs.find((job) => job.status === 'running') ?? null;
 				owed = operation;
 			} catch {
 				// Each section reports its own failed reads; the header only goes quiet.
 			}
 		}
+		const off = socket.subscribe(topics.state(id), (m: ServerMessage) => {
+			if (m.type === 'state') void read();
+		});
 		void read();
-		const timer = setInterval(read, 5000);
+		const unhook = socket.onConnected(() => void read());
+		const timer = setInterval(read, 60_000);
 		document.addEventListener('visibilitychange', read);
 		return () => {
 			current = false;
+			off();
+			unhook();
 			clearInterval(timer);
 			document.removeEventListener('visibilitychange', read);
 		};
@@ -94,7 +105,9 @@
 	<div class="border-b bg-card">
 		<div class="mx-auto grid max-w-6xl gap-3 px-4 pt-4 sm:px-6">
 			<div class="flex flex-wrap items-center gap-3">
-				<h1 class="text-2xl font-semibold tracking-tight">{instance?.name ?? 'Server'}</h1>
+				<h1 class="min-w-0 text-2xl font-semibold tracking-tight wrap-anywhere">
+					{instance?.name ?? 'Server'}
+				</h1>
 				{#if instance}
 					<StateBadge
 						state={instance.state}
@@ -129,12 +142,12 @@
 						{/if}
 					</p>
 				{/if}
-				<div class="flex flex-wrap items-center gap-x-4 gap-y-2 sm:ml-auto">
+				<div class="flex w-full items-center gap-x-4 gap-y-2 sm:ml-auto sm:w-auto">
 					{#if instance && instanceList.items.length > 1}
 						<label class="sr-only" for="server-switcher">Switch server</label>
 						<NativeSelect
 							id="server-switcher"
-							class="max-w-48 sm:max-w-64"
+							class="min-w-0 flex-1 sm:max-w-64 sm:flex-none"
 							value={id}
 							onchange={switchTo}
 						>
@@ -145,10 +158,11 @@
 					{/if}
 					{#if offerCompare}
 						<a
-							class="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground hover:underline"
+							class="inline-flex min-h-6 min-w-6 items-center justify-center gap-1.5 text-sm text-muted-foreground hover:text-foreground hover:underline"
 							href={compareHref}
 						>
-							<GitCompare class="size-4" aria-hidden="true" /> Compare with another server
+							<GitCompare class="size-4" aria-hidden="true" />
+							<span class="sr-only sm:not-sr-only">Compare with another server</span>
 						</a>
 					{/if}
 				</div>

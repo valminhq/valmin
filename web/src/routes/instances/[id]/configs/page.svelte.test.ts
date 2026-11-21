@@ -35,7 +35,7 @@ const listed = [
 	}
 ];
 
-function serveList(items = listed) {
+function serveList(items: object[] = listed) {
 	daemon.on('GET', '/instances/inst-a/configs', () => Response.json({ items }));
 }
 
@@ -92,6 +92,44 @@ describe('the mod configuration list', () => {
 
 		const link = await screen.findByRole('link', { name: /Author\.Sailing\.cfg/ });
 		expect(link.getAttribute('href')).toBe('/instances/inst-a/configs/Author.Sailing.cfg');
+	});
+
+	// A file in a subfolder is one route segment, so its slashes travel escaped.
+	it('links a file in a subfolder to its editor as one segment', async () => {
+		serveList([
+			{
+				file: 'expand_world/expand_biomes.yaml',
+				plugin: '',
+				size_bytes: 12,
+				installed_mods: [],
+				dir: 'BepInEx/config'
+			}
+		]);
+		render(Page);
+
+		const link = await screen.findByRole('link', { name: /expand_biomes\.yaml/ });
+		expect(link.getAttribute('href')).toBe(
+			'/instances/inst-a/configs/expand_world%2Fexpand_biomes.yaml'
+		);
+		expect(screen.getByText('Edited as text')).toBeTruthy();
+	});
+
+	it('marks a file a mod update replaced while it held edits', async () => {
+		serveList([
+			{
+				...listed[0],
+				mod_replaced_edits: {
+					mod: 'Author-Sailing',
+					version: '2.0.0',
+					created_at: '2026-11-01T10:00:00Z'
+				}
+			},
+			listed[1]
+		]);
+		render(Page);
+
+		expect(await screen.findByText(/Replaced by Author-Sailing\s+2\.0\.0/)).toBeTruthy();
+		expect(screen.getAllByText(/Replaced by/)).toHaveLength(1);
 	});
 
 	it('offers a retry when the list could not be read', async () => {
@@ -226,5 +264,29 @@ describe('deleting a file', () => {
 
 		await screen.findByRole('link', { name: /com\.example\.wards\.cfg/ });
 		expect(screen.queryByRole('button', { name: /^Delete / })).toBeNull();
+	});
+
+	it('offers a text-only file a delete only with config.raw', async () => {
+		const yaml = {
+			file: 'expand_world/expand_biomes.yaml',
+			plugin: '',
+			size_bytes: 12,
+			installed_mods: [],
+			dir: 'BepInEx/config'
+		};
+		serveList([...listed, yaml]);
+		const { unmount } = render(Page);
+
+		await screen.findByRole('button', { name: 'Delete com.example.wards.cfg' });
+		expect(screen.queryByRole('button', { name: `Delete ${yaml.file}` })).toBeNull();
+		unmount();
+
+		session.permissions = permissions('inst-a', [
+			actions.configRead,
+			actions.configEdit,
+			actions.configRaw
+		]);
+		render(Page);
+		expect(await screen.findByRole('button', { name: `Delete ${yaml.file}` })).toBeTruthy();
 	});
 });

@@ -118,6 +118,45 @@ func TestLoginRehashesAWeakStoredHash(t *testing.T) {
 	}
 }
 
+func TestAuthenticateTouchesTheSessionOncePerThrottle(t *testing.T) {
+	db := testDB(t)
+	useFastArgon2Params(t, db)
+	seedLoginUser(t, db, "u1", "ada", "a-fine-password")
+	sessions := NewSessions(db, time.Hour, 24*time.Hour)
+	logged, err := sessions.Login(t.Context(), "ada", "a-fine-password", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lastSeen := func() string {
+		t.Helper()
+		var stamp string
+		if err := db.Reader.QueryRowContext(t.Context(),
+			`SELECT last_seen_at FROM sessions WHERE id = ?`, logged.SessionID).Scan(&stamp); err != nil {
+			t.Fatal(err)
+		}
+		return stamp
+	}
+	authenticate := func() {
+		t.Helper()
+		if u, _, err := sessions.Authenticate(t.Context(), logged.Cookie); err != nil || u == nil {
+			t.Fatalf("Authenticate = %+v, %v, want the user", u, err)
+		}
+	}
+
+	opened := lastSeen()
+	authenticate()
+	if got := lastSeen(); got != opened {
+		t.Errorf("last_seen_at inside the throttle = %s, want %s unchanged", got, opened)
+	}
+
+	sessions.throttle = time.Millisecond
+	time.Sleep(5 * time.Millisecond)
+	authenticate()
+	if got := lastSeen(); got == opened {
+		t.Errorf("last_seen_at after the throttle = %s, want it advanced", got)
+	}
+}
+
 func TestAuthenticateRejectsAMalformedCookie(t *testing.T) {
 	db := testDB(t)
 	sessions := NewSessions(db, time.Hour, 24*time.Hour)

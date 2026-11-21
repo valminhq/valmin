@@ -77,14 +77,14 @@ func (h *Instances) clone(w http.ResponseWriter, r *http.Request) {
 		ArchiveID: archiveID, ArchivePath: archivePath, RequestedBy: u.ID,
 		AuditIP: middleware.ClientIPFrom(r.Context()).String(),
 	}
-	ports := instance.NewAllocator(h.DB, h.Runtime, h.Cfg.Ports.Base, h.Cfg.Ports.Stride)
-	job, err := h.ctl.Cloner.SubmitOnFreePort(r.Context(), ports, run)
+	job, err := h.ctl.Cloner.SubmitOnFreePort(r.Context(), h.ctl.Ports, run)
 	if err != nil {
 		var conflict *store.JobConflict
 		switch {
 		case errors.As(err, &conflict):
 			writeJobSubmitError(w, r, err)
-		case errors.Is(err, store.ErrInstanceNameTaken), errors.Is(err, store.ErrBasePortTaken):
+		case errors.Is(err, store.ErrInstanceNameTaken), errors.Is(err, store.ErrBasePortTaken),
+			errors.Is(err, instance.ErrPortsExhausted):
 			writeCreateInstanceError(w, r, err)
 		case errors.Is(err, store.ErrInstanceNotStopped):
 			apierr.Write(w, r, apierr.New(errcode.InvalidState).

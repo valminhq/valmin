@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +17,9 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
@@ -225,6 +228,17 @@ func writeServerFile(t *testing.T, dataDir, rel, body string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeBootLog writes the BepInEx log of a boot a second from now, so a mod installed just
+// before it counts as installed before the boot whatever the file clock's resolution.
+func writeBootLog(t *testing.T, dataDir, body string) {
+	t.Helper()
+	writeServerFile(t, dataDir, "BepInEx/LogOutput.log", body)
+	at := time.Now().Add(time.Second)
+	if err := os.Chtimes(serverPath(dataDir, "BepInEx/LogOutput.log"), at, at); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -732,6 +746,78 @@ func TestUpdateReplacesTheOldVersionsFiles(t *testing.T) {
 	}
 }
 
+// TestAnUpdateFollowsTheModsConfig: a version that ships a changed config replaces the admin's
+// edited file, clears its pending copy and keeps the mod as its owner; a version that ships the
+// same config leaves the admin's next edit alone.
+func TestAnUpdateFollowsTheModsConfig(t *testing.T) {
+	t.Parallel()
+	pkg := func(version, cfg string) modPackageFixture {
+		return modPackageFixture{fullName: "Ns-Only", version: version, files: map[string]string{
+			"manifest.json": "{}", "plugins/Only.dll": version, "config/Only.cfg": cfg,
+		}}
+	}
+	rt, db, admin, _, dataDir := installWorld(t,
+		pkg("1.0.0", "v1 default"), pkg("2.0.0", "v2 default"), pkg("3.0.0", "v2 default"))
+	alreadyModded(t, db)
+	const cfg = "BepInEx/config/Only.cfg"
+	install := func(version string) {
+		t.Helper()
+		var accepted jobView
+		decodeInto(t, postInstall(t, rt, admin, "Ns-Only", version), &accepted)
+		if got := waitJob(t, rt, admin, accepted.JobID); got.Status != "succeeded" {
+			t.Fatalf("install %s = %+v, want succeeded", version, got)
+		}
+	}
+	configEntry := func() installer.ManifestEntry {
+		t.Helper()
+		row := installedRows(t, db)["Ns-Only"]
+		for _, e := range manifestOf(t, &row) {
+			if e.Path == cfg {
+				return e
+			}
+		}
+		t.Fatalf("the manifest no longer names %s", cfg)
+		return installer.ManifestEntry{}
+	}
+
+	install("1.0.0")
+	writeServerFile(t, dataDir, cfg, "mine")
+	writeServerFile(t, dataDir, cfg+".pending", "an edit left by a crash")
+
+	install("2.0.0")
+	if body, _ := os.ReadFile(serverPath(dataDir, cfg)); string(body) != "v2 default" {
+		t.Errorf("after 2.0.0, %s = %q, want the mod's new version", cfg, body)
+	}
+	if e := configEntry(); e.Kept || e.SHA256 != hashText("v2 default") {
+		t.Errorf("after 2.0.0, manifest entry = %+v, want the written v2 file", e)
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		if _, err := os.Stat(serverPath(dataDir, cfg+".pending")); errors.Is(err, os.ErrNotExist) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the pending copy survived an update that replaced its file")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	writeServerFile(t, dataDir, cfg, "mine again")
+	install("3.0.0")
+	if body, _ := os.ReadFile(serverPath(dataDir, cfg)); string(body) != "mine again" {
+		t.Errorf("after 3.0.0, %s = %q, want the admin's file kept", cfg, body)
+	}
+	if e := configEntry(); !e.Kept || e.SHA256 != hashText("v2 default") {
+		t.Errorf("after 3.0.0, manifest entry = %+v, want kept with the shipped hash", e)
+	}
+}
+
+// hashText is the hex sha256 a manifest records for body.
+func hashText(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:])
+}
+
 // TestAnUpdateMovesAFileBetweenTwoPackages updates B and its dependency A in one job, where
 // A's new version drops Lib.dll and B's new version ships it. The move succeeds, Lib.dll holds
 // B's bytes and B's manifest owns it.
@@ -863,6 +949,37 @@ func TestInstalledModViewConfigFiles(t *testing.T) {
 			row := &store.InstanceMod{FullName: "Author-Sailing", FileManifest: string(manifest)}
 			if got := toInstalledModView(row, nil, nil).ConfigFiles; !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("config_files = %#v, want %#v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadStatusWaitsForTheRunAfterAnInstall(t *testing.T) {
+	run := time.Date(2026, 11, 20, 2, 48, 0, 0, time.UTC)
+	load := &instance.PluginLoad{Declared: 0, ObservedAt: run}
+	manifest, err := json.Marshal([]installer.ManifestEntry{
+		{Path: "BepInEx/plugins/Advize-PlantEverything/PlantEverything.dll", SHA256: "0"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name        string
+		installedAt time.Time
+		want        *string
+	}{
+		{"installed before the run it was not seen in", run.Add(-time.Hour), new(string(instance.ModNotSeen))},
+		{"installed after the run", run.Add(time.Minute), new(loadPending)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			row := &store.InstanceMod{
+				FullName: "Advize-PlantEverything", FileManifest: string(manifest), Enabled: true,
+				InstalledAt: store.FormatTime(tc.installedAt),
+			}
+			got := toInstalledModView(row, nil, load).LoadStatus
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("load_status = %q, want %q", deref(got), deref(tc.want))
 			}
 		})
 	}

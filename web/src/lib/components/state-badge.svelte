@@ -33,7 +33,8 @@
 			title="A launch setting or the password changed. The server runs with the old values until it restarts."
 			>restart required</Badge
 		>
-	{:else if pendingRestart}
+		<!-- A stopped server picks up saved mod and config changes when it starts; nothing waits. -->
+	{:else if state === 'running' && pendingRestart}
 		<Badge
 			variant="outline"
 			title="Saved mod or configuration changes are waiting for the next start."

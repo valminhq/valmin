@@ -35,7 +35,9 @@ every server gets its own copy.
   versions, disable a mod to find a broken one, and see which mods failed to load.
 - Queue installs and updates on a running server; they run when it stops or restarts.
 - Edit BepInEx and plugin configuration in a form built from the file, or as raw text,
-  with a review step and comparison against earlier versions.
+  with a review step and comparison against earlier versions. YAML, JSON and text configs
+  in subfolders (Expand World Data, WackysDatabase, EpicLoot patches) open as text, with a
+  syntax check before saving.
 - Export the mods players need as a profile for r2modman, Gale or Thunderstore Mod
   Manager.
 
@@ -72,7 +74,9 @@ every server gets its own copy.
 - Send alerts to Discord or any webhook for unexpected stops, crash loops, failed or
   stuck jobs, stale backups, low disk space, new game builds and more, with quiet hours.
   Each server can have its own channels and rules, alongside the shared ones.
-- Let friends check and start servers from Discord with `/status` and `/start`.
+- Let friends check, join and start servers from Discord with `/status`, `/join` and `/start`,
+  and let bot admins restart, back up and update them with `/restart`, `/stop`, `/backup` and
+  `/update`.
 
 **Running the panel**
 

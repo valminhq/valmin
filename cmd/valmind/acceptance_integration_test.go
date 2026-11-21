@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"os"
@@ -30,6 +31,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -150,18 +152,69 @@ func newPanel(t *testing.T, env map[string]string) *panel {
 		client: &http.Client{Timeout: 30 * time.Second},
 	}
 	p.origin = "http://" + p.addr
+	d := docker(t)
+	t.Cleanup(func() { removeLeftovers(t, d, p.root) })
 	t.Cleanup(p.stop)
 	return p
 }
 
+// removeLeftovers force-removes what a panel under test left on the shared Docker daemon:
+// helpers labelled with its data root and game containers bind-mounting from it. The panel is
+// SIGKILLed at cleanup, so it removes neither, and a dev panel on the same host would report
+// every game container as its own orphan.
+func removeLeftovers(t *testing.T, d *runtime.Docker, root string) {
+	ctx := context.WithoutCancel(t.Context())
+	if _, err := runtime.RemovePanelThrowaways(ctx, d, root); err != nil {
+		t.Logf("remove leftover helpers: %v", err)
+	}
+	managed, err := d.List(ctx, map[string]string{instance.LabelManaged: "true"})
+	if err != nil {
+		t.Logf("list leftover game containers: %v", err)
+		return
+	}
+	for i := range managed {
+		if !bindsUnder(&managed[i], root) {
+			continue
+		}
+		if err := d.ForceRemove(ctx, managed[i].ID); err != nil {
+			t.Logf("remove leftover game container %s: %v", managed[i].ID, err)
+		}
+	}
+}
+
+// bindsUnder reports whether c mounts any host path inside root.
+func bindsUnder(c *runtime.Container, root string) bool {
+	for _, b := range c.Spec.Binds {
+		if strings.HasPrefix(b.HostPath, root+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// nextPort is the last port freePort considered. It starts at a random point so concurrent
+// test binaries rarely walk the same ports.
+var nextPort = func() *atomic.Int32 {
+	var p atomic.Int32
+	p.Store(int32(20000 + rand.IntN(10000)))
+	return &p
+}()
+
+// freePort returns a port nothing listens on, from below the kernel's ephemeral range
+// (32768 by default). The daemon binds it only after its startup gate, which can take a
+// minute; an ephemeral port could meanwhile go to another test's listener, which would then
+// answer /healthz in this panel's place.
 func freePort(t *testing.T) int {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
+	for port := nextPort.Add(1); port < 32768; port = nextPort.Add(1) {
+		l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err == nil {
+			_ = l.Close()
+			return int(port)
+		}
 	}
-	defer func() { _ = l.Close() }()
-	return l.Addr().(*net.TCPAddr).Port
+	t.Fatal("no free port below the ephemeral range")
+	return 0
 }
 
 // start boots the daemon and waits for /healthz.
@@ -396,7 +449,7 @@ func (p *panel) do(method, path string, body any) response {
 	}
 	resp, err := p.client.Do(req)
 	if err != nil {
-		p.t.Fatalf("%s %s: %v", method, path, err)
+		p.t.Fatalf("%s %s: %v\ndaemon output:\n%s", method, path, err, p.out.String())
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(resp.Body)

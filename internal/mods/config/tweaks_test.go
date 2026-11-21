@@ -97,24 +97,3 @@ func TestMerge(t *testing.T) {
 		})
 	}
 }
-
-// TestKeepCopies asserts the backup follows every write while the original is taken once.
-func TestKeepCopies(t *testing.T) {
-	dir := t.TempDir()
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = root.Close() }()
-	for _, content := range []string{"", "first", "second"} {
-		if err := KeepCopies(root, "a.cfg", []byte(content)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for name, want := range map[string]string{"a.cfg" + OriginalSuffix: "", "a.cfg" + BackupSuffix: "second"} {
-		got, err := os.ReadFile(filepath.Join(dir, name))
-		if err != nil || string(got) != want {
-			t.Errorf("%s = %q, %v, want %q", name, got, err, want)
-		}
-	}
-}

@@ -7,6 +7,7 @@
 	import { viewerZone } from '#lib/api/schedules.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { unsaved } from '#lib/state/dirty.svelte.js';
+	import SaveBar from '#lib/components/save-bar.svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
 	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
@@ -41,7 +42,8 @@
 	const draft = $derived(
 		JSON.stringify([enabled, rows.map(({ key: _key, ...link }) => link), adminIDs, zone])
 	);
-	unsaved(() => allowed && !loading && (draft !== baseline || token !== ''));
+	const dirty = $derived(allowed && !loading && (draft !== baseline || token !== ''));
+	unsaved(() => dirty);
 
 	const STATE_TEXT: Record<string, string> = {
 		disabled: 'Off',
@@ -142,10 +144,11 @@
 
 <main class={pageNarrow}>
 	<PageHeader title="Discord bot">
-		Let people in your Discord check and start game servers with <code>/status</code> and
-		<code>/start</code>. Each link decides which servers a Discord server or channel can see, and
-		whether it may start them. Everyone in a linked channel can use both commands. Bot admins can
-		also plan power cuts for every server with <code>/shutdown</code>.
+		Let people in your Discord check, join and start game servers with <code>/status</code>,
+		<code>/join</code> and <code>/start</code>. Each link decides which servers a Discord server or
+		channel can see, and whether it may start them. Everyone in a linked channel can use these
+		commands. Bot admins can also restart, stop, back up and update the linked servers, and plan
+		power cuts for every server with <code>/shutdown</code>.
 	</PageHeader>
 	{#if !allowed}
 		<p class="text-sm text-muted-foreground">
@@ -261,8 +264,9 @@
 				<Card.Header>
 					<Card.Title>Bot admins</Card.Title>
 					<Card.Description>
-						Who may plan and cancel power cuts with <code>/shutdown</code>, in any linked channel.
-						Right-click a member or a role and copy its ID.
+						Who may use <code>/restart</code>, <code>/stop</code>, <code>/backup</code> and
+						<code>/update</code> on the servers linked to a channel, and plan and cancel power cuts
+						with <code>/shutdown</code>. Right-click a member or a role and copy its ID.
 					</Card.Description>
 				</Card.Header>
 				<Card.Content class="grid gap-4">
@@ -291,16 +295,23 @@
 				</Card.Content>
 			</Card.Root>
 
-			<div class="flex flex-wrap gap-2">
-				<Button disabled={saving} onclick={save}
-					>{saving ? 'Saving…' : 'Save Discord settings'}</Button
-				>
-				{#if settings.configured || settings.links.length > 0}
+			{#if settings.configured || settings.links.length > 0}
+				<div>
 					<Button variant="outline" disabled={saving} onclick={() => (removeOpen = true)}
 						>Remove bot</Button
 					>
-				{/if}
-			</div>
+				</div>
+			{/if}
+			{#if dirty}
+				<SaveBar
+					saveLabel="Save Discord settings"
+					busy={saving}
+					ondiscard={() => settings && fill(settings)}
+					onsave={save}
+				>
+					You have unsaved Discord settings.
+				</SaveBar>
+			{/if}
 		{/if}
 	{/if}
 </main>

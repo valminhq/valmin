@@ -27,6 +27,7 @@ const defaultPluginLoadWindow = 5 * time.Second
 type Notifier interface {
 	NotifyUnexpectedStop(ctx context.Context, inst *store.Instance, to, reason string)
 	NotifyPublicBuild(ctx context.Context, previous, observed string) func(context.Context, *sql.Tx) error
+	NotifyUpdateTest(ctx context.Context, res *UpdateTestResult)
 }
 
 // Deps are the collaborators control's components share.
@@ -54,14 +55,17 @@ type Deps struct {
 
 // Components is every instance job component, built once and wired to each other.
 type Components struct {
-	Starter       *Starter
-	Stopper       *Stopper
-	Restarter     *Restarter
-	Backupper     *Backupper
-	Pruner        *Pruner
-	Provisioner   *Provisioner
-	Deleter       *Deleter
-	Cloner        *Cloner
+	Starter     *Starter
+	Stopper     *Stopper
+	Restarter   *Restarter
+	Backupper   *Backupper
+	Pruner      *Pruner
+	Provisioner *Provisioner
+	Deleter     *Deleter
+	Cloner      *Cloner
+	// Ports reserves the base port of every server this panel creates, so concurrent creates
+	// never choose the same one.
+	Ports         *instance.Allocator
 	Restorer      *Restorer
 	WorldTooler   *WorldTooler
 	GameUpdater   *GameUpdater
@@ -108,12 +112,16 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	c.Backupper = &Backupper{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, DataRoot: dataRoot,
 		Stopper: c.Stopper, Starter: c.Starter,
+		FreeSpace:      func() (uint64, error) { return instance.FreeSpace(dataRoot) },
+		FreeSpaceFloor: uint64(max(cfg.Data.FreeSpaceFloorBytes, 0)),
 	}
+	c.Stopper.Backupper = c.Backupper
 	c.Restarter = &Restarter{Engine: d.Engine, Starter: c.Starter, Stopper: c.Stopper, Backupper: c.Backupper}
 	c.Operations = &Operations{DB: d.DB, Engine: d.Engine, Starter: c.Starter, Keeper: d.Keeper}
 	if d.Installer != nil {
 		c.Operations.Mods = d.Installer
 	}
+	c.Ports = instance.NewAllocator(d.DB, d.Runtime, cfg.Ports.Base, cfg.Ports.Stride)
 	c.Provisioner = &Provisioner{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Builds: builds,
 		DataRoot: dataRoot, HostRoot: hostRoot, SteamCMDImage: cfg.Game.SteamCMDImage,
@@ -141,9 +149,13 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	c.UpdateTester = &UpdateTester{
 		DB: d.DB, Engine: d.Engine, Chainer: c.Chainer, Cloner: c.Cloner, GameUpdater: c.GameUpdater,
 		Deleter: c.Deleter, Installer: d.Installer,
-		Ports:   instance.NewAllocator(d.DB, d.Runtime, cfg.Ports.Base, cfg.Ports.Stride),
+		Ports:   c.Ports,
 		Streams: d.Streams, ReadMods: d.ReadMods, DataRoot: dataRoot,
 		CPUs: goruntime.NumCPU(), AvailableMemoryMB: instance.AvailableMemoryMB,
+		ReadyTimeout: readyTimeout,
+	}
+	if d.Notifier != nil {
+		c.UpdateTester.Notify = d.Notifier.NotifyUpdateTest
 	}
 	c.UpdateChecker = &UpdateChecker{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Config: cfg, Notifier: d.Notifier,
@@ -156,8 +168,8 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Keeper: d.Keeper, Streams: d.Streams, Logs: logs,
 		DataRoot: dataRoot, HostRoot: hostRoot, StopTimeout: stopTimeout,
 		PublishState: d.PublishState, states: states, Notifier: d.Notifier,
-		Starter: c.Starter, Stopper: c.Stopper, Provisioner: c.Provisioner, Deleter: c.Deleter,
-		UpdateChecker: c.UpdateChecker, GameUpdater: c.GameUpdater,
+		Starter: c.Starter, Stopper: c.Stopper, Restarter: c.Restarter, Provisioner: c.Provisioner,
+		Deleter: c.Deleter, UpdateChecker: c.UpdateChecker, GameUpdater: c.GameUpdater,
 		crash: instance.NewCrashLoop(), owedStops: make(map[string]string), idle: idleClock{},
 		recovery:    &Recovery{DB: d.DB, Runtime: d.Runtime, DataRoot: dataRoot},
 		modRecovery: &manager.Recovery{DB: d.DB, DataRoot: dataRoot},

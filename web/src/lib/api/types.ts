@@ -21,6 +21,8 @@ export interface User {
 	hour_cycle: '' | 'h12' | 'h23';
 	/** How the user reads dates, or '' to follow their browser. */
 	date_order: '' | 'mdy' | 'dmy' | 'ymd';
+	/** True while the password was chosen or issued by an administrator and not yet replaced. */
+	password_change_required: boolean;
 }
 
 export interface InstancePermissions {

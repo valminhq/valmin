@@ -6,6 +6,7 @@
 	import { topics, type ServerMessage } from '#lib/socket/messages.js';
 	import { withLive } from '#lib/state/instances.svelte.js';
 	import AutoStopPanel from '#lib/components/auto-stop-panel.svelte';
+	import WatchdogPanel from '#lib/components/watchdog-panel.svelte';
 	import GameVersionPanel from '#lib/components/game-version-panel.svelte';
 	import ScheduledRuns from '#lib/components/scheduled-runs.svelte';
 	import SchedulesEditor from '#lib/components/schedules-editor.svelte';
@@ -25,6 +26,8 @@
 		void load(id);
 		return off;
 	});
+	// A first read that failed while the panel was unreachable is tried again when it comes back.
+	$effect(() => socket.onConnected(() => void (!instance && load(id))));
 
 	/** Reads the instance, dropping a reply for one no longer shown. */
 	async function load(instanceId: string) {
@@ -52,7 +55,10 @@
 	{#if loading}
 		<p class="text-sm text-muted-foreground">Loading…</p>
 	{:else if !instance}
-		<p class="text-sm text-muted-foreground">This server is not here.</p>
+		<!-- A failed read is explained by the problem above. -->
+		{#if !failure}
+			<p class="text-sm text-muted-foreground">This server is not here.</p>
+		{/if}
 	{:else}
 		<div class="grid items-start gap-6 lg:grid-cols-2">
 			<div class="grid gap-6">
@@ -61,6 +67,7 @@
 			</div>
 			<div class="grid gap-6">
 				<AutoStopPanel {instance} onchange={() => void load(id)} />
+				<WatchdogPanel {instance} onchange={() => void load(id)} />
 				<GameVersionPanel {instance} onchange={() => void load(id)} />
 				<ScheduledRuns instanceId={instance.id} />
 			</div>

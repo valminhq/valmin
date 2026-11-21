@@ -18,6 +18,13 @@ type (
 	RestorePayload struct {
 		BackupID string `json:"backup_id"`
 	}
+	// ArchivePlan names the archive a stop or restart may write once the server is down: the
+	// catalogue id it will have and the file it will be written to. It is a restart's whole
+	// payload, and sits beside the reason in a stop's. Both are empty when no archive is owed.
+	ArchivePlan struct {
+		ArchiveID   string `json:"archive_id,omitempty"`
+		ArchivePath string `json:"archive_path,omitempty"`
+	}
 	GameUpdatePayload struct {
 		ConfirmModded bool `json:"confirm_modded"`
 		// FromBuild is the build the server ran when the update was queued. It is neither

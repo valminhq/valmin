@@ -8,8 +8,8 @@ Open **Backups** on a server. Two buttons make a backup now:
 
 - **Stop and back up** makes a consistent archive. Valmin stops a running server,
   waits for the world save to finish, makes the archive, and starts the server again.
-  The server is offline for the whole backup. A server that was already stopped stays
-  stopped.
+  The server is offline for the whole backup, so on a running server the button asks first,
+  as **Stop** does. A server that was already stopped stays stopped.
 - **Back up without stopping** is best-effort: an active save can produce an
   incomplete archive that may not restore. Use it only when you cannot allow downtime.
 
@@ -40,12 +40,23 @@ many **best-effort** backups to keep. The two counts are separate, so a run of
 best-effort copies never pushes out your consistent ones. A count of `0` keeps all
 backups of that type. Snapshots taken before a restore, import, or update have their own
 limit, equal to the consistent count. Older backups are deleted after the next backup or
-scheduled cleanup.
+scheduled cleanup; the backup's progress line says how many retention removed, and its log
+names them. Before you take a backup by hand, the page says what retention would then
+remove, and **Stop and back up** repeats it in its confirmation. A restore, import or reset
+over a save directory with no files in it takes no snapshot, since there is nothing to keep.
 
-**Back up when this server restarts** makes a consistent backup on every restart,
-including scheduled ones, between the stop and the start. The restart waits for it, so
-large worlds add a few minutes of downtime. If the stop did not confirm the world save,
-no archive is taken and the operation says so.
+**Back up on restarts and automatic stops** makes a consistent backup after the stop of every
+restart, every [auto-stop](#stop-a-server-when-nobody-plays) and every stop a schedule runs,
+including the stop step of a schedule's chain. A restart waits for the backup between the stop
+and the start, so large worlds add a few minutes of downtime; an automatic stop finishes once the
+backup is written, so its notification arrives after the backup. A stop you make by hand, a
+planned power cut and the stops of an update test never back up. If the stop did not confirm the
+world save, or the data root is below the [free-space floor](configuration.md#daemon-settings), no archive is
+taken and the operation says so; the stop itself always goes ahead, and so does one whose finished
+backup cannot be added to the backup list, which removes the file. If Valmin is killed while one
+of these backups is being written, the unfinished file, or a finished one that never reached the
+backup list, is removed when Valmin next starts. A schedule that stops the server and
+then runs its own Back up step makes two backups.
 
 To back up on a schedule, see [Schedule maintenance](#schedule-maintenance). To keep
 copies off the host, see [off-host copies](remote-backups.md) or download archives to
@@ -100,7 +111,8 @@ built, explored or destroyed.
   taken in between, and any [world check](#world-check) warning the newer backup has that
   the older did not.
 - **Players** (needs `stats.read`): the peak player count, player-hours, how long at least
-  one player was online, and how much of the period the panel observed. Player counts are
+  one player was online, and how much of the period the panel observed, or that no player
+  counts were observed in the period. Player counts are
   kept for 30 days, so for an older period this section says it is not covered.
 - **Operations**: every job that finished on the server in the period, or started and is
   still running, such as starts, stops, restarts, mod changes, game updates and restores,
@@ -108,7 +120,8 @@ built, explored or destroyed.
   snapshot it took first only as it finishes, so that job is listed in the period that ends
   at its snapshot, not the one that starts there.
   Finished jobs are kept for 30 days by default (`jobs.retention_days`) and at most the
-  newest 500 per server, so an old period, or a long one on a busy server, may be incomplete.
+  newest 500 of each kind per server, so an old period, or a long one on a busy server, may
+  be incomplete.
 - **Other changes** (administrators only): audit log entries for the server that are not
   jobs, such as configuration edits. When the period holds more entries than the dialog
   reads, a link opens the audit log for those days.
@@ -118,6 +131,11 @@ built, explored or destroyed.
 To restore, stop the server, select an archive, and confirm the world name. Restore
 replaces the server's entire `worlds_local` directory and leaves the server stopped.
 Start it after checking the job result.
+
+To put a world from one server's backup on another server, or from a deleted server's
+leftover archive, use [import a world](usage.md#import-a-world) on the target instead.
+A restore always replaces the same server's `worlds_local`; an import installs one world
+under the target's world name.
 
 An archive holds the server's whole `worlds/` directory except a top-level `cache/`
 directory and the game's own rolling saves (`<world>_backup_auto-*` in `worlds_local`):
@@ -141,7 +159,13 @@ overview shows **This server needs a check** until you choose **Check this serve
 On **Saved setups**, stop the server and save a named setup before changing its mods
 or settings. Valmin stores the installed package files along with mod versions,
 registries, locks, enabled states, client tags, launch and backup settings, and
-flat `.cfg` files supported by the configuration editor. The saved package files
+the `.cfg` files directly in `BepInEx/config`. Config files in subfolders and YAML,
+JSON and text files are not saved and a restore leaves them as they are; the save card
+lists them. Each config file the restore replaces or removes is kept in its history first.
+Restoring a setup with an older version of a mod leaves the YAML or JSON files a later update
+of that mod wrote; load the older version from the file's history if the mod needs it. A setup
+saved before mods recorded the config files they ship lets the next update of those mods keep
+such files as they are; later updates follow the mod again. The saved package files
 support recovery when a registry or download cache is unavailable. If a required
 package cannot be captured, the save job fails without publishing the setup.
 
@@ -163,37 +187,67 @@ World restoration follows the [world restore procedure](#back-up-or-restore-a-wo
 ## Schedule maintenance
 
 On **Maintenance**, choose **What to run** and **How often**, then choose
-**Add schedule** to run backups, restarts, or game updates on their own.
+**Add schedule** to run backups, restarts, game updates or update tests on their own.
 
 New schedules use the browser's time zone, including across daylight saving changes.
 Existing schedules keep the time zone they were created with (UTC for schedules created
-before this change) until you change their time. Upcoming runs, each schedule's next run,
-and skipped and failed runs are shown in your browser's time zone. A schedule whose cron
-expression uses another zone names it on its row.
+before this change) until you move them, as described below. Upcoming runs, each
+schedule's next run, and skipped and failed runs are shown in your browser's time zone. Each
+row shows its next run, says when it runs in words, such as "Every day at 04:00", with its
+zone in brackets when that is not yours, and keeps its cron expression as the detail below.
+A cron expression you wrote by hand is shown as written when it is not one of the builder's
+daily, weekly, monthly or every-few-hours shapes.
 
 On the days the clocks change, a schedule still runs once. A time in the hour the clocks
 skip runs when they jump past it, and a time in the hour they repeat runs the first time the
 clock reaches it.
 
 Backups, restarts and game updates stop the server, so their schedules may run at most once
-an hour, as may a sequence with a step that stops it. `@every` expressions are not accepted.
+an hour, as may a sequence with a step that stops it and an update test, which can apply
+what it tested. `@every` expressions are not accepted.
 
 A schedule keeps running after its author loses access to the server, and after their
 account is deleted, when it shows an unnamed author. Disable or delete schedules you no
 longer want.
 
-To move a schedule to another time, choose the pencil on its row, set the new time in the
-form below the list and choose **Save new time**. What it runs, its steps and its waiting
-rules stay as they are, and it takes your current time zone. The form does not load the
-schedule's present time: it shows whatever it last held, so set the time you want.
+To change a schedule, choose the pencil on its row. The form below the list fills with its
+time, its steps and its waiting rules; change any of them and choose **Save changes**. What it
+runs cannot change, and the schedule keeps its run history and its author. Only the fields you
+changed are saved, so editing a sequence's steps or the waiting rules leaves its next run as it
+was. Changing the time moves the next run to the new time. A run already waiting for players
+stops waiting when you change the time, turn waiting off, or leave the sequence with no step
+that stops the server, which also turns waiting off.
+
+The times in the form are in the schedule's own time zone, which the form names. When that
+differs from yours, the form offers a switch, **Run it in** followed by your zone and
+**instead**, that moves the schedule to your zone; the times in the form are then read in
+your zone. An expression written by hand that sets one time of day, such as `0 4 * * *`, on
+every day, on listed days from Monday to Sunday in order, or on a day of the month up to the
+28th, opens in the controls; any other expression you wrote opens as **Cron expression**, as
+written.
+
+When some of a server's schedules run in a zone other than yours, a line above the list says
+how many and offers **Move to** your zone, unless a schedule is open in the form below. After you confirm, each keeps its clock times and
+reads them in your zone, so a schedule that ran at 04:00 UTC now runs at 04:00 your time and
+its next run changes. A run already waiting for players stops waiting, as for any change of
+time.
+
+To try a schedule without waiting for its time, choose **Run now** on its row and confirm.
+It runs at once, as saved and as it would on its time: a sequence runs its steps in order,
+and a stop step backs up as a scheduled stop does under **Back up on restarts and automatic
+stops**. It does not wait for players, and its next run stays as it is. Changes still open
+in the form are not part of the run; save them first. The job history shows the run as
+**Schedule, run by** your name. A schedule that is waiting for players to leave offers no
+**Run now**; turn its waiting off to let the held run start within a minute. A paused
+schedule can be run this way too.
 
 **Upcoming runs** lists the next runs of every enabled schedule, earliest first.
 
 A scheduled restart or backup stops the server and disconnects its players. To avoid that,
-turn on **Wait until no players are connected** when you add the schedule. A due run then
-waits until the server is empty. **Wait at most** caps the wait; after it, the run starts
-with players connected. Valmin reads the player count from the server log, and it can be
-unknown for up to 10 minutes after the server starts. **If the player count is unknown**
+turn on **Wait until no players are connected** when you add or edit the schedule. A due
+run then waits until the server is empty. **Wait at most** caps the wait; after it, the run
+starts with players connected. Valmin reads the player count from the server log, and it can
+be unknown for up to 10 minutes after the server starts. **If the player count is unknown**
 chooses what that means: **Wait, as if players are connected** or **Run, as if the server
 is empty**. A waiting run shows a **waiting for players** badge in the schedule list, heads
 **Upcoming runs**, and shows a notice on the server's overview page, each with the latest
@@ -223,7 +277,9 @@ for each one, in order. A step is one of:
 Each step runs as the job it normally is and appears in the job history. The next step
 starts when the previous one has finished, and the sequence stops at the first step that
 fails; the sequence then shows as **Failed**, and the server stays as that step left it.
-Stopping a stopped server, or starting a running one, counts as done. Backing up a
+Stopping a stopped server, or starting a running one, counts as done. A step the server
+cannot take, such as a command or a wait on a stopped server, is skipped; the job's last line
+then says how many steps were skipped, and its log says which and why. Backing up a
 running server stops it for the backup and starts it again before the next step. A game
 update needs a stopped server, so put **Stop the server** before it. A sequence with an
 update step is skipped on a modded server, as an update alone is.
@@ -234,6 +290,29 @@ listed under [send server commands](usage.md#send-server-commands), and only an
 administrator can add an update step or a command outside that list. **Wait until no
 players are connected** works for a sequence with a step that stops the server, and holds
 the whole sequence until the server is empty.
+
+### Test updates on a schedule
+
+A modded server cannot take a scheduled game update, because the update needs a person to
+confirm it. Choose **Test updates on a copy** instead, which administrators can schedule. Each
+run does what [Test an update on a copy](usage.md#test-an-update-on-a-copy) does by hand: it
+copies the server, installs the new game build and the pending mod updates on the copy,
+starts it and reads what the mod loader said. The game is tried unless the panel's hourly
+update check found the server current, and the mods when any update is pending. A run with
+no game or mod update to try is skipped, and so is one while the server still has a copy
+from an earlier test: apply or discard that copy first.
+
+Turn on **Apply when every mod loads and nobody is on** to finish the job unattended. When the
+test ends, the updates are applied as **Apply to the server** applies them, but only if the
+copy's mod loader finished, named every enabled mod and reported no failure, and the server is
+stopped or running with nobody on it. A server whose player count is unknown counts as
+occupied. Otherwise the copy is kept for you to look at, apply or discard. A copy that runs
+nothing newer than the server is only removed: the server is not stopped. The apply shows in
+the job history as part of the schedule.
+
+Add an alert rule for **Update test finished** to hear how each test went: whether every mod
+loaded, which ones failed, and whether the updates are being applied or why not. An apply
+that updates the server also sends **Server updated**.
 
 **Skipped and failed runs** lists the scheduled runs, among the last 50, that did not
 complete. A run is **Skipped** when the server is busy with another task or is in a state
@@ -247,7 +326,8 @@ Skipped and failed runs show the reason under them.
 An idle server keeps using CPU with nobody connected. To save power, open **Maintenance**,
 turn on **Stop when empty** under **Auto-stop**, choose how many minutes (5 to 1440) the
 server may sit empty, and select **Save auto-stop**. Once the server has had no players for
-that long, Valmin stops it the normal way, saving the world first. Players cannot join until
+that long, Valmin stops it the normal way, saving the world first, and makes a backup when
+[**Back up on restarts and automatic stops**](#backup-settings) is on. Players cannot join until
 someone starts it again.
 
 Valmin reads the player count from the server log. While the count is unknown, the server
@@ -259,6 +339,48 @@ auto-stop waits while another task is running on the server.
 An auto-stop appears in the job history as requested by **Panel**, in the audit log as
 **Auto-stop**, and sends `server_stopped` with the reason **No players for N minutes** to the
 channels of the **Server stopped** [rules](usage.md#add-a-rule) that cover that server.
+
+## Restart a hung server
+
+A mod can leave the game process alive while its main loop is stuck. Docker still reports the
+server as running, and players cannot join. To be told, or to have Valmin restart it, open
+**Maintenance** and choose under **Watchdog**:
+
+- **Do nothing**, the default.
+- **Alert me** sends one **Server stopped unexpectedly** notification when the server stops
+  responding, and leaves it running.
+- **Alert me and restart the server** sends the same notification and restarts the server. It
+  needs the right to restart the server as well as to change its settings, and Valmin restarts a
+  server this way at most once an hour. A server that hangs again inside the hour is reported at
+  once and restarted when the hour is up. The hour is counted in memory, so it starts again when
+  Valmin does.
+
+The game writes a status line (`Connections N ZDOS:N …`) to its log every 10 minutes while its
+main loop runs, with or without players. A running server counts as not responding when it has
+logged none for 15 minutes, or for 25 minutes after it starts, which leaves room for the first
+line. The watchdog reads this from the log, so it works for private and crossplay servers and
+needs no open port. Before it acts, Valmin reads the server's log once more, and it counts silence
+only from the moment it could last read the log, so a log stream that stalled or a Docker outage
+does not make a healthy server look hung. A server that has logged no status line since it started
+is only reported, never restarted, because how long a large world takes to load is not known. A
+server whose log never shows the line, for example because a mod filters the log, is reported 25
+minutes after every start; turn the watchdog off for it. A host or Valmin that was suspended does
+not count as silence: the clock restarts when Valmin runs again, and also when Valmin starts, so a
+hung server is noticed up to 15 minutes after Valmin comes up. A restart waits for the next check
+while another task is working on the server; the hang is reported meanwhile.
+
+A stuck game may not be able to save, so a restart may wait the whole stop timeout, after which
+Docker kills the server. If Docker still shows the container running after that, Valmin does not start it again: the
+server is held in the error state until someone checks it. Otherwise the server starts again and
+the world goes back to its last autosave, up to 30 minutes old. The restart records
+that the save was not confirmed, so **Unclean stop** opens in the operations inbox, and no backup
+is taken even with [**Back up on restarts and automatic stops**](#backup-settings) on. The
+restart appears in the job history as requested by **Panel** and in the audit log as
+**Watchdog**. Each report also counts toward the **Crash loop** alert.
+
+Valmin does not use a query to the game's port for this. In a test, a server answered it only
+while public listing was on and crossplay was off, and it kept answering with the game's main
+loop stopped for several minutes, so it cannot tell a stuck game from a healthy one.
 
 ## Reset or upgrade the world with mods
 
@@ -335,6 +457,7 @@ mods. With the default configuration, the data root contains:
 | `backups/`               | World backup archives and pre-upgrade database copies.           |
 | `cache/steam/896660/`    | Downloaded game builds, one directory per build of any branch.   |
 | `cache/<registry>/`      | Downloaded mod packages, one directory per registry.             |
+| `cache/catalogue.db`     | The registries' mod catalogue. A cache; it needs no backup.      |
 | `setups/blobs/`          | Package files retained for saved setups.                         |
 | `exports/`               | The latest [installation export](#move-to-a-new-host).           |
 
@@ -503,7 +626,8 @@ the database and are not affected.
 
 Use the server's update action to update the Valheim installation. On a modded server,
 [test the update on a copy](usage.md#test-an-update-on-a-copy) first: the copy downloads the
-new build into the cache and applying it reuses that download. The game build and mod
+new build into the cache and applying it reuses that download. To do this unattended, see
+[Test updates on a schedule](#test-updates-on-a-schedule). The game build and mod
 packages stay cached on the host after a test, and discarding the copy does not remove
 them. Rebuilding the runtime image alone does not download a new game build. Preload any new runtime
 or SteamCMD image before configuring Valmin to use it: the daemon does not pull images.

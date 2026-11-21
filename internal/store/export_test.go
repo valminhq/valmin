@@ -19,7 +19,7 @@ func TestCopyToWritesAConsistentDatabase(t *testing.T) {
 	if _, err := db.Reader.ExecContext(t.Context(), `DELETE FROM instances`); err == nil {
 		t.Error("a reader connection accepted a write after the copy")
 	}
-	copied, err := Open(t.Context(), "sqlite", path)
+	copied, err := Open(t.Context(), "sqlite", path, CataloguePath(t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}

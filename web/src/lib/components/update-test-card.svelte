@@ -247,10 +247,16 @@
 						<p class="text-muted-foreground">
 							The copy has not written a mod loader log, so no mod has been checked yet.
 						</p>
-					{:else}
+					{:else if test.plugin_load.complete}
 						<p>
 							{test.plugin_load.loaded}
 							{test.plugin_load.loaded === 1 ? 'mod' : 'mods'} loaded on the copy and none failed.
+						</p>
+					{/if}
+					{#if test.plugin_load && !test.plugin_load.complete}
+						<p class="text-muted-foreground">
+							The mod loader on the copy had not finished: {test.plugin_load.loaded}
+							{test.plugin_load.loaded === 1 ? 'mod' : 'mods'} loaded so far.
 						</p>
 					{/if}
 					{#if test.not_seen.length > 0}
