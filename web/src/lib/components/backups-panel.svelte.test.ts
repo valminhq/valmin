@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Backup } from '#lib/api/backups.js';
 import { actions, type Instance, type WorldOnDisk } from '#lib/api/instances.js';
 import { session } from '#lib/state/session.svelte.js';
-import { click } from '#lib/testing/interact.js';
+import { click, text } from '#lib/testing/interact.js';
 import { FakeDaemon, backup, instance, job, permissions } from '#lib/testing/daemon.js';
 import BackupsPanel from './backups-panel.svelte';
 
@@ -147,6 +147,25 @@ describe('the backups panel', () => {
 		).toBeTruthy();
 
 		await click(button('Stop and back up'));
+		await vi.waitFor(() => expect(daemon.requests('POST', list)).toHaveLength(1));
+		expect(daemon.requests('POST', list)[0].query.get('mode')).toBe('quiesced');
+	});
+
+	// Restart and Stop ask first; this takes a running server offline just the same.
+	it('asks before stopping a running server for a backup', async () => {
+		await open([actions.backupsList, actions.backupsCreate], {
+			row: instance({ state: 'running', backup_keep_cold: 2 })
+		});
+		daemon.on('POST', list, () => Response.json(job(), { status: 202 }));
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
+
+		await click(button('Stop and back up'));
+		const dialog = await screen.findByRole('dialog');
+		expect(text(dialog)).toContain('Connected players are disconnected');
+		expect(text(dialog)).toContain('Only the newest 2 consistent backups are kept');
+		expect(daemon.requests('POST', list), 'nothing sent before the answer').toHaveLength(0);
+
+		await click(within(dialog).getByRole('button', { name: 'Stop and back up' }));
 		await vi.waitFor(() => expect(daemon.requests('POST', list)).toHaveLength(1));
 		expect(daemon.requests('POST', list)[0].query.get('mode')).toBe('quiesced');
 	});

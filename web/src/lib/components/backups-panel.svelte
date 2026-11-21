@@ -164,6 +164,13 @@
 	}
 
 	const take = (mode: BackupMode) => run(() => backups.create(instance.id, mode));
+	// A quiesced backup of a running server takes it offline, so it is confirmed like Stop.
+	let confirmStop = $state(false);
+	const retentionNote = $derived(
+		instance.backup_keep_cold > 0
+			? ` Only the newest ${instance.backup_keep_cold} consistent ${instance.backup_keep_cold === 1 ? 'backup is' : 'backups are'} kept, so the oldest may be removed.`
+			: ''
+	);
 
 	let acknowledging = $state<string | null>(null);
 	/** Clears a flagged archive's findings, then re-reads the catalogue: acknowledging moves
@@ -304,332 +311,348 @@
 		? 'xl:grid-cols-[minmax(0,1fr)_22rem]'
 		: ''}"
 >
-	<Card.Root class="min-w-0">
-		<Card.Header>
-			<Card.Title>Backup history</Card.Title>
-			<Card.Description>
-				Archives of this server's world, newest first. Restoring one replaces the entire world-save
-				directory (worlds_local), including any other worlds in it. Mods, configuration, server
-				files and player lists are not touched.
-			</Card.Description>
-		</Card.Header>
-		<Card.Content class="grid gap-4">
-			{#if !canList}
-				<p class="text-sm text-muted-foreground" data-testid="backups-blocked">
-					Backups are not available to you.
-				</p>
-			{:else}
-				{#if !loading && !loadFailure}
-					{#if points.newest}
-						{@const sameArchive = points.newestConsistent?.id === points.newest.id}
-						<div
-							class="grid gap-3 {sameArchive ? '' : 'sm:grid-cols-2'}"
-							data-testid="recovery-points"
-						>
-							{@render point(
-								'Newest backup',
-								points.newest,
-								sameArchive
-									? 'Consistent, so also the newest consistent backup'
-									: 'Best-effort, copied while running'
-							)}
-							{#if !sameArchive}
-								{#if points.newestConsistent}
-									{@render point('Newest consistent backup', points.newestConsistent, 'Consistent')}
-								{:else}
-									<div
-										class={['grid gap-0.5 rounded-lg border p-4', warningBox]}
-										data-testid="no-consistent-backup"
-									>
-										<span class="text-xs">Newest consistent backup</span>
-										<span class="font-medium">None</span>
-										<span class="text-xs">
-											{#if cursor}
-												None among the backups loaded so far. Load older backups to look further.
-											{:else}
-												Every backup here was copied while the server was running and may not
-												restore.{canCreate ? ' Use Stop and back up to make one.' : ''}
-											{/if}
-										</span>
-									</div>
+	<div class="grid min-w-0 gap-6">
+		<Card.Root class="min-w-0">
+			<Card.Header>
+				<Card.Title>Backup history</Card.Title>
+				<Card.Description>
+					Archives of this server's world, newest first. Restoring one replaces the entire
+					world-save directory (worlds_local), including any other worlds in it. Mods,
+					configuration, server files and player lists are not touched.
+				</Card.Description>
+			</Card.Header>
+			<Card.Content class="grid gap-4">
+				{#if !canList}
+					<p class="text-sm text-muted-foreground" data-testid="backups-blocked">
+						Backups are not available to you.
+					</p>
+				{:else}
+					{#if !loading && !loadFailure}
+						{#if points.newest}
+							{@const sameArchive = points.newestConsistent?.id === points.newest.id}
+							<div
+								class="grid gap-3 {sameArchive ? '' : 'sm:grid-cols-2'}"
+								data-testid="recovery-points"
+							>
+								{@render point(
+									'Newest backup',
+									points.newest,
+									sameArchive
+										? 'Consistent, so also the newest consistent backup'
+										: 'Best-effort, copied while running'
+								)}
+								{#if !sameArchive}
+									{#if points.newestConsistent}
+										{@render point(
+											'Newest consistent backup',
+											points.newestConsistent,
+											'Consistent'
+										)}
+									{:else}
+										<div
+											class={['grid gap-0.5 rounded-lg border p-4', warningBox]}
+											data-testid="no-consistent-backup"
+										>
+											<span class="text-xs">Newest consistent backup</span>
+											<span class="font-medium">None</span>
+											<span class="text-xs">
+												{#if cursor}
+													None among the backups loaded so far. Load older backups to look further.
+												{:else}
+													Every backup here was copied while the server was running and may not
+													restore.{canCreate ? ' Use Stop and back up to make one.' : ''}
+												{/if}
+											</span>
+										</div>
+									{/if}
 								{/if}
-							{/if}
-						</div>
-					{:else}
-						<div class="grid gap-0.5 rounded-lg border bg-muted/40 p-4">
-							<span class="text-xs text-muted-foreground">Newest backup</span>
-							<span class="font-medium">Nothing has been backed up yet</span>
-							<span class="text-xs text-muted-foreground">
-								No panel backup archives yet. Check Worlds on disk below for other saved worlds.
-							</span>
-						</div>
+							</div>
+						{:else}
+							<div class="grid gap-0.5 rounded-lg border bg-muted/40 p-4">
+								<span class="text-xs text-muted-foreground">Newest backup</span>
+								<span class="font-medium">Nothing has been backed up yet</span>
+								<span class="text-xs text-muted-foreground">
+									No panel backup archives yet. Check Worlds on disk below for other saved worlds.
+								</span>
+							</div>
+						{/if}
 					{/if}
-				{/if}
-				{#if canCreate}
-					<!--
+					{#if canCreate}
+						<!--
 					The two controls are not two speeds of the same thing, and the copy is the only
 					place that difference is visible. A quiesced archive stops the server, which is what
 					makes it trustworthy; a hot copy reads a world that is being written to, so it is
 					best-effort and never the recommended one.
 				-->
-					<div class="grid gap-3 sm:grid-cols-2">
-						<div class="grid gap-2 rounded-lg border p-4">
-							<p class="text-sm font-medium">Back up now</p>
-							<p class="text-sm text-muted-foreground">
-								A running server is stopped once its world has saved and started again afterwards;
-								it is offline for the whole backup. A stopped server stays stopped.
-							</p>
-							<Button
-								size="sm"
-								class="justify-self-start"
-								disabled={busy !== null}
-								onclick={() => take('quiesced')}
-							>
-								Stop and back up
-							</Button>
+						<div class="grid gap-3 sm:grid-cols-2">
+							<div class="grid gap-2 rounded-lg border p-4">
+								<p class="text-sm font-medium">Back up now</p>
+								<p class="text-sm text-muted-foreground">
+									A running server is stopped once its world has saved and started again afterwards;
+									it is offline for the whole backup. A stopped server stays stopped.
+								</p>
+								<Button
+									size="sm"
+									class="justify-self-start"
+									disabled={busy !== null}
+									onclick={() =>
+										instance.state === 'running' ? (confirmStop = true) : take('quiesced')}
+								>
+									Stop and back up
+								</Button>
+							</div>
+							<div class="grid gap-2 rounded-lg border p-4">
+								<p class="text-sm font-medium">Back up without stopping</p>
+								<p class="text-sm text-muted-foreground">
+									Copies the world while the server runs. The backup may contain an incomplete save
+									and may not be restorable.
+								</p>
+								<Button
+									variant="outline"
+									size="sm"
+									class="justify-self-start"
+									disabled={busy !== null}
+									onclick={() => take('hot')}
+								>
+									Back up without stopping
+								</Button>
+							</div>
 						</div>
-						<div class="grid gap-2 rounded-lg border p-4">
-							<p class="text-sm font-medium">Back up without stopping</p>
-							<p class="text-sm text-muted-foreground">
-								Copies the world while the server runs. The backup may contain an incomplete save
-								and may not be restorable.
-							</p>
-							<Button
-								variant="outline"
-								size="sm"
-								class="justify-self-start"
-								disabled={busy !== null}
-								onclick={() => take('hot')}
-							>
-								Back up without stopping
-							</Button>
-						</div>
-					</div>
-				{/if}
+					{/if}
 
-				<Problem error={failure} />
+					<Problem error={failure} />
 
-				{#if jobId}
-					<!--
+					{#if jobId}
+						<!--
 					A quiesced backup is a stop, a copy of the whole world and a start, which on a large
 					world is minutes with nothing else to see. A restore is the same again. F4: this is the
 					daemon's own job, not a bar that runs ahead of it.
 				-->
-					<div class="rounded-lg border p-4">
-						<JobProgress {jobId} onfinish={finished} />
-					</div>
-				{/if}
+						<div class="rounded-lg border p-4">
+							<JobProgress {jobId} onfinish={finished} />
+						</div>
+					{/if}
 
-				{#if busy}
-					<p class="text-sm text-muted-foreground">{busy}</p>
-				{/if}
+					{#if busy}
+						<p class="text-sm text-muted-foreground">{busy}</p>
+					{/if}
 
-				{#if loading}
-					<p class="text-sm text-muted-foreground">Loading…</p>
-				{:else if loadFailure}
-					<Problem error={loadFailure} />
-					<Button variant="outline" class="justify-self-start" onclick={() => load(instance.id)}
-						>Retry loading backups</Button
-					>
-				{:else if list.length > 0}
-					<!--
+					{#if loading}
+						<p class="text-sm text-muted-foreground">Loading…</p>
+					{:else if loadFailure}
+						<Problem error={loadFailure} />
+						<Button variant="outline" class="justify-self-start" onclick={() => load(instance.id)}
+							>Retry loading backups</Button
+						>
+					{:else if list.length > 0}
+						{#if restoreBlocked && canRestore && !busy}
+							<p class="text-sm text-muted-foreground">{restoreBlocked}</p>
+						{/if}
+						<!--
 						One rendering at both widths. Every field carries its own label, shown on the card at
 						narrow widths and replaced by the column header above md, so a row cannot say one
 						thing on a phone and another on a laptop.
 					-->
-					{#if list.length > 1}
-						<div class="flex flex-wrap items-center gap-2">
-							<Button
-								variant="outline"
-								size="sm"
-								onclick={() => {
-									comparing = !comparing;
-									pickedIds = [];
-								}}
-							>
-								<GitCompare />
-								<span>{comparing ? 'Cancel comparing' : 'Compare two backups'}</span>
-							</Button>
-							{#if comparing}
+						{#if list.length > 1}
+							<div class="flex flex-wrap items-center gap-2">
 								<Button
+									variant="outline"
 									size="sm"
-									disabled={picked.length !== 2}
-									onclick={() => (compareOpen = true)}
+									onclick={() => {
+										comparing = !comparing;
+										pickedIds = [];
+									}}
 								>
-									Show what happened between them
+									<GitCompare />
+									<span>{comparing ? 'Cancel comparing' : 'Compare two backups'}</span>
 								</Button>
-								<span class="text-sm text-muted-foreground">{picked.length} of 2 selected</span>
-							{/if}
-						</div>
-					{/if}
-					<div class="grid gap-2 md:grid-cols-[minmax(0,1.3fr)_9rem_minmax(0,1fr)_5rem]">
-						<div
-							class="hidden gap-3 px-3 text-xs font-medium text-muted-foreground md:col-span-full md:grid md:grid-cols-subgrid"
-						>
-							<span>Created</span>
-							<span>Consistency</span>
-							<span>Reason</span>
-							<span>Size</span>
-						</div>
-						<ul class="grid gap-2 md:contents">
-							{#each list as archive (archive.id)}
-								<li
-									class="grid gap-3 rounded-lg border p-3 md:col-span-full md:grid-cols-subgrid md:items-baseline"
-								>
-									<div class="grid gap-0.5">
-										<span class="text-xs text-muted-foreground md:hidden">Created</span>
-										{#if comparing}
-											<label class="flex items-center gap-2">
-												<input
-													type="checkbox"
-													class="size-4 accent-primary"
-													checked={picked.some((b) => b.id === archive.id)}
-													onchange={(e) => pick(archive, e.currentTarget.checked)}
-												/>
+								{#if comparing}
+									<Button
+										size="sm"
+										disabled={picked.length !== 2}
+										onclick={() => (compareOpen = true)}
+									>
+										Show what happened between them
+									</Button>
+									<span class="text-sm text-muted-foreground">{picked.length} of 2 selected</span>
+								{/if}
+							</div>
+						{/if}
+						<div class="grid gap-2 md:grid-cols-[minmax(0,1.3fr)_9rem_minmax(0,1fr)_5rem]">
+							<div
+								class="hidden gap-3 px-3 text-xs font-medium text-muted-foreground md:col-span-full md:grid md:grid-cols-subgrid"
+							>
+								<span>Created</span>
+								<span>Consistency</span>
+								<span>Reason</span>
+								<span>Size</span>
+							</div>
+							<ul class="grid gap-2 md:contents">
+								{#each list as archive (archive.id)}
+									<li
+										class="grid gap-3 rounded-lg border p-3 md:col-span-full md:grid-cols-subgrid md:items-baseline"
+									>
+										<div class="grid gap-0.5">
+											<span class="text-xs text-muted-foreground md:hidden">Created</span>
+											{#if comparing}
+												<label class="flex items-center gap-2">
+													<input
+														type="checkbox"
+														class="size-4 accent-primary"
+														checked={picked.some((b) => b.id === archive.id)}
+														onchange={(e) => pick(archive, e.currentTarget.checked)}
+													/>
+													<span>{when(archive.created_at)}</span>
+												</label>
+											{:else}
 												<span>{when(archive.created_at)}</span>
-											</label>
-										{:else}
-											<span>{when(archive.created_at)}</span>
-										{/if}
-										<span class="font-mono text-xs text-muted-foreground">{archive.world_name}</span
-										>
-									</div>
-									<div class="grid justify-items-start gap-0.5">
-										<span class="text-xs text-muted-foreground md:hidden">Consistency</span>
-										<!--
+											{/if}
+											<span class="font-mono text-xs text-muted-foreground"
+												>{archive.world_name}</span
+											>
+										</div>
+										<div class="grid justify-items-start gap-0.5">
+											<span class="text-xs text-muted-foreground md:hidden">Consistency</span>
+											<!--
 											Which of the two an archive is decides whether it can be trusted to
 											restore, so it is on every row rather than only on the row that lacks it.
 										-->
-										{#if !archive.consistent}
-											<Badge variant="secondary">Best-effort</Badge>
-											<span class="text-xs text-muted-foreground">copied while running</span>
-										{:else}
-											<Badge variant="outline">Consistent</Badge>
-											<span class="text-xs text-muted-foreground">server was stopped</span>
-										{/if}
-									</div>
-									<div class="grid justify-items-start gap-0.5">
-										<span class="text-xs text-muted-foreground md:hidden">Reason</span>
-										<Badge variant="outline">{archive.trigger.replaceAll('_', ' ')}</Badge>
-										{#if archive.prunes_next}
-											<!-- A retention setting whose effect is invisible until it deletes
+											{#if !archive.consistent}
+												<Badge variant="secondary">Best-effort</Badge>
+												<span class="text-xs text-muted-foreground">copied while running</span>
+											{:else}
+												<Badge variant="outline">Consistent</Badge>
+												<span class="text-xs text-muted-foreground">server was stopped</span>
+											{/if}
+										</div>
+										<div class="grid justify-items-start gap-0.5">
+											<span class="text-xs text-muted-foreground md:hidden">Reason</span>
+											<Badge variant="outline">{archive.trigger.replaceAll('_', ' ')}</Badge>
+											{#if archive.prunes_next}
+												<!-- A retention setting whose effect is invisible until it deletes
 											     something is the wrong shape for world data. -->
-											<Badge variant="destructive">Pending deletion</Badge>
-											<span class="text-xs text-muted-foreground">removed at the next prune</span>
-										{/if}
-									</div>
-									<div class="grid gap-0.5">
-										<span class="text-xs text-muted-foreground md:hidden">Size</span>
-										<span class="tabular-nums">{formatBytes(archive.size_bytes)}</span>
-										{#if archive.world_bytes !== null}
-											<span class="text-xs text-muted-foreground tabular-nums"
-												>world {formatBytes(archive.world_bytes)}</span
-											>
-										{/if}
-									</div>
-									{#if archive.world_attention.length > 0}
-										<div
-											class={[
-												'grid justify-items-start gap-1 rounded-md border p-3 text-sm md:col-span-full',
-												warningBox
-											]}
-										>
-											<span class="font-medium">Attention required</span>
-											<ul class="list-disc pl-5">
-												{#each archive.world_attention as finding (finding.code)}
-													<li>{finding.message}</li>
-												{/each}
-											</ul>
-											<span>
-												Check the server log around this time before relying on this backup.
-												<a
-													class="underline"
-													href={resolve('/instances/[id]#console', { id: instance.id })}
-													>Open the console</a
+												<Badge variant="destructive">Pending deletion</Badge>
+												<span class="text-xs text-muted-foreground">removed at the next prune</span>
+											{/if}
+										</div>
+										<div class="grid gap-0.5">
+											<span class="text-xs text-muted-foreground md:hidden">Size</span>
+											<span class="tabular-nums">{formatBytes(archive.size_bytes)}</span>
+											{#if archive.world_bytes !== null}
+												<span class="text-xs text-muted-foreground tabular-nums"
+													>world {formatBytes(archive.world_bytes)}</span
 												>
-											</span>
+											{/if}
+										</div>
+										{#if archive.world_attention.length > 0}
+											<div
+												class={[
+													'grid justify-items-start gap-1 rounded-md border p-3 text-sm md:col-span-full',
+													warningBox
+												]}
+											>
+												<span class="font-medium">Attention required</span>
+												<ul class="list-disc pl-5">
+													{#each archive.world_attention as finding (finding.code)}
+														<li>{finding.message}</li>
+													{/each}
+												</ul>
+												<span>
+													Check the server log around this time before relying on this backup.
+													<a
+														class="underline"
+														href={resolve('/instances/[id]#console', { id: instance.id })}
+														>Open the console</a
+													>
+												</span>
+												{#if canRestore}
+													<Button
+														variant="outline"
+														size="sm"
+														disabled={acknowledging !== null}
+														onclick={() => acknowledge(archive)}
+													>
+														{acknowledging === archive.id ? 'Acknowledging…' : 'Acknowledge'}
+													</Button>
+												{/if}
+											</div>
+										{/if}
+										<div class="flex flex-wrap gap-1 md:col-span-full md:justify-end">
+											{#if canCreate && remote?.destination_id}
+												<Button
+													variant="ghost"
+													size="sm"
+													disabled={uploading !== null}
+													onclick={() => uploadRemote(archive)}
+												>
+													{uploading === archive.id ? 'Queuing…' : 'Upload now'}
+												</Button>
+											{/if}
+											{#if canDownload}
+												<Button
+													variant="ghost"
+													size="sm"
+													href={backups.downloadUrl(instance.id, archive.id)}
+													download={archive.filename}
+												>
+													<Download />
+													<span>Download</span>
+												</Button>
+											{/if}
 											{#if canRestore}
 												<Button
-													variant="outline"
+													variant="ghost"
 													size="sm"
-													disabled={acknowledging !== null}
-													onclick={() => acknowledge(archive)}
+													disabled={restoreBlocked !== null}
+													title={restoreBlocked ?? undefined}
+													onclick={() => askRestore(archive)}
 												>
-													{acknowledging === archive.id ? 'Acknowledging…' : 'Acknowledge'}
+													<History />
+													<span>Restore</span>
+												</Button>
+												<Button
+													variant="ghost"
+													size="sm"
+													disabled={jobRunning}
+													onclick={() => askDelete(archive)}
+												>
+													<Trash2 />
+													<span>Delete</span>
 												</Button>
 											{/if}
 										</div>
-									{/if}
-									<div class="flex flex-wrap gap-1 md:col-span-full md:justify-end">
-										{#if canCreate && remote?.destination_id}
-											<Button
-												variant="ghost"
-												size="sm"
-												disabled={uploading !== null}
-												onclick={() => uploadRemote(archive)}
-											>
-												{uploading === archive.id ? 'Queuing…' : 'Upload now'}
-											</Button>
-										{/if}
-										{#if canDownload}
-											<Button
-												variant="ghost"
-												size="sm"
-												href={backups.downloadUrl(instance.id, archive.id)}
-												download={archive.filename}
-											>
-												<Download />
-												<span>Download</span>
-											</Button>
-										{/if}
-										{#if canRestore}
-											<Button
-												variant="ghost"
-												size="sm"
-												disabled={restoreBlocked !== null}
-												onclick={() => askRestore(archive)}
-											>
-												<History />
-												<span>Restore</span>
-											</Button>
-											<Button
-												variant="ghost"
-												size="sm"
-												disabled={jobRunning}
-												onclick={() => askDelete(archive)}
-											>
-												<Trash2 />
-												<span>Delete</span>
-											</Button>
-										{/if}
-									</div>
-								</li>
-							{/each}
-						</ul>
-					</div>
-					<Problem error={moreFailure} />
-					{#if cursor}
-						<Button
-							variant="outline"
-							class="justify-self-start"
-							disabled={loadingMore}
-							onclick={loadMore}
-						>
-							{loadingMore
-								? 'Loading…'
-								: moreFailure
-									? 'Retry loading older backups'
-									: 'Load older backups'}
-						</Button>
-					{/if}
-					{#if restoreBlocked && canRestore}
-						<p class="text-sm text-muted-foreground">{restoreBlocked}</p>
+									</li>
+								{/each}
+							</ul>
+						</div>
+						<Problem error={moreFailure} />
+						{#if cursor}
+							<Button
+								variant="outline"
+								class="justify-self-start"
+								disabled={loadingMore}
+								onclick={loadMore}
+							>
+								{loadingMore
+									? 'Loading…'
+									: moreFailure
+										? 'Retry loading older backups'
+										: 'Load older backups'}
+							</Button>
+						{/if}
 					{/if}
 				{/if}
-				<WorldsOnDisk {instance} />
-			{/if}
-		</Card.Content>
-	</Card.Root>
+			</Card.Content>
+		</Card.Root>
+		{#if canList}
+			<!-- Apart from the archives: deleting here acts on the live world, not on a backup. -->
+			<Card.Root class="min-w-0">
+				<Card.Content>
+					<WorldsOnDisk {instance} />
+				</Card.Content>
+			</Card.Root>
+		{/if}
+	</div>
 	{#if (canList && (canSetPolicy || canRestore)) || canSchedule}
 		<aside aria-label="Backup settings" class="grid min-w-0 gap-6">
 			{#if canList && (canSetPolicy || canRestore)}
@@ -741,12 +764,19 @@
 <RemoteBackupsPanel {instance} {onchange} refreshKey={remoteRefresh} bind:summary={remote} />
 
 <DestructiveConfirm
+	bind:open={confirmStop}
+	title={`Stop ${instance.name} and back up?`}
+	description={`Connected players are disconnected while the server saves the world and stops. It starts again once the backup is written.${retentionNote}`}
+	confirmLabel="Stop and back up"
+	onconfirm={() => void take('quiesced')}
+/>
+<DestructiveConfirm
 	bind:open={restoreOpen}
 	name={instance.world_name}
 	title="Restore backup for {instance.world_name}?"
 	description="The entire world-save directory (worlds_local), including any other worlds in it, is replaced by the archive taken {restoring
 		? when(restoring.created_at)
-		: ''}. Mods, configuration, server files and player lists are not touched. The panel first backs up what is there now, as a pre restore backup, and leaves this server stopped afterwards so you can check it before starting."
+		: ''}. Mods, configuration, server files and player lists are not touched. The panel first backs up what is there now, if anything, as a pre restore backup, and leaves this server stopped afterwards so you can check it before starting."
 	confirmLabel="Restore backup"
 	onconfirm={restore}
 />
