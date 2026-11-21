@@ -359,6 +359,9 @@ did not finish, the unconfirmed-stop alert waits.
 
 ### Search and copy the console log
 
+Each console line starts with its time. The first line, and the first line of each new day,
+also shows the date, so a log that spans several days says where each day begins.
+
 The console has a search box above the log. It matches case-insensitively, as plain
 text, among the lines the browser holds: at most 5,000 rows, which include the startup
 segment of up to 500 rows that the browser never trims. The counter counts matching
@@ -1610,7 +1613,7 @@ says so.
 
 `/start` starts a stopped server; with several linked
 servers, pick one from the suggestions. The reply changes to say when the server
-is online, or that it failed; the reason stays in the panel's job history. Together with
+is online, or that it failed; the reason stays under Operations on the server's overview in the panel. Together with
 [auto-stop](operations.md#stop-a-server-when-nobody-plays), players can start
 an empty server themselves when they want to play.
 
@@ -1630,7 +1633,7 @@ allows `/start`. With several linked servers, pick one from the suggestions.
   that the server restarts or stops when all of them have left, or in 5 minutes at the
   latest, and the command waits for that; `wait` sets the minutes, from 0 to 60. The warning
   needs an RCON mod on the server; without one the wait still applies. With `wait:0` the
-  server restarts or stops at once. The wait shows in the panel's job history, where you can
+  server restarts or stops at once. The wait shows under Operations in the panel, where you can
   cancel it.
 - `/backup` backs up the server's world. A stopped server is backed up at once. A running
   server stops for the backup and starts again, so players are warned and waited for first,
@@ -1647,7 +1650,7 @@ allows `/start`. With several linked servers, pick one from the suggestions.
   runs.
 
 A reply follows its job for 14 minutes, the longest Discord lets it be edited. A job that runs
-longer finishes in the panel, where its job history and
+longer finishes in the panel, where Operations on the server's overview and
 [notifications](#get-notified) report it. To keep admins informed in Discord, send
 notifications to a private admin channel: add its webhook as a shared channel under
 **Notifications** and a rule for the events you want, such as failed jobs, alerts or

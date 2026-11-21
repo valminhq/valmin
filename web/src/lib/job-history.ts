@@ -4,6 +4,12 @@ import type { Job, JobChange, JobChangeAction, JobStatus } from '#lib/api/types.
 
 const upperFirst = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
+/** A job's own message as a sentence, whatever case the step that wrote it used. */
+export const jobMessage = (message: string) => upperFirst(message.trim());
+
+/** Kinds whose own name is not what the panel calls them. */
+const KIND_NAMES: Record<string, string> = { chain: 'Sequence' };
+
 /**
  * A readable name for a job kind: the kind in words, so a kind this build does not know still
  * reads tidily. A mod install that only moves installed packages to newer versions is an
@@ -13,6 +19,7 @@ export function jobLabel(kind: string, changes?: JobChange[]): string {
 	if (kind === 'mod_install' && changes?.length && changes.every((c) => c.action === 'update')) {
 		return 'Mod update';
 	}
+	if (Object.hasOwn(KIND_NAMES, kind)) return KIND_NAMES[kind];
 	const words = kind.replaceAll('_', ' ').trim();
 	return words ? upperFirst(words) : 'Operation';
 }

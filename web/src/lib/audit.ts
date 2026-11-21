@@ -66,7 +66,8 @@ const OUTCOMES: Record<AuditOutcome, { label: string; variant: BadgeVariant }> =
 	cancelled: { label: 'Cancelled', variant: 'outline' }
 };
 
-const spaced = (name: string) => name.replaceAll('_', ' ');
+/** A schedule or job kind in words; a chain is what the schedule form calls a sequence. */
+const spaced = (name: string) => (name === 'chain' ? 'sequence' : name.replaceAll('_', ' '));
 
 /** A table entry by its own key: an action named like an Object method finds nothing. */
 const own = <T>(table: Record<string, T>, key: string): T | undefined =>

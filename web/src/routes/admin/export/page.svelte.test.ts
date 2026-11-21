@@ -38,7 +38,7 @@ describe('the installation export screen', () => {
 		const button = screen.getByRole('button', { name: 'Export' }) as HTMLButtonElement;
 		await click(button);
 
-		expect(await screen.findByText(/writing the full export/)).toBeTruthy();
+		expect(await screen.findByText(/writing the full export/i)).toBeTruthy();
 		expect(daemon.requests('POST', '/admin/export').map((r) => r.body)).toEqual([{ mode: 'full' }]);
 		expect(button.disabled).toBe(true);
 	});

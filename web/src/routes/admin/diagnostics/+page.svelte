@@ -139,15 +139,7 @@
 		if (!at) return 'Not measured';
 		const date = new Date(at);
 		if (Number.isNaN(date.getTime())) return 'Not measured';
-		return formatInstant(date, {
-			year: 'numeric',
-			month: 'short',
-			day: 'numeric',
-			hour: '2-digit',
-			minute: '2-digit',
-			second: '2-digit',
-			timeZoneName: 'short'
-		});
+		return formatInstant(date, { second: '2-digit' });
 	}
 
 	$effect(() => {

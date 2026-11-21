@@ -343,7 +343,7 @@ describe('the update test card', () => {
 		);
 		await open(admin, null);
 
-		expect(await screen.findByText(/copying the server/)).toBeTruthy();
+		expect(await screen.findByText(/copying the server/i)).toBeTruthy();
 	});
 
 	it('tells a test copy where it came from instead of offering its own test', async () => {

@@ -795,8 +795,8 @@
 				>
 					<p class="text-sm text-muted-foreground">
 						{changed.length}
-						{changed.length === 1 ? 'setting' : 'settings'} changed. The server picks them up on its next
-						start.
+						{changed.length === 1 ? 'setting' : 'settings'} changed. The server picks
+						{changed.length === 1 ? 'it' : 'them'} up on its next start.
 					</p>
 					<div class="flex gap-2">
 						<Button
@@ -820,7 +820,7 @@
 				<Card.Header>
 					<Card.Title>Manage server</Card.Title>
 					<Card.Description
-						>These take effect at once. Save changes does not apply to them.</Card.Description
+						>These take effect at once, apart from the settings above.</Card.Description
 					>
 				</Card.Header>
 				<Card.Content class="grid divide-y">

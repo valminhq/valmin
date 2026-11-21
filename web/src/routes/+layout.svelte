@@ -6,6 +6,7 @@
 	import { page, updated } from '$app/state';
 	import { resolve } from '$app/paths';
 	import ReloadNotice from '#lib/components/reload-notice.svelte';
+	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import { session } from '#lib/state/session.svelte.js';
 	import { instanceList } from '#lib/state/instances.svelte.js';
 	import { socket } from '#lib/socket/index.svelte.js';
@@ -113,14 +114,28 @@
 	// is still running the current build.
 	$effect(() => socket.onConnected(() => void updated.check()));
 
-	// Guards every editor holding unsaved work. The prompt is the browser's own because
-	// beforeNavigate is synchronous and the unload path can show nothing else. Once a newer
-	// build exists, a link or goto to another page becomes a full page load so it lands on that
-	// build. Back and Forward stay client-side, because cancelling one makes Kit step history
-	// back again; so do query-only changes, which callers make with replace and keep focus for.
+	// Where a link or goto was headed when unsaved work stopped it, while the panel asks.
+	let leaving = $state<URL | null>(null);
+	// A link to the page already open replaces it, as Kit itself would.
+	let leavingSamePage = false;
+	let confirmLeave = $state(false);
+
+	// Guards every editor holding unsaved work. A link or goto inside the panel is held and the
+	// panel's own dialog asks; leaving the page, and Back or Forward, use the browser's prompt,
+	// since beforeNavigate is synchronous there and cancelling Back makes Kit step history again.
+	// Once a newer build exists, a link or goto to another page becomes a full page load so it
+	// lands on that build. Back and Forward stay client-side; so do query-only changes, which
+	// callers make with replace and keep focus for.
 	beforeNavigate((nav) => {
 		if (nav.shallow && nav.type === 'goto') return;
 		if (hasUnsaved()) {
+			if (!nav.willUnload && nav.type !== 'popstate' && nav.to) {
+				nav.cancel();
+				leaving = nav.to.url;
+				leavingSamePage = nav.to.url.href === nav.from?.url.href;
+				confirmLeave = true;
+				return;
+			}
 			if (!confirm('Leave without saving? The changes on this page will be lost.')) {
 				nav.cancel();
 				return;
@@ -163,6 +178,20 @@
 	<AppHeader />
 {/if}
 <ReloadNotice />
+<DestructiveConfirm
+	bind:open={confirmLeave}
+	title="Leave without saving?"
+	description="The changes on this page will be lost."
+	confirmLabel="Leave"
+	cancelLabel="Stay"
+	onconfirm={() => {
+		const to = leaving;
+		leaving = null;
+		discardUnsaved();
+		// eslint-disable-next-line svelte/no-navigation-without-resolve
+		if (to) void goto(to.pathname + to.search + to.hash, { replaceState: leavingSamePage });
+	}}
+/>
 <div id="main" tabindex="-1">
 	{@render children()}
 </div>

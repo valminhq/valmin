@@ -289,7 +289,12 @@
 				<p class="text-sm text-muted-foreground">Activity may be stale.</p>
 				<Button size="sm" variant="outline" onclick={() => (retry += 1)}>Retry activity</Button>
 			</div>{/if}
-		{#if history && activity}
+		{#if history && activity && activity.knownMs === 0}
+			<!-- Nothing observed: one line rather than empty tiles and a hatched chart. -->
+			<p class="text-sm text-muted-foreground">
+				No player counts were observed in this period. They are recorded while the server runs.
+			</p>
+		{:else if history && activity}
 			<div class="grid grid-cols-2 gap-3 md:grid-cols-4">
 				<div class="rounded-md border p-3">
 					<p class="text-xs text-muted-foreground">Peak players</p>
