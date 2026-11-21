@@ -136,7 +136,9 @@ func (u *Users) create(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	JSON(w, r, http.StatusCreated, store.User{ID: id, Username: body.Username, Role: body.Role, CreatedAt: now})
+	JSON(w, r, http.StatusCreated, store.User{
+		ID: id, Username: body.Username, Role: body.Role, CreatedAt: now, PasswordChangeRequired: true,
+	})
 }
 
 type updateSelfRequest struct {
@@ -257,6 +259,7 @@ func (u *Users) update(w http.ResponseWriter, r *http.Request) {
 		ID: id, Username: current.Username, Role: role, Disabled: disabled,
 		Owner:     current.Owner,
 		CreatedAt: current.CreatedAt, LastLoginAt: current.LastLoginAt,
+		PasswordChangeRequired: current.PasswordChangeRequired,
 	})
 }
 

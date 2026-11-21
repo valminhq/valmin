@@ -393,3 +393,74 @@ func TestOwnerStaysWritableOtherwise(t *testing.T) {
 		t.Fatalf("a no-op update on the owner: %v", err)
 	}
 }
+
+// Asserts an account made or reset by an administrator is flagged to choose its own password, and
+// that the owner's own change, and a recovery from the command line, leave it unflagged.
+func TestPasswordChangeRequiredFollowsWhoChoseThePassword(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	required := func(id string) bool {
+		t.Helper()
+		u, err := db.UserByID(t.Context(), id)
+		if err != nil || u == nil {
+			t.Fatalf("load %s: %v %v", id, u, err)
+		}
+		return u.PasswordChangeRequired
+	}
+
+	if err := db.CreateUser(t.Context(), "own", "own", "h", RoleMember, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if required("own") {
+		t.Error("an account created without an administrator is flagged")
+	}
+	audit := &AuditEntry{UserID: "own", Action: "users.create", Detail: "{}"}
+	if err := db.CreateUserAudited(t.Context(), "given", "given", "h", RoleMember, time.Now(), audit); err != nil {
+		t.Fatal(err)
+	}
+	if !required("given") {
+		t.Error("an account an administrator created is not flagged")
+	}
+
+	if _, err := db.SetUserPasswordKeepingSession(t.Context(), "given", "mine", "", false, &AuditEntry{
+		UserID: "given", Action: "users.password.change", Detail: "{}",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if required("given") {
+		t.Error("choosing a password did not clear the flag")
+	}
+	if err := db.SetUserPasswordAudited(t.Context(), "given", "issued", &AuditEntry{
+		UserID: "own", Action: "users.password.reset", Detail: "{}",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !required("given") {
+		t.Error("an administrator's reset did not flag the account")
+	}
+	if err := db.SetUserPasswordByUsername(t.Context(), "given", "recovered"); err != nil {
+		t.Fatal(err)
+	}
+	if required("given") {
+		t.Error("a recovery from the command line left the account flagged")
+	}
+
+	// Re-hashing a password an account already uses is not choosing one.
+	if err := db.SetUserPasswordAudited(t.Context(), "given", "issued-again", &AuditEntry{
+		UserID: "own", Action: "users.password.reset", Detail: "{}",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetUserPassword(t.Context(), "given", "rehashed"); err != nil {
+		t.Fatal(err)
+	}
+	if !required("given") {
+		t.Error("re-hashing the issued password cleared the request to replace it")
+	}
+	if err := db.ClearPasswordChangeRequired(t.Context(), "given"); err != nil {
+		t.Fatal(err)
+	}
+	if required("given") {
+		t.Error("ClearPasswordChangeRequired left the flag set")
+	}
+}

@@ -1280,6 +1280,12 @@ says administrators reach every server and need no server access. Resetting a pa
 shows only the new password. Only the owner, the account created at first-run setup, can
 reset the owner's password.
 
+A password you generate or reset is chosen by you, not by the account's owner, so that
+person is sent to **Change password** after signing in with it and has to choose their own
+before the panel opens anything else. The panel's pages enforce this; the API does not refuse
+other requests for it. An account created from an invite, one recovered from the command line,
+and a member signed in by a [trusted proxy](#sign-in-with-single-sign-on) are not asked.
+
 Making someone an administrator, disabling their sign-in and resetting their password each
 ask you to confirm first, and each ends that account's sessions. Changing an administrator
 back to a member, and enabling sign-in again, apply at once.

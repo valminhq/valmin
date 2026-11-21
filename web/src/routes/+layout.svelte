@@ -102,6 +102,14 @@
 			void goto(loginWithReturn('/login', page.url));
 			return;
 		}
+		if (
+			session.user?.password_change_required &&
+			!isPublic &&
+			page.url.pathname !== '/account/password'
+		) {
+			void goto(resolve('account/password'), { replaceState: true });
+			return;
+		}
 		if (session.user && isPublic) {
 			// A path that matches no route is refused by goto and opened with a full page load.
 			const path = returnPath(page.url);

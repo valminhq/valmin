@@ -105,7 +105,8 @@ var ErrProxyAdmin = errors.New("admin accounts cannot sign in through the proxy"
 
 // LoginTrusted creates a session for username, whom a trusted reverse proxy has already
 // authenticated. An unknown name is ErrInvalidCredentials, a disabled account
-// ErrAccountDisabled and an admin ErrProxyAdmin.
+// ErrAccountDisabled and an admin ErrProxyAdmin. Such an account never uses its stored
+// password, so it is no longer asked to replace it.
 func (s *Sessions) LoginTrusted(ctx context.Context, username, ip, userAgent string) (*LoggedIn, error) {
 	rec, err := s.db.UserForLogin(ctx, username)
 	switch {
@@ -117,6 +118,12 @@ func (s *Sessions) LoginTrusted(ctx context.Context, username, ip, userAgent str
 		return nil, ErrAccountDisabled
 	case rec.Role == store.RoleAdmin:
 		return nil, ErrProxyAdmin
+	}
+	if rec.PasswordChangeRequired {
+		if err := s.db.ClearPasswordChangeRequired(ctx, rec.ID); err != nil {
+			return nil, fmt.Errorf("clear password change: %w", err)
+		}
+		rec.PasswordChangeRequired = false
 	}
 	return s.open(ctx, rec, ip, userAgent)
 }
@@ -228,7 +235,7 @@ func (s *Sessions) ChangePassword(
 	if err != nil {
 		return fmt.Errorf("hash password: %w", err)
 	}
-	revoked, err := s.db.SetUserPasswordKeepingSession(ctx, rec.ID, hash, keepSessionID, audit)
+	revoked, err := s.db.SetUserPasswordKeepingSession(ctx, rec.ID, hash, keepSessionID, false, audit)
 	if err != nil {
 		return fmt.Errorf("set password: %w", err)
 	}

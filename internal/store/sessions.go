@@ -51,7 +51,7 @@ func (db *DB) SessionAndUser(ctx context.Context, tokenHash string) (*Session, *
 		SELECT s.id, s.user_id, s.created_at, s.last_seen_at,
 		       s.idle_expires_at, s.absolute_expires_at, s.ip, s.user_agent,
 		       u.id, u.username, u.role, u.disabled, u.created_at, u.last_login_at, u.timezone,
-		       u.hour_cycle, u.date_order
+		       u.hour_cycle, u.date_order, u.password_change_required
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = ?
 		  AND s.revoked_at IS NULL
@@ -60,7 +60,7 @@ func (db *DB) SessionAndUser(ctx context.Context, tokenHash string) (*Session, *
 		tokenHash, Now(), Now()).Scan(
 		&s.ID, &s.UserID, &createdAt, &lastSeen, &idleExp, &absExp, &s.IP, &s.UserAgent,
 		&u.ID, &u.Username, &u.Role, &u.Disabled, &u.CreatedAt, &lastLogin, &u.Timezone,
-		&u.HourCycle, &u.DateOrder)
+		&u.HourCycle, &u.DateOrder, &u.PasswordChangeRequired)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil, nil
 	}
