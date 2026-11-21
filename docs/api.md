@@ -427,7 +427,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/operation/resume`        | Continue an interrupted operation; returns a job.                     |
 | `POST`   | `/instances/{id}/operation/abandon`       | Drop the steps that never ran; returns the operation.                 |
 | `GET`    | `/instances/{id}/jobs`                    | Server job history; `scheduled=true` lists scheduled runs only, `since`/`until` bound it. |
-| `GET`    | `/instances/{id}/backups`                 | World backup catalog, with each archive's `world_bytes` and `world_attention`. |
+| `GET`    | `/instances/{id}/backups`                 | World backup catalog, with each archive's `world_bytes` and `world_attention`, and `removed_by_next_consistent` and `removed_by_next_best_effort`: the `{id, created_at}` of the archives retention deletes once the next backup of that kind is taken. |
 | `POST`   | `/instances/{id}/backups?mode=quiesced`   | Stop, back up, and resume a previously running server; returns a job. |
 | `POST`   | `/instances/{id}/backups?mode=hot`        | Best-effort backup without stopping; returns a job.                   |
 | `GET`    | `/instances/{id}/backups/{bid}/download`  | Download an archive.                                                  |

@@ -41,8 +41,9 @@ best-effort copies never pushes out your consistent ones. A count of `0` keeps a
 backups of that type. Snapshots taken before a restore, import, or update have their own
 limit, equal to the consistent count. Older backups are deleted after the next backup or
 scheduled cleanup; the backup's progress line says how many retention removed, and its log
-names them. A restore, import or reset over a save directory with no files in it takes no
-snapshot, since there is nothing to keep.
+names them. Before you take a backup by hand, the page says what retention would then
+remove, and **Stop and back up** repeats it in its confirmation. A restore, import or reset
+over a save directory with no files in it takes no snapshot, since there is nothing to keep.
 
 **Back up on restarts and automatic stops** makes a consistent backup after the stop of every
 restart, every [auto-stop](#stop-a-server-when-nobody-plays) and every stop a schedule runs,

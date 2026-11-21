@@ -2,7 +2,7 @@
 	import { resolve } from '$app/paths';
 	import { unsaved } from '#lib/state/dirty.svelte.js';
 	import { scheduleKinds, formatInstant } from '#lib/api/schedules.js';
-	import { backups, type Backup, type BackupMode } from '#lib/api/backups.js';
+	import { backups, type Backup, type BackupMode, type BackupRemoval } from '#lib/api/backups.js';
 	import { backupAge, recoveryPoints } from '#lib/backup-points.js';
 	import { formatBytes } from '#lib/format.js';
 	import { actions, instances, stateSentence, type Instance } from '#lib/api/instances.js';
@@ -32,6 +32,8 @@
 	let { instance, onchange }: { instance: Instance; onchange?: () => void } = $props();
 
 	let list = $state<Backup[]>([]);
+	let removedByConsistent = $state<BackupRemoval[]>([]);
+	let removedByBestEffort = $state<BackupRemoval[]>([]);
 	let cursor = $state<string | null>(null);
 	let loadingMore = $state(false);
 	let moreFailure = $state<unknown>(null);
@@ -105,6 +107,8 @@
 		try {
 			const page = await backups.list(id);
 			list = page.items;
+			removedByConsistent = page.removed_by_next_consistent;
+			removedByBestEffort = page.removed_by_next_best_effort;
 			cursor = page.next_cursor;
 			loadFailure = null;
 		} catch (err) {
@@ -163,10 +167,18 @@
 	const take = (mode: BackupMode) => run(() => backups.create(instance.id, mode));
 	// A quiesced backup of a running server takes it offline, so it is confirmed like Stop.
 	let confirmStop = $state(false);
-	const retentionNote = $derived(
-		instance.backup_keep_cold > 0
-			? ` Only the newest ${instance.backup_keep_cold} consistent ${instance.backup_keep_cold === 1 ? 'backup is' : 'backups are'} kept, so the oldest may be removed.`
-			: ''
+	/** What retention deletes when the next backup is taken, said in one sentence, or ''. */
+	function removalNote(removals: BackupRemoval[]): string {
+		if (removals.length === 0) return '';
+		const newest = when(removals[0].created_at);
+		return removals.length === 1
+			? `Retention then removes the backup from ${newest}.`
+			: `Retention then removes ${removals.length} backups, the newest from ${newest}.`;
+	}
+	const consistentRemoval = $derived(removalNote(removedByConsistent));
+	// A copy of a server that is not running is stored as a consistent one.
+	const bestEffortRemoval = $derived(
+		removalNote(instance.state === 'running' ? removedByBestEffort : removedByConsistent)
 	);
 
 	let acknowledging = $state<string | null>(null);
@@ -395,6 +407,9 @@
 									A running server is stopped once its world has saved and started again afterwards;
 									it is offline for the whole backup. A stopped server stays stopped.
 								</p>
+								{#if consistentRemoval}
+									<p class="text-sm text-muted-foreground">{consistentRemoval}</p>
+								{/if}
 								<Button
 									size="sm"
 									class="justify-self-start"
@@ -411,6 +426,9 @@
 									Copies the world while the server runs. The backup may contain an incomplete save
 									and may not be restorable.
 								</p>
+								{#if bestEffortRemoval}
+									<p class="text-sm text-muted-foreground">{bestEffortRemoval}</p>
+								{/if}
 								<Button
 									variant="outline"
 									size="sm"
@@ -770,7 +788,7 @@
 <DestructiveConfirm
 	bind:open={confirmStop}
 	title={`Stop ${instance.name} and back up?`}
-	description={`Connected players are disconnected while the server saves the world and stops. It starts again once the backup is written.${retentionNote}`}
+	description={`Connected players are disconnected while the server saves the world and stops. It starts again once the backup is written.${consistentRemoval ? ` ${consistentRemoval}` : ''}`}
 	confirmLabel="Stop and back up"
 	onconfirm={() => void take('quiesced')}
 />
