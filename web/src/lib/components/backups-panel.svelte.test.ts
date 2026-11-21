@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Backup } from '#lib/api/backups.js';
+import type { Backup, BackupRemoval } from '#lib/api/backups.js';
 import { actions, type Instance, type WorldOnDisk } from '#lib/api/instances.js';
 import { session } from '#lib/state/session.svelte.js';
 import { click, text } from '#lib/testing/interact.js';
@@ -34,10 +34,23 @@ async function open(
 	{
 		archives = [backup()],
 		row = instance(),
-		worlds = [world()]
-	}: { archives?: Backup[]; row?: Instance; worlds?: WorldOnDisk[] } = {}
+		worlds = [world()],
+		removals = {}
+	}: {
+		archives?: Backup[];
+		row?: Instance;
+		worlds?: WorldOnDisk[];
+		removals?: { consistent?: BackupRemoval[]; bestEffort?: BackupRemoval[] };
+	} = {}
 ) {
-	daemon.on('GET', list, () => Response.json({ items: archives, next_cursor: null }));
+	daemon.on('GET', list, () =>
+		Response.json({
+			items: archives,
+			next_cursor: null,
+			removed_by_next_consistent: removals.consistent ?? [],
+			removed_by_next_best_effort: removals.bestEffort ?? []
+		})
+	);
 	daemon.on('GET', '/instances/inst-a/worlds', () =>
 		Response.json({ items: worlds, next_cursor: null })
 	);
@@ -154,7 +167,8 @@ describe('the backups panel', () => {
 	// Restart and Stop ask first; this takes a running server offline just the same.
 	it('asks before stopping a running server for a backup', async () => {
 		await open([actions.backupsList, actions.backupsCreate], {
-			row: instance({ state: 'running', backup_keep_cold: 2 })
+			row: instance({ state: 'running', backup_keep_cold: 2 }),
+			removals: { consistent: [{ id: 'b-old', created_at: '2026-09-18T23:05:00Z' }] }
 		});
 		daemon.on('POST', list, () => Response.json(job(), { status: 202 }));
 		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
@@ -162,12 +176,42 @@ describe('the backups panel', () => {
 		await click(button('Stop and back up'));
 		const dialog = await screen.findByRole('dialog');
 		expect(text(dialog)).toContain('Connected players are disconnected');
-		expect(text(dialog)).toContain('Only the newest 2 consistent backups are kept');
+		expect(text(dialog)).toContain('Retention then removes the backup from');
 		expect(daemon.requests('POST', list), 'nothing sent before the answer').toHaveLength(0);
 
 		await click(within(dialog).getByRole('button', { name: 'Stop and back up' }));
 		await vi.waitFor(() => expect(daemon.requests('POST', list)).toHaveLength(1));
 		expect(daemon.requests('POST', list)[0].query.get('mode')).toBe('quiesced');
+	});
+
+	// What the next backup deletes is said before it is taken, for each kind on its own.
+	it('names what each kind of backup would remove, and says nothing when it removes none', async () => {
+		await open([actions.backupsList, actions.backupsCreate], {
+			row: instance({ state: 'running' }),
+			removals: {
+				consistent: [
+					{ id: 'b-1', created_at: '2026-09-18T23:05:00Z' },
+					{ id: 'b-2', created_at: '2026-09-17T23:05:00Z' }
+				]
+			}
+		});
+
+		expect(screen.getByText(/Retention then removes 2 backups, the newest from/)).toBeTruthy();
+		expect(screen.getAllByText(/Retention then removes/)).toHaveLength(1);
+	});
+
+	// A server that is not running has no live world to copy, so the daemon stores the copy as a
+	// consistent one and prunes it with those.
+	it('uses the consistent removals for a best-effort copy of a stopped server', async () => {
+		await open([actions.backupsList, actions.backupsCreate], {
+			row: instance({ state: 'stopped' }),
+			removals: {
+				consistent: [{ id: 'b-1', created_at: '2026-09-18T23:05:00Z' }],
+				bestEffort: []
+			}
+		});
+
+		expect(screen.getAllByText(/Retention then removes the backup from/)).toHaveLength(2);
 	});
 
 	it('sends hot for the best-effort copy', async () => {

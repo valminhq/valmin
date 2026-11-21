@@ -29,6 +29,19 @@ export interface Backup {
 	world_attention: WorldAttention[];
 }
 
+/** An archive that retention deletes once the next backup of a kind is taken. */
+export interface BackupRemoval {
+	id: string;
+	created_at: string;
+}
+
+/** The catalogue page, with what the next consistent and the next best-effort backup would
+ * remove. The daemon computes both from the whole catalogue. */
+export interface BackupList extends Page<Backup> {
+	removed_by_next_consistent: BackupRemoval[];
+	removed_by_next_best_effort: BackupRemoval[];
+}
+
 /** One finding of the world check. A finding flags an archive; it never refuses one. */
 export interface WorldAttention {
 	code: string;
@@ -80,7 +93,7 @@ export const backups = {
 	list: (instanceId: string, cursor: string | null = null, limit = 50) => {
 		const params = new URLSearchParams({ limit: String(limit) });
 		if (cursor) params.set('cursor', cursor);
-		return api.get<Page<Backup>>(`/instances/${instanceId}/backups?${params}`);
+		return api.get<BackupList>(`/instances/${instanceId}/backups?${params}`);
 	},
 	/** Returns a job, never the archive (ADR-028): a quiesced backup stops a server and can
 	 * run for minutes. */
