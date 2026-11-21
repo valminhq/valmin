@@ -71,7 +71,7 @@ func (s *Schedules) Warn(ctx context.Context, sc *store.Schedule, left time.Dura
 			slog.String("schedule_id", sc.ID), slog.Any("error", err))
 		return true
 	}
-	return s.Instances.say(ctx, inst, playerWarning(steps, left))
+	return s.Instances.say(ctx, inst, control.PlayerWarning(steps, left))
 }
 
 func (h *Instances) say(ctx context.Context, inst *store.Instance, line string) bool {
@@ -94,32 +94,6 @@ func (h *Instances) say(ctx context.Context, inst *store.Instance, line string) 
 }
 
 const warnTimeout = 15 * time.Second
-
-// playerWarning is the line said to players when a run of steps is held for them to leave.
-func playerWarning(steps []control.ChainStep, left time.Duration) string {
-	action := "goes down for maintenance"
-	if len(steps) == 1 {
-		switch steps[0].Type {
-		case control.StepRestart:
-			action = "restarts"
-		case control.StepBackup:
-			action = "restarts for a backup"
-		}
-	}
-	return fmt.Sprintf("The server %s when all players have left, or in %s at the latest.",
-		action, spokenDuration(left))
-}
-
-func spokenDuration(d time.Duration) string {
-	n, unit := int((d+time.Minute-1)/time.Minute), "minute"
-	if n%60 == 0 {
-		n, unit = n/60, "hour"
-	}
-	if n != 1 {
-		unit += "s"
-	}
-	return fmt.Sprintf("%d %s", n, unit)
-}
 
 func occupied(state instance.State, players *int, unknown string) bool {
 	if state != instance.StateRunning {

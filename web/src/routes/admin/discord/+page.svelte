@@ -142,10 +142,11 @@
 
 <main class={pageNarrow}>
 	<PageHeader title="Discord bot">
-		Let people in your Discord check and start game servers with <code>/status</code> and
-		<code>/start</code>. Each link decides which servers a Discord server or channel can see, and
-		whether it may start them. Everyone in a linked channel can use both commands. Bot admins can
-		also plan power cuts for every server with <code>/shutdown</code>.
+		Let people in your Discord check, join and start game servers with <code>/status</code>,
+		<code>/join</code> and <code>/start</code>. Each link decides which servers a Discord server or
+		channel can see, and whether it may start them. Everyone in a linked channel can use these
+		commands. Bot admins can also restart, stop, back up and update the linked servers, and plan
+		power cuts for every server with <code>/shutdown</code>.
 	</PageHeader>
 	{#if !allowed}
 		<p class="text-sm text-muted-foreground">
@@ -261,8 +262,9 @@
 				<Card.Header>
 					<Card.Title>Bot admins</Card.Title>
 					<Card.Description>
-						Who may plan and cancel power cuts with <code>/shutdown</code>, in any linked channel.
-						Right-click a member or a role and copy its ID.
+						Who may use <code>/restart</code>, <code>/stop</code>, <code>/backup</code> and
+						<code>/update</code> on the servers linked to a channel, and plan and cancel power cuts
+						with <code>/shutdown</code>. Right-click a member or a role and copy its ID.
 					</Card.Description>
 				</Card.Header>
 				<Card.Content class="grid gap-4">

@@ -136,7 +136,7 @@ func (m *Mods) currentClientCode(w http.ResponseWriter, r *http.Request) {
 	if _, ok := m.mustLoadInstance(w, r, id); !ok {
 		return
 	}
-	code, err := m.currentModpackCode(r, id)
+	code, err := m.currentModpackCode(r.Context(), id)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
@@ -150,16 +150,16 @@ func (m *Mods) currentClientCode(w http.ResponseWriter, r *http.Request) {
 
 // currentModpackCode returns the server's stored profile code when the client mod list it
 // carries is still the one the server's mods give, and nil otherwise.
-func (m *Mods) currentModpackCode(r *http.Request, instanceID string) (*store.ModpackCode, error) {
-	code, err := m.DB.ModpackCode(r.Context(), instanceID)
+func (m *Mods) currentModpackCode(ctx context.Context, instanceID string) (*store.ModpackCode, error) {
+	code, err := m.DB.ModpackCode(ctx, instanceID)
 	if err != nil || code == nil {
 		return nil, err
 	}
-	installed, err := m.DB.InstanceMods(r.Context(), instanceID)
+	installed, err := m.DB.InstanceMods(ctx, instanceID)
 	if err != nil {
 		return nil, fmt.Errorf("read mods of instance %s: %w", instanceID, err)
 	}
-	preview, err := m.buildExport(r, "", installed)
+	preview, err := m.buildExport(ctx, "", installed)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +278,7 @@ func (m *Mods) loadExport(w http.ResponseWriter, r *http.Request, id string) (*s
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return nil, nil, false
 	}
-	preview, err := m.buildExport(r, inst.Name, installed)
+	preview, err := m.buildExport(r.Context(), inst.Name, installed)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return nil, nil, false
@@ -311,7 +311,7 @@ func exportArchive(w http.ResponseWriter, r *http.Request, p *exportPreview, eve
 // the versions this instance has installed, then everything left over as an exclusion. The
 // panel classifies nothing on its own (03 §5.6) — an untagged package is reported, not
 // guessed at.
-func (m *Mods) buildExport(r *http.Request, name string, installed []store.InstanceMod) (*exportPreview, error) {
+func (m *Mods) buildExport(ctx context.Context, name string, installed []store.InstanceMod) (*exportPreview, error) {
 	byName := make(map[string]*store.InstanceMod, len(installed))
 	for i := range installed {
 		byName[installed[i].FullName] = &installed[i]
@@ -331,7 +331,7 @@ func (m *Mods) buildExport(r *http.Request, name string, installed []store.Insta
 		}
 	}
 
-	conflicts, err := m.walkClosure(r, byName, included, queue)
+	conflicts, err := m.walkClosure(ctx, byName, included, queue)
 	if err != nil {
 		return nil, err
 	}
@@ -368,7 +368,7 @@ func (m *Mods) buildExport(r *http.Request, name string, installed []store.Insta
 // cached index, and returns what could not be included. queue holds the packages in included
 // whose dependencies have not been read yet.
 func (m *Mods) walkClosure(
-	r *http.Request,
+	ctx context.Context,
 	byName map[string]*store.InstanceMod,
 	included map[string]exportEntry,
 	queue []string,
@@ -382,7 +382,7 @@ func (m *Mods) walkClosure(
 		if row, seen := byName[parent]; seen {
 			prefer = row.Source
 		}
-		deps, _, ok, err := m.DB.ModVersionDependencies(r.Context(), parent, entry.Version, prefer)
+		deps, _, ok, err := m.DB.ModVersionDependencies(ctx, parent, entry.Version, prefer)
 		if err != nil {
 			return nil, fmt.Errorf("read dependencies of %s: %w", parent, err)
 		}
