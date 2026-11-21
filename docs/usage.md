@@ -620,11 +620,12 @@ current world is backed up first.
 
 ### Worlds on disk
 
-Under the backup history, **Worlds on disk** lists every world in the server's save
-directory with its size. The world the server loads is marked, and a world missing its
-header or data file is marked incomplete. If the world the server is set to load is
-not there, the page says so: backups refuse until the server creates it or you import
-one under that name.
+In its own card under the backup history, **Worlds on disk** lists every world in the
+server's save directory with its size. The world the server loads is marked, and a world
+missing its header or data file is marked incomplete. An empty save directory, as on a server
+that has never started, is simply described as empty. If other worlds are there but not the
+one the server is set to load, the page warns: backups refuse until the server creates it or
+you import one under that name.
 
 **Load this one instead** replaces the loaded world with another world from the list.
 The game's own rolling saves are listed separately under **Game backups**, newest first,

@@ -200,6 +200,10 @@
 						<Problem error={playersFailure} />
 					{:else if !players}
 						<p class="text-sm text-muted-foreground">Loading…</p>
+					{:else if players.peak === null}
+						<p class="text-sm text-muted-foreground">
+							No player counts were observed in this period.
+						</p>
 					{:else}
 						<p class="text-sm">
 							Peak {players.peak ?? '—'} · {(players.playerMs / 3_600_000).toFixed(1)} player-hours ·

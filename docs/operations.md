@@ -8,8 +8,8 @@ Open **Backups** on a server. Two buttons make a backup now:
 
 - **Stop and back up** makes a consistent archive. Valmin stops a running server,
   waits for the world save to finish, makes the archive, and starts the server again.
-  The server is offline for the whole backup. A server that was already stopped stays
-  stopped.
+  The server is offline for the whole backup, so on a running server the button asks first,
+  as **Stop** does. A server that was already stopped stays stopped.
 - **Back up without stopping** is best-effort: an active save can produce an
   incomplete archive that may not restore. Use it only when you cannot allow downtime.
 
@@ -40,7 +40,9 @@ many **best-effort** backups to keep. The two counts are separate, so a run of
 best-effort copies never pushes out your consistent ones. A count of `0` keeps all
 backups of that type. Snapshots taken before a restore, import, or update have their own
 limit, equal to the consistent count. Older backups are deleted after the next backup or
-scheduled cleanup.
+scheduled cleanup; the backup's progress line says how many retention removed, and its log
+names them. A restore, import or reset over a save directory with no files in it takes no
+snapshot, since there is nothing to keep.
 
 **Back up on restarts and automatic stops** makes a consistent backup after the stop of every
 restart, every [auto-stop](#stop-a-server-when-nobody-plays) and every stop a schedule runs,
@@ -108,7 +110,8 @@ built, explored or destroyed.
   taken in between, and any [world check](#world-check) warning the newer backup has that
   the older did not.
 - **Players** (needs `stats.read`): the peak player count, player-hours, how long at least
-  one player was online, and how much of the period the panel observed. Player counts are
+  one player was online, and how much of the period the panel observed, or that no player
+  counts were observed in the period. Player counts are
   kept for 30 days, so for an older period this section says it is not covered.
 - **Operations**: every job that finished on the server in the period, or started and is
   still running, such as starts, stops, restarts, mod changes, game updates and restores,
