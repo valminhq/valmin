@@ -244,7 +244,7 @@
 			onchange={load}
 		/>
 
-		<RestartNotice instance={inst} />
+		<RestartNotice instance={inst} canRestart={session.allowed(id).includes(actions.restart)} />
 
 		<MaintenanceNotice instanceId={inst.id} />
 

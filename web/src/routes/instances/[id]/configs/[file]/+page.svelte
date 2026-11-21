@@ -433,7 +433,7 @@
 	{/if}
 
 	{#if instance}
-		<RestartNotice {instance} />
+		<RestartNotice {instance} canRestart={session.allowed(id).includes(actions.restart)} />
 	{/if}
 
 	{#if canRaw && !textOnly}

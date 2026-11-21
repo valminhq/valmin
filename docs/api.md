@@ -1592,7 +1592,9 @@ API errors use this envelope:
 ```
 
 Some errors also include `error.details`. Use `code` for branching and `message`
-for display. Include `request_id` when investigating the matching daemon log.
+for display. Include `request_id` when investigating the matching daemon log. A request body
+with a field the endpoint does not accept answers `400 malformed_json` with the field in
+`details.field`, as does a refusal that concerns one field, such as `409 name_taken`.
 
 | HTTP status | Common meaning                                                     |
 | ----------- | ------------------------------------------------------------------ |
