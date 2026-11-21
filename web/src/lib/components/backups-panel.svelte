@@ -22,6 +22,7 @@
 	import { remoteBackups, type RemoteSummary } from '#lib/api/remote-backups.js';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import Problem from '#lib/components/problem.svelte';
+	import SaveFooter from '#lib/components/save-footer.svelte';
 	import Download from '@lucide/svelte/icons/download';
 	import History from '@lucide/svelte/icons/history';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
@@ -95,11 +96,7 @@
 
 	/** Takes the daemon's row as the retention form's baseline, so the screen never shows a
 	 * count it merely sent (F4). Re-runs when the parent re-reads the row after a save. */
-	$effect(() => {
-		keepCold = instance.backup_keep_cold;
-		keepHot = instance.backup_keep_hot;
-		onRestart = instance.backup_on_restart;
-	});
+	$effect(resetPolicy);
 
 	async function load(id: string) {
 		loading = true;
@@ -240,6 +237,13 @@
 			Number.isInteger(keepHot) &&
 			keepHot >= 0
 	);
+
+	/** Puts the retention fields back on the daemon's row. */
+	function resetPolicy() {
+		keepCold = instance.backup_keep_cold;
+		keepHot = instance.backup_keep_hot;
+		onRestart = instance.backup_on_restart;
+	}
 
 	/**
 	 * Saves retention and re-reads the catalogue, because changing a count changes which
@@ -721,14 +725,14 @@
 							</div>
 							<Switch id="backup-on-restart" disabled={!canSetPolicy} bind:checked={onRestart} />
 						</div>
-						<Button
-							size="sm"
-							class="justify-self-start"
-							disabled={!policyValid || !policyChanged || savingPolicy}
-							onclick={savePolicy}
-						>
-							{savingPolicy ? 'Saving…' : 'Save backup settings'}
-						</Button>
+						<SaveFooter
+							saveLabel="Save backup settings"
+							changed={policyChanged}
+							busy={savingPolicy}
+							invalid={!policyValid}
+							ondiscard={resetPolicy}
+							onsave={savePolicy}
+						/>
 					</Card.Content>
 				</Card.Root>
 			{/if}

@@ -2,11 +2,11 @@
 	import { unsaved } from '#lib/state/dirty.svelte.js';
 	import { actions, instances, type Instance, type WatchdogMode } from '#lib/api/instances.js';
 	import { session } from '#lib/state/session.svelte.js';
-	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import { NativeSelect } from '#lib/components/ui/native-select/index.js';
 	import Problem from '#lib/components/problem.svelte';
+	import SaveFooter from '#lib/components/save-footer.svelte';
 
 	let { instance, onchange }: { instance: Instance; onchange?: () => void } = $props();
 
@@ -60,9 +60,13 @@
 			</p>
 		</div>
 		{#if canEdit}
-			<Button size="sm" class="justify-self-start" disabled={!changed || saving} onclick={save}>
-				{saving ? 'Saving…' : 'Save watchdog'}
-			</Button>
+			<SaveFooter
+				saveLabel="Save watchdog"
+				{changed}
+				busy={saving}
+				ondiscard={() => (mode = instance.watchdog)}
+				onsave={save}
+			/>
 		{/if}
 	</Card.Content>
 </Card.Root>

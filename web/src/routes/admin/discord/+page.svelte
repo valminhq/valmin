@@ -7,6 +7,7 @@
 	import { viewerZone } from '#lib/api/schedules.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { unsaved } from '#lib/state/dirty.svelte.js';
+	import SaveBar from '#lib/components/save-bar.svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
 	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
@@ -41,7 +42,8 @@
 	const draft = $derived(
 		JSON.stringify([enabled, rows.map(({ key: _key, ...link }) => link), adminIDs, zone])
 	);
-	unsaved(() => allowed && !loading && (draft !== baseline || token !== ''));
+	const dirty = $derived(allowed && !loading && (draft !== baseline || token !== ''));
+	unsaved(() => dirty);
 
 	const STATE_TEXT: Record<string, string> = {
 		disabled: 'Off',
@@ -293,16 +295,23 @@
 				</Card.Content>
 			</Card.Root>
 
-			<div class="flex flex-wrap gap-2">
-				<Button disabled={saving} onclick={save}
-					>{saving ? 'Saving…' : 'Save Discord settings'}</Button
-				>
-				{#if settings.configured || settings.links.length > 0}
+			{#if settings.configured || settings.links.length > 0}
+				<div>
 					<Button variant="outline" disabled={saving} onclick={() => (removeOpen = true)}
 						>Remove bot</Button
 					>
-				{/if}
-			</div>
+				</div>
+			{/if}
+			{#if dirty}
+				<SaveBar
+					saveLabel="Save Discord settings"
+					busy={saving}
+					ondiscard={() => settings && fill(settings)}
+					onsave={save}
+				>
+					You have unsaved Discord settings.
+				</SaveBar>
+			{/if}
 		{/if}
 	{/if}
 </main>

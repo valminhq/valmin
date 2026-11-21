@@ -97,6 +97,15 @@ A tab that was already open shows **Valmin was updated** at the top of the page.
 **Reload** to use the new version. Until you do, the next link you follow loads the new
 version in full. A form with unsaved changes still asks before you leave.
 
+### How saving works
+
+Full-page editors, such as server settings, mod configuration and the Discord bot, show a
+bar at the bottom of the page while something differs, with **Discard changes** and a save
+button. A card that holds its own settings, such as auto-stop, the watchdog, backup
+settings or a player list, keeps its save button at the card's foot. Once something
+differs, **Unsaved changes** and **Discard changes** appear beside it. Switches that act
+at once, such as pausing a schedule, have no save button.
+
 ## Create a server
 
 1. Select **New server** from the server list.

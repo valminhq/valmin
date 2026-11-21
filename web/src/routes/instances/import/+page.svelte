@@ -23,6 +23,7 @@
 	import * as Card from '#lib/components/ui/card/index.js';
 	import * as Alert from '#lib/components/ui/alert/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
+	import FileInput from '#lib/components/file-input.svelte';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import { Switch } from '#lib/components/ui/switch/index.js';
 	import Problem from '#lib/components/problem.svelte';
@@ -37,8 +38,8 @@
 	let failure = $state<unknown>(null);
 	let fileError = $state('');
 	let from = $state<ManifestSource | null>(null);
-	let fileName = $state('');
 	let code = $state('');
+	let manifestFiles = $state<FileList | undefined>();
 	let preview = $state<ManifestPreview | null>(null);
 	let busy = $state(false);
 	let job = $state<Job | null>(null);
@@ -100,7 +101,7 @@
 	}
 
 	async function use(template: CatalogueTemplate) {
-		fileName = '';
+		manifestFiles = undefined;
 		fileError = '';
 		code = template.code;
 		await check({ code: template.code });
@@ -110,7 +111,6 @@
 		const file = (event.currentTarget as HTMLInputElement).files?.[0];
 		fileError = '';
 		if (!file) return;
-		fileName = file.name;
 		code = '';
 		let parsed: InstanceManifest;
 		try {
@@ -125,7 +125,7 @@
 	}
 
 	async function pasted() {
-		fileName = '';
+		manifestFiles = undefined;
 		fileError = '';
 		await check({ code: code.trim() });
 	}
@@ -316,10 +316,12 @@
 			</Card.Header>
 			<Card.Content class="grid gap-2">
 				<Label for="manifest-file">File</Label>
-				<Input id="manifest-file" type="file" accept="application/json,.json" onchange={chose} />
-				{#if fileName}
-					<p class="text-sm text-muted-foreground">{fileName}</p>
-				{/if}
+				<FileInput
+					id="manifest-file"
+					accept="application/json,.json"
+					bind:files={manifestFiles}
+					onchange={chose}
+				/>
 			</Card.Content>
 		</Card.Root>
 

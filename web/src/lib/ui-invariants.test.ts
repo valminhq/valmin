@@ -626,3 +626,17 @@ describe('confirming a destructive action', () => {
 		expect(offenders).toEqual([]);
 	});
 });
+
+describe('saving edits', () => {
+	// The bar pinned to the bottom of a full-page editor is one component, so its look and its
+	// Discard and Save wording cannot drift between pages.
+	it('pins the unsaved-changes bar only through SaveBar', () => {
+		const bar = join('src', 'lib', 'components', 'save-bar.svelte');
+		const offenders = sources()
+			.filter(
+				([path, text]) => path !== bar && /sticky bottom-0/.test(text) && /changed/.test(text)
+			)
+			.map(([path]) => path);
+		expect(offenders, 'use <SaveBar> instead').toEqual([]);
+	});
+});

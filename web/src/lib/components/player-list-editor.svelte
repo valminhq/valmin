@@ -15,6 +15,7 @@
 	import { latestCall } from '#lib/latest.js';
 	import { unsaved } from '#lib/state/dirty.svelte.js';
 	import Problem from '#lib/components/problem.svelte';
+	import SaveFooter from '#lib/components/save-footer.svelte';
 	import PlayerNames from '#lib/components/player-names.svelte';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
@@ -205,26 +206,17 @@
 				</Alert.Root>
 			{/if}
 
-			<div class="flex items-center justify-end gap-2">
-				<Button
-					variant="ghost"
-					size="sm"
-					disabled={!changed || saving}
-					onclick={() => {
-						text = baseline;
-						void load();
-					}}
-				>
-					Discard changes
-				</Button>
-				<Button
-					size="sm"
-					disabled={!changed || saving || conflict !== null}
-					onclick={() => void save()}
-				>
-					{saving ? 'Saving…' : 'Save list'}
-				</Button>
-			</div>
+			<SaveFooter
+				saveLabel="Save list"
+				{changed}
+				busy={saving}
+				invalid={conflict !== null}
+				ondiscard={() => {
+					text = baseline;
+					void load();
+				}}
+				onsave={() => void save()}
+			/>
 		{/if}
 	</Card.Content>
 </Card.Root>
