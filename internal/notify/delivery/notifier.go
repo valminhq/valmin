@@ -105,7 +105,10 @@ func (n *Notifier) OnJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.Fini
 		InstanceName: fin.InstanceName,
 		Detail: []notify.Field{
 			{Name: "Reason", Value: failureReason(fin.Error)},
-			{Name: "What to do", Value: "Open the server's job history for the full log, then run the backup again."},
+			{
+				Name:  "What to do",
+				Value: "Open Operations on the server's overview for the full log, then run the backup again.",
+			},
 			{Name: "Job ID", Value: fin.ID},
 		},
 	}

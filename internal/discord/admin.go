@@ -168,7 +168,7 @@ func (b *Bot) cycle(ctx context.Context, in *interaction, s *server, step string
 
 // jobHistory points to where a failed job's reason is, which stays in the panel because it names
 // containers and paths.
-const jobHistory = " The panel's job history says why."
+const jobHistory = " Operations on the server's overview in the panel says why."
 
 // backup backs up the world of s: at once when it is stopped, and when it runs, which stops it
 // for the backup, after warning players as cycle does.

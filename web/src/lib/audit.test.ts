@@ -329,7 +329,7 @@ describe('summaries of recorded actions', () => {
 					}
 				]
 			},
-			'Alex changed the chain schedule on Viking World: steps to "wait 5 minutes → stop"'
+			'Alex changed the sequence schedule on Viking World: steps to "wait 5 minutes → stop"'
 		],
 		[
 			'a removed schedule',
@@ -341,7 +341,7 @@ describe('summaries of recorded actions', () => {
 			'a schedule run by hand',
 			'schedules.run',
 			{ kind: 'chain' },
-			'Alex ran the chain schedule now on Viking World'
+			'Alex ran the sequence schedule now on Viking World'
 		]
 	];
 

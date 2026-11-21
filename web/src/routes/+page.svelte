@@ -276,7 +276,10 @@
 						<!-- Identity and state own the title row at every width. Conditions sit on
 						     their own line below it, where no number of them can squeeze the name. -->
 						<Card.Title class="flex items-center justify-between gap-3">
-							<a class="hover:underline" href={resolve('/instances/[id]', { id: instance.id })}>
+							<a
+								class="min-w-0 wrap-anywhere hover:underline"
+								href={resolve('/instances/[id]', { id: instance.id })}
+							>
 								{instance.name}
 							</a>
 							<StateBadge

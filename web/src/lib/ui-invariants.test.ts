@@ -514,7 +514,9 @@ describe('every page says which page it is', () => {
 			join('src', 'routes', 'instances', '[id]', '+layout.svelte'),
 			'utf8'
 		);
-		expect(serverLayout).toMatch(/<h1 class="[^"]*">\{instance\?\.name \?\? 'Server'\}<\/h1>/);
+		expect(serverLayout).toMatch(
+			/<h1 class="[^"]*">\s*\{instance\?\.name \?\? 'Server'\}\s*<\/h1>/
+		);
 		expect(serverLayout, 'a deep link never ran the dashboard load').toContain(
 			'instanceList.ensure()'
 		);

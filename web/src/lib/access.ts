@@ -24,7 +24,8 @@ const PHRASES: Record<string, Phrase> = {
 	'config.edit': { verb: 'edit', object: 'configuration' },
 	'config.raw': { verb: 'edit', object: 'raw configuration files' },
 	'world.import': { verb: 'import', object: 'worlds' },
-	'instance.settings': { verb: 'change', object: 'server settings' }
+	'instance.settings': { verb: 'change', object: 'server settings' },
+	'notifications.manage': { verb: 'manage', object: 'notifications' }
 };
 
 /** The phrase for an action; a name this table does not know becomes its own words. */
