@@ -105,7 +105,9 @@
 	<div class="border-b bg-card">
 		<div class="mx-auto grid max-w-6xl gap-3 px-4 pt-4 sm:px-6">
 			<div class="flex flex-wrap items-center gap-3">
-				<h1 class="text-2xl font-semibold tracking-tight">{instance?.name ?? 'Server'}</h1>
+				<h1 class="min-w-0 text-2xl font-semibold tracking-tight wrap-anywhere">
+					{instance?.name ?? 'Server'}
+				</h1>
 				{#if instance}
 					<StateBadge
 						state={instance.state}

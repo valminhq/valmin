@@ -200,7 +200,7 @@ func conditionDetail(c *store.AlertCondition, edge string, loc *time.Location) [
 	switch c.Kind {
 	case alerts.KindJobFailed.String():
 		fields = []notify.Field{{Key: "reason", Name: "Reason", Value: failureReason(d[alerts.DetailReason])}}
-		next = "Open the server's job history for the full log, then try the job again."
+		next = "Open Operations on the server's overview for the full log, then try the job again."
 	case alerts.KindLowDisk.String():
 		fields = []notify.Field{
 			{Key: "free", Name: "Free space", Value: formatBytes(d[alerts.DetailFree])},

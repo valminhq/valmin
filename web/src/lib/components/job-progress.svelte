@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { isTerminal, watchJob } from '#lib/api/jobs.js';
 	import type { Job } from '#lib/api/types.js';
+	import { jobMessage } from '#lib/job-history.js';
 	import { socket } from '#lib/socket/index.svelte.js';
 	import { Progress } from '#lib/components/ui/progress/index.js';
 
@@ -35,7 +36,7 @@
 	<div class="grid gap-2">
 		<Progress value={job.progress} max={100} />
 		<p class="text-sm text-muted-foreground">
-			{job.message || job.status}
+			{job.message ? jobMessage(job.message) : job.status}
 			{#if job.status === 'running'}<span class="tabular-nums"> · {job.progress}%</span>{/if}
 		</p>
 		{#if job.error}

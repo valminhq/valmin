@@ -528,7 +528,11 @@
 		{:else}
 			<Problem error={failure} />
 			<p class={['text-sm text-muted-foreground', !started && 'sr-only']} role="status">
-				{started ? `Started “${started}”. Its progress shows in the server’s job history.` : ''}
+				{#if started}
+					Started “{started}”. Its progress shows under
+					<a class="underline" href={resolve('/instances/[id]', { id: instance.id })}>Operations</a> on
+					the overview.
+				{/if}
 			</p>
 
 			{#if !loading && mine.length > 0}
@@ -648,78 +652,84 @@
 					<div class="grid gap-2" data-testid="chain-editor">
 						<Label>Steps, in order</Label>
 						{#each draft as d, i (d.id)}
-							<div class="flex flex-wrap items-center gap-2">
-								<span class="w-5 text-sm text-muted-foreground">{i + 1}.</span>
-								<Select.Root type="single" bind:value={d.type}>
-									<Select.Trigger class="w-56" aria-label="Step {i + 1} type">
-										{chainSteps.find((c) => c.type === d.type)?.label}
-									</Select.Trigger>
-									<Select.Content>
-										{#each offeredSteps as option (option.type)}
-											<Select.Item value={option.type}>{option.label}</Select.Item>
-										{/each}
-									</Select.Content>
-								</Select.Root>
-								{#if d.type === 'command'}
-									<Input
-										bind:value={d.command}
-										class="min-w-48 flex-1 font-mono"
-										autocomplete="off"
-										placeholder="say Restarting in 5 minutes"
-										aria-label="Step {i + 1} command"
-									/>
-								{:else if d.type === 'wait'}
-									<Input
-										inputmode="numeric"
-										autocomplete="off"
-										bind:value={d.seconds}
-										class="w-28"
-										aria-label="Step {i + 1} seconds (1 to {maxWaitSeconds})"
-									/>
-									<span class="text-sm text-muted-foreground">seconds</span>
-								{:else if d.type === 'wait_for'}
-									<Select.Root type="single" bind:value={d.condition}>
-										<Select.Trigger class="w-48" aria-label="Step {i + 1} condition">
-											{waitConditions.find((c) => c.value === d.condition)?.label}
+							<!-- Number, the step's own fields, and a fixed icon group, so every row's controls
+							     line up whatever the step asks for. -->
+							<div class="grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-start gap-2">
+								<span class="pt-2 text-sm text-muted-foreground">{i + 1}.</span>
+								<div class="flex min-w-0 flex-wrap items-center gap-2">
+									<Select.Root type="single" bind:value={d.type}>
+										<Select.Trigger class="w-56 max-w-full" aria-label="Step {i + 1} type">
+											{chainSteps.find((c) => c.type === d.type)?.label}
 										</Select.Trigger>
 										<Select.Content>
-											{#each waitConditions as option (option.value)}
-												<Select.Item value={option.value}>{option.label}</Select.Item>
+											{#each offeredSteps as option (option.type)}
+												<Select.Item value={option.type}>{option.label}</Select.Item>
 											{/each}
 										</Select.Content>
 									</Select.Root>
-									<span class="text-sm text-muted-foreground">for at most</span>
-									<Input
-										inputmode="numeric"
-										autocomplete="off"
-										bind:value={d.seconds}
-										class="w-28"
-										aria-label="Step {i + 1} longest wait in seconds (1 to {maxWaitSeconds})"
-									/>
-									<span class="text-sm text-muted-foreground">seconds</span>
-								{/if}
-								<Button
-									variant="ghost"
-									size="sm"
-									disabled={i === 0}
-									onclick={() => moveStep(i, -1)}
-								>
-									<ArrowUp />
-									<span class="sr-only">Move step {i + 1} up</span>
-								</Button>
-								<Button
-									variant="ghost"
-									size="sm"
-									disabled={i === draft.length - 1}
-									onclick={() => moveStep(i, 1)}
-								>
-									<ArrowDown />
-									<span class="sr-only">Move step {i + 1} down</span>
-								</Button>
-								<Button variant="ghost" size="sm" onclick={() => draft.splice(i, 1)}>
-									<Trash2 />
-									<span class="sr-only">Remove step {i + 1}</span>
-								</Button>
+									{#if d.type === 'command'}
+										<Input
+											bind:value={d.command}
+											class="min-w-48 flex-1 font-mono"
+											autocomplete="off"
+											placeholder="say Restarting in 5 minutes"
+											aria-label="Step {i + 1} command"
+										/>
+									{:else if d.type === 'wait'}
+										<Input
+											inputmode="numeric"
+											autocomplete="off"
+											bind:value={d.seconds}
+											class="w-28"
+											aria-label="Step {i + 1} seconds (1 to {maxWaitSeconds})"
+										/>
+										<span class="text-sm text-muted-foreground">seconds</span>
+									{:else if d.type === 'wait_for'}
+										<Select.Root type="single" bind:value={d.condition}>
+											<Select.Trigger class="w-48" aria-label="Step {i + 1} condition">
+												{waitConditions.find((c) => c.value === d.condition)?.label}
+											</Select.Trigger>
+											<Select.Content>
+												{#each waitConditions as option (option.value)}
+													<Select.Item value={option.value}>{option.label}</Select.Item>
+												{/each}
+											</Select.Content>
+										</Select.Root>
+										<span class="text-sm text-muted-foreground">for at most</span>
+										<Input
+											inputmode="numeric"
+											autocomplete="off"
+											bind:value={d.seconds}
+											class="w-28"
+											aria-label="Step {i + 1} longest wait in seconds (1 to {maxWaitSeconds})"
+										/>
+										<span class="text-sm text-muted-foreground">seconds</span>
+									{/if}
+								</div>
+								<div class="flex items-center">
+									<Button
+										variant="ghost"
+										size="sm"
+										disabled={i === 0}
+										onclick={() => moveStep(i, -1)}
+									>
+										<ArrowUp />
+										<span class="sr-only">Move step {i + 1} up</span>
+									</Button>
+									<Button
+										variant="ghost"
+										size="sm"
+										disabled={i === draft.length - 1}
+										onclick={() => moveStep(i, 1)}
+									>
+										<ArrowDown />
+										<span class="sr-only">Move step {i + 1} down</span>
+									</Button>
+									<Button variant="ghost" size="sm" onclick={() => draft.splice(i, 1)}>
+										<Trash2 />
+										<span class="sr-only">Remove step {i + 1}</span>
+									</Button>
+								</div>
 							</div>
 						{/each}
 						<Button
@@ -966,8 +976,8 @@
 			<Dialog.Title>Delete this schedule?</Dialog.Title>
 			<Dialog.Description>
 				{deleting ? label(deleting.kind) : ''}
-				<span class="font-mono">({deleting?.cron})</span> stops running on its own. Runs already in the
-				job history are kept.
+				<span class="font-mono">({deleting?.cron})</span> stops running on its own. Runs already listed
+				under Operations are kept.
 			</Dialog.Description>
 		</Dialog.Header>
 		<Dialog.Footer>

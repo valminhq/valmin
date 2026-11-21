@@ -888,7 +888,8 @@
 											class="size-4 transition-transform group-open:rotate-90 motion-reduce:transition-none"
 										/>
 										{dependencies.length}
-										{dependencies.length === 1 ? 'dependency' : 'dependencies'} came with them
+										{dependencies.length === 1 ? 'dependency' : 'dependencies'} came with
+										{chosen.length === 1 ? 'it' : 'them'}
 									</summary>
 									<ul class="divide-y border-t">
 										{#each dependencies as mod (mod.full_name)}

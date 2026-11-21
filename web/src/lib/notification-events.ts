@@ -183,7 +183,7 @@ export const PANEL_EVENTS: PanelEvent[] = [
 		'Job failed',
 		'Backup failed',
 		[['reason', 'Reason', 'The archive could not be written.']],
-		'Open the server’s job history for the full log, then try the job again.'
+		'Open Operations on the server’s overview for the full log, then try the job again.'
 	),
 	condition(
 		'backup_attention',

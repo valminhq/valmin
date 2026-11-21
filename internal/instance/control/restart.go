@@ -89,7 +89,11 @@ func (r *Restarter) stopForQueue(
 	archived func(context.Context, *sql.Tx) error, pruneCleanup func(context.Context),
 ) jobs.Outcome {
 	settleConfigs(ctx, r.Starter.DB, jh, instanceID)
-	jh.Progress(ctx, 100, fmt.Sprintf("stopped; installing %d queued mod(s), then starting", queued))
+	mods := "1 queued mod"
+	if queued != 1 {
+		mods = fmt.Sprintf("%d queued mods", queued)
+	}
+	jh.Progress(ctx, 100, "Stopped; installing "+mods+", then starting")
 	finish := func(ctx context.Context, tx *sql.Tx) error {
 		ok, err := instance.SetStateTx(ctx, tx, instanceID, instance.StateStopping, instance.StateStopped)
 		if err != nil {

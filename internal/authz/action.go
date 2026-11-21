@@ -163,8 +163,8 @@ func GrantExtraOptions() []GrantExtraOption {
 	return []GrantExtraOption{
 		{ModsManage, "Can install, update, and extract arbitrary third-party archives."},
 		{ConfigEdit, "Can change mod settings through validated forms."},
-		{ConfigRaw, "Can write arbitrary bytes to mod configuration files, and everything " +
-			"config.edit allows."},
+		{ConfigRaw, "Can write arbitrary bytes to mod configuration files, and change mod settings " +
+			"through the forms as well."},
 		{
 			BackupsRestore,
 			"Can replace the live world, permanently delete backup archives, and set how many are kept here and off-host.",

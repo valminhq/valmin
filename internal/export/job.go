@@ -83,11 +83,7 @@ func (e *Exporter) Job(mode Mode, unlocked []string) jobs.Runner {
 			}
 			return jobs.Failed(errcode.Internal, err)
 		}
-		size := ""
-		if fi, err := os.Stat(dest); err == nil {
-			size = fmt.Sprintf(" (%d MiB)", fi.Size()>>20)
-		}
-		jh.Progress(ctx, 100, "export ready: "+filepath.Base(dest)+size)
+		jh.Progress(ctx, 100, "Export ready: "+filepath.Base(dest))
 		return jobs.Outcome{Status: jobs.StatusSucceeded}
 	}
 }
