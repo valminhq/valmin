@@ -65,6 +65,15 @@ func (h *Instances) startUpdateTest(w http.ResponseWriter, r *http.Request) {
 		writeFieldError(w, r, "game", apierr.FieldRequired, "Choose the game, the mods or both.")
 		return
 	}
+	game, mods, err := pendingUpdates(r.Context(), h.DB, h.ctl.UpdateTester, inst)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if (!body.Game || !game) && (!body.Mods || !mods) {
+		apierr.Write(w, r, apierr.New(errcode.InvalidState).Msg(nothingToTest(body.Game, body.Mods)))
+		return
+	}
 	job, err := h.ctl.UpdateTester.Submit(r.Context(), &control.UpdateTestSubmission{
 		Instance: inst, Game: body.Game, Mods: body.Mods, RequestedBy: u.ID,
 		Audit: jobAudit(r.Context(), u.ID, inst.ID, "instances.update_test.start", body),
@@ -105,6 +114,18 @@ func (h *Instances) applyUpdateTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	Accepted(w, r, job.ID, toJobView(job))
+}
+
+// nothingToTest says that the parts of an update test the caller chose have nothing pending.
+func nothingToTest(game, mods bool) string {
+	switch {
+	case game && mods:
+		return "No game or mod updates are pending, so there is nothing to test."
+	case game:
+		return "This server already has the newest game build, so there is nothing to test."
+	default:
+		return "No mod updates are pending, so there is nothing to test."
+	}
 }
 
 // writeUpdateTestError answers the refusals of an update test or its apply, and any other job

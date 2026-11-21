@@ -223,7 +223,7 @@ func (t *UpdateTester) test(
 	jh.Progress(ctx, 85, "waiting for the copy's world to load")
 	if err := t.Chainer.runStep(ctx, jh, trialChain(copyInst, requestedBy), &ChainStep{
 		Type: StepWaitFor, Condition: ConditionReady, Seconds: waitSeconds(t.ReadyTimeout),
-	}); err != nil {
+	}); err != nil && !errors.Is(err, errStepSkipped) {
 		return trialFailure(ctx, err, "wait for the copy to load")
 	}
 	// The wait skips a copy that already stopped, which must fail the test, not pass it.

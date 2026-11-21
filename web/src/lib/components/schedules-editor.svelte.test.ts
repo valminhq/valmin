@@ -267,10 +267,11 @@ describe('the schedules editor', () => {
 			rows: [schedule({ timezone: 'UTC', last_run_at: '2026-09-24T01:15:00Z' })]
 		});
 
-		const line = text(await screen.findByText(/schedule uses UTC/));
-		expect(line).toMatch(/next [^·]*\b0?9:00\b/);
+		// The plain time leads; the cron and its zone are the detail under it.
+		const line = text(await screen.findByText(/times shown in Asia\/Kolkata/));
+		expect(text(screen.getByText(/^next /))).toMatch(/next [^·]*\b0?9:00\b/);
 		expect(line).toMatch(/last [^·]*\b0?6:45\b/);
-		expect(line).toContain('shown in Asia/Kolkata');
+		expect(line).toContain('in UTC');
 		expect(screen.getByText('30 3 * * *')).toBeTruthy();
 	});
 
