@@ -21,6 +21,7 @@
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import Problem from '#lib/components/problem.svelte';
 	import SetupComparison from '#lib/components/setup-comparison.svelte';
+	import SetupBeforeUpdateCard from '#lib/components/setup-before-update-card.svelte';
 
 	const id = $derived(page.params.id ?? '');
 	const canManage = $derived(session.allowed(id).includes(actions.setupsManage));
@@ -194,8 +195,8 @@
 <div class="grid gap-6">
 	<PageHeader title="Saved setups" level={2}>
 		Save exact mod versions and every configuration file, then compare and restore them later.
-		Restoring saves the current setup first, so a restore can be undone. World backups are linked
-		for reference and restored separately.
+		Restoring, and each mod update unless turned off below, saves the current setup first, so the
+		change can be undone. World backups are linked for reference and restored separately.
 	</PageHeader>
 
 	{#if !canManage}
@@ -267,6 +268,8 @@
 					</div>
 				</Card.Content>
 			</Card.Root>
+
+			<SetupBeforeUpdateCard {instance} onchange={(row) => (instance = row)} />
 
 			<Card.Root>
 				<Card.Header>

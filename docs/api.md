@@ -739,6 +739,9 @@ conflicts (`mod_conflict`), so resolve first and fix them. Only conflicts the ch
 causes are reported. The response's `backup` is `true` when the install would move or
 remove an installed package on a server that has a world. The install job then backs up
 the world first, as **Update all** does, and keeps the backup even if the install fails.
+`setup` is `true` when the install would move or remove an installed package and the server's
+`setup_before_update` is not `off`: the job then also saves the current setup first, as an
+automatic setup linked to that backup.
 
 An install that would overwrite files no installed mod owns, such as files placed by hand,
 writes nothing and fails with `mod_unowned_files`; its `error` names the files. Send the
@@ -810,11 +813,11 @@ closure includes a disabled mod are refused the same way.
 
 `POST /instances/{id}/mods/updates/resolve` takes no body and returns `targets` (each
 mod with a newer version in its own registry), `nodes` (every package that would
-change, with `from_version` empty for a new dependency), `conflicts`, and `backup`.
-Locked mods, modpacks, and members that follow their modpack are never targets; update
+change, with `from_version` empty for a new dependency), `conflicts`, `backup` and `setup`.
+`setup` is `true` unless the server's `setup_before_update` is `off`. Locked mods, modpacks, and members that follow their modpack are never targets; update
 a modpack by installing its new version. To apply, send `{"targets": [...]}` with the
 targets from the preview to `POST /instances/{id}/mods/updates`. The job backs up the
-world, then updates all targets together, rolling all of them back if one fails. It is
+world and, when `setup` is `true`, saves the current setup, then updates all targets together, rolling all of them back if one fails. It is
 refused while the preview has conflicts.
 
 `POST /instances/{id}/mods/code/preview` takes `{"code": "<profile code>", "select": [...]}`
@@ -822,7 +825,8 @@ and applies a r2modman or Gale profile code to this server as a dry run. It fetc
 as the import routes do. `select` names exactly the packages to apply; left out, installs and
 raised versions are chosen and lowered versions are not. The answer has `profile_name`,
 `registry` (the one that served the code), `matching` (packages already at the code's
-version), `rows`, `targets`, `nodes`, `conflicts`, `problems` and `backup`. Each row has
+version), `rows`, `targets`, `nodes`, `conflicts`, `problems`, `backup` and `setup`, which
+mean what they do for the update preview. Each row has
 `full_name`, `installed_version` (empty when not installed), `version`, `source`, `selected`,
 and either `change` (`install`, `upgrade` or `downgrade`) or `skip`, one of `locked`,
 `disabled`, `modpack`, `framework`, `other_registry`, `not_in_registry`, `registry_disabled`,
@@ -951,9 +955,11 @@ Each setup has `config_tree`, `configs_truncated`, `automatic` and `light`. `con
 `false` for a setup saved before setups held the whole config tree: it holds only the `.cfg`
 files directly in `BepInEx/config`, and restoring it changes only those. `configs_truncated` is
 `true` when the listing limits left files out of the setup; a restore leaves such files alone.
-`automatic` marks a setup the restore job saved from the server just before it changed
-anything, named `Before restoring <name>`. Each server keeps its newest three automatic
-setups. If that capture fails, the restore goes ahead and its job log says so. A `light`
+`automatic` marks a setup the panel saved from the server just before it changed anything:
+a restore's, named `Before restoring <name>`, or a mod update's, named
+`Before updating <mods>` or `Before changing mods` (see `setup_before_update`). Either links
+the `pre_update` backup the job took first, when it took one. Each server keeps its newest
+three automatic setups. If that capture fails, the job goes ahead and its log says so. A `light`
 setup restores the packages it does not keep from the download cache or their registry; its
 preview lists, in `problems`, each such package that is not cached and that no enabled
 registry lists.
@@ -1061,6 +1067,12 @@ second event. The restart job records `clean: false` when Docker had to kill the
 and the instance is started again unless Docker still shows the container running, in which case
 it is held in the `error` state. Any other value returns `422`. It takes effect immediately
 without setting `restart_required`.
+
+`setup_before_update` is `full` (the default), `light` or `off`: what a mod update saves of the
+setup before it moves any file. `full` and `light` save an automatic setup, full or light,
+linked to the update's `pre_update` backup; `off` saves only the backup. It needs
+`setups.manage`, takes effect immediately without setting `restart_required`, and any other
+value returns `422`. A copy made to test an update gets `off`.
 
 `join_host` is the host name or IP address players connect to, without a port: an IP address,
 or a DNS name of letters, digits and hyphens. Anything else, including a port, returns `422`.
@@ -1176,6 +1188,7 @@ is marked as pending a restart.
 | `auto_stop_minutes`                                                                     | `instance.settings` and `instance.stop` |
 | `watchdog` set to `off` or `alert`                                                      | `instance.settings`                     |
 | `watchdog` set to `restart`                                                             | `instance.settings` and `instance.restart` |
+| `setup_before_update`                                                                   | `setups.manage`                         |
 | `game_branch`, `game_branch_password`                                                   | `instance.update`                       |
 | `mem_limit_mb`, `cpu_limit`                                                             | `instance.limits`                       |
 | `extra_args`                                                                            | `instance.extra_args`                   |

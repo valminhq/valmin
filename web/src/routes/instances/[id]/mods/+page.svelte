@@ -39,6 +39,7 @@
 	import { session } from '#lib/state/session.svelte.js';
 	import { socket } from '#lib/socket/index.svelte.js';
 	import { latestCall } from '#lib/latest.js';
+	import { preUpdateNotice } from '#lib/pre-update.js';
 	import { topics, type ServerMessage } from '#lib/socket/messages.js';
 	import { Badge } from '#lib/components/ui/badge/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
@@ -125,6 +126,7 @@
 		kept: KeptMember[];
 		conflicts: ModConflict[];
 		backup: boolean;
+		setup: boolean;
 	} | null>(null);
 	let confirmOpen = $state(false);
 	let confirmFailure = $state<unknown>(null);
@@ -375,7 +377,8 @@
 			removals: closure.removals,
 			kept: closure.kept,
 			conflicts: closure.conflicts,
-			backup: closure.backup
+			backup: closure.backup,
+			setup: closure.setup
 		};
 	}
 
@@ -410,7 +413,8 @@
 				removals: [],
 				kept: [],
 				conflicts: [],
-				backup: false
+				backup: false,
+				setup: false
 			};
 			confirmFailure = err;
 		} finally {
@@ -1549,12 +1553,9 @@
 					now.
 				</p>
 			{/if}
-			{#if pending.backup}
-				<p class="text-sm text-muted-foreground">
-					The world is backed up first. The backup is kept even if the {updating
-						? 'update'
-						: 'install'} fails.
-				</p>
+			{@const saves = preUpdateNotice(pending, updating ? 'update' : 'install')}
+			{#if saves}
+				<p class="text-sm text-muted-foreground">{saves}</p>
 			{/if}
 			<Dialog.Footer>
 				<Button variant="outline" onclick={() => (confirmOpen = false)}>Cancel</Button>
@@ -1652,9 +1653,8 @@
 				</p>
 			{/if}
 			<p class="text-sm text-muted-foreground">
-				{pending.backup
-					? 'The world is backed up first. The backup is kept even if the update fails.'
-					: 'This server has no world yet, so there is nothing to back up.'}
+				{preUpdateNotice(pending, 'update') ??
+					'This server has no world yet, so there is nothing to back up.'}
 			</p>
 			<Dialog.Footer>
 				<Button variant="outline" onclick={() => (updateAllOpen = false)}>Cancel</Button>

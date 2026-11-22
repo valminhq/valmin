@@ -108,6 +108,11 @@ function serve({
 	daemon.on('GET', '/instances/inst-a/setups/setup-1/preview', () => Response.json(result));
 }
 
+/** The card under the title text. */
+function card(title: string): HTMLElement {
+	return screen.getByText(title).closest('[data-slot="card"]') as HTMLElement;
+}
+
 async function open() {
 	render(Page);
 	await screen.findByRole('heading', { name: 'Saved for this server' });
@@ -181,8 +186,11 @@ describe('Saved setups', () => {
 		daemon.on('POST', '/instances/inst-a/setups', () => Response.json(job()));
 		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
 		await open();
-		await fireEvent.click(screen.getByRole('switch', { name: /Keep package files/ }));
-		expect(screen.getByText(/It fails for a version the registry has removed/)).toBeTruthy();
+		const saveCard = card('Save current setup');
+		await fireEvent.click(within(saveCard).getByRole('switch', { name: /Keep package files/ }));
+		expect(
+			within(saveCard).getByText(/It fails for a version the registry has removed/)
+		).toBeTruthy();
 		await fireEvent.click(screen.getByRole('button', { name: 'Save setup' }));
 		await vi.waitFor(() =>
 			expect(daemon.requests('POST', '/instances/inst-a/setups')).toHaveLength(1)
@@ -190,6 +198,36 @@ describe('Saved setups', () => {
 		expect(daemon.requests('POST', '/instances/inst-a/setups')[0].body).toEqual({
 			name: 'Working before update',
 			light: true
+		});
+	});
+
+	it('saves what mod updates save first from the two switches', async () => {
+		serve();
+		daemon.on('PATCH', '/instances/inst-a', () =>
+			Response.json(instance({ id: 'inst-a', name: 'Live', setup_before_update: 'light' }))
+		);
+		await open();
+		const before = card('Before mod updates');
+		const save = within(before).getByRole('button', { name: 'Save' }) as HTMLButtonElement;
+		expect(save.disabled).toBe(true);
+
+		await fireEvent.click(within(before).getByRole('switch', { name: /Keep package files/ }));
+		expect(before.textContent).toContain('It fails for a version the registry has removed.');
+		await fireEvent.click(save);
+		await vi.waitFor(() => expect(daemon.requests('PATCH', '/instances/inst-a')).toHaveLength(1));
+		expect(daemon.requests('PATCH', '/instances/inst-a')[0].body).toEqual({
+			setup_before_update: 'light'
+		});
+		await vi.waitFor(() => expect(save.disabled).toBe(true));
+
+		await fireEvent.click(
+			within(before).getByRole('switch', { name: 'Save the setup before mod updates' })
+		);
+		expect(within(before).queryByRole('switch', { name: /Keep package files/ })).toBeNull();
+		await fireEvent.click(save);
+		await vi.waitFor(() => expect(daemon.requests('PATCH', '/instances/inst-a')).toHaveLength(2));
+		expect(daemon.requests('PATCH', '/instances/inst-a')[1].body).toEqual({
+			setup_before_update: 'off'
 		});
 	});
 

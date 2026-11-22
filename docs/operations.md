@@ -40,7 +40,9 @@ reach the rest of what retention has kept.
 many **best-effort** backups to keep. The two counts are separate, so a run of
 best-effort copies never pushes out your consistent ones. A count of `0` keeps all
 backups of that type. Snapshots taken before a restore, import, or update have their own
-limit, equal to the consistent count. Older backups are deleted after the next backup or
+limit, equal to the consistent count. A snapshot an automatic setup links (see
+[Recover a saved setup](#recover-a-saved-setup)) is kept outside these counts until the setup
+is removed. Older backups are deleted after the next backup or
 scheduled cleanup; the backup's progress line says how many retention removed, and its log
 names them. Before you take a backup by hand, the page says what retention would then
 remove, and **Stop and back up** repeats it in its confirmation. A restore, import or reset
@@ -187,10 +189,23 @@ files they ship lets the next update of those mods keep such files as they are; 
 updates follow the mod again.
 
 Before it changes anything, a restore saves the server's current setup as an
-**Automatic** one named **Before restoring** and the setup's name. Restore that setup to
-undo the restore. Each server keeps its newest three automatic setups; delete one like any
-other setup. If the current setup cannot be saved, for example because an installed mod's
-files are missing, the restore goes ahead and its job log says so.
+**Automatic** one named **Before restoring** and the setup's name, linked to the pre-update
+snapshot the restore takes of the world when it changes mods. Restore that setup to undo the
+restore.
+
+Every mod update saves one the same way: before any mod file moves, the job takes its
+pre-update snapshot of the world and saves the current setup as an automatic one linked to
+that snapshot, named after the mods it updates (see
+[Undo a mod update](usage.md#undo-a-mod-update)). Both are recorded even when the update
+fails. **Before mod updates** on **Saved setups** turns this off, or saves light setups; the
+`setup_before_update` instance field holds the choice (`full`, `light` or `off`). Copies made
+to test an update never save one.
+
+Each server keeps its newest three automatic setups, from restores and updates together;
+delete one like any other setup. A pruned or deleted automatic setup releases its snapshot to
+normal retention. If the current
+setup cannot be saved, for example because an installed mod's files are missing, the restore
+or update goes ahead and its job log says so.
 
 You can link a consistent backup from the same server, or choose **Back up the world now** to
 take one while the setup is saved and link it. That backup is consistent, since the server is

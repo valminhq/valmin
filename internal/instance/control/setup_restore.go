@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -377,9 +376,9 @@ func (s *SetupJobs) applyStagedSetup(
 }
 
 // RunRestore applies a saved setup to a stopped instance: it snapshots the world when mods
-// change, saves the current setup as an automatic one and the current files for rollback,
-// applies the staged files, and commits the rows in the job's finish. A failed apply rolls the
-// files back.
+// change, saves the current setup as an automatic one linked to that snapshot and the current
+// files for rollback, applies the staged files, and commits the rows in the job's finish. A
+// failed apply rolls the files back.
 //
 //nolint:gocognit // The restore phases share a single rollback boundary.
 func (s *SetupJobs) RunRestore(
@@ -405,16 +404,10 @@ func (s *SetupJobs) RunRestore(
 		if err := ctx.Err(); err != nil {
 			return fail(err, nil)
 		}
-		var archived func(context.Context, *sql.Tx) error
-		if plan.ModsChanged {
-			jh.Progress(ctx, 55, "backing up the world")
-			archived, err = s.Worlds.Snapshot(ctx, inst, store.TriggerPreUpdate)
-			if err != nil {
-				return fail(err, nil)
-			}
+		archived, saveBefore, err := s.saveBeforeRestore(ctx, jh, &plan, row, payload.StagingDir)
+		if err != nil {
+			return fail(err, nil)
 		}
-		jh.Progress(ctx, 60, "saving the current setup")
-		saveBefore := s.saveBeforeRestore(ctx, jh, inst, row, &plan.Current, payload.StagingDir)
 		jh.Progress(ctx, 65, "saving current files for rollback")
 		if err := BackupSetupPaths(inst, payload.StagingDir, plan.Journal); err != nil {
 			return fail(err, archived)
@@ -452,41 +445,41 @@ func (s *SetupJobs) RunRestore(
 		jh.Progress(ctx, 100, "setup restored; server remains stopped")
 		out := jobs.Outcome{
 			Status: jobs.StatusSucceeded,
-			OnFinish: func(ctx context.Context, tx *sql.Tx) error {
+			OnFinish: joinFinish(func(ctx context.Context, tx *sql.Tx) error {
 				if err := store.TxApplySetupState(ctx, tx, inst.ID, mods, &launch, backup); err != nil {
 					return err
 				}
-				if err := store.TxRecordConfigRevisions(ctx, tx, written); err != nil {
-					return err
-				}
-				return saveBefore(ctx, tx)
-			},
+				return store.TxRecordConfigRevisions(ctx, tx, written)
+			}, saveBefore),
 			AfterFinish: cleanup,
 		}
 		return out.PrependFinish(archived)
 	}
 }
 
-// saveBeforeRestore captures current as the automatic setup saved before restoring target, and
-// returns the finish step that publishes it and prunes older automatic setups other than target.
-// A capture that fails is logged on the job and publishes nothing, so the restore goes ahead.
+// saveBeforeRestore takes what a restore of row saves before it changes anything: a pre-update
+// snapshot of the world when mods change, and the current setup as an automatic one linked to
+// it. It returns the finish steps that record each, nil for what was not taken; a setup that
+// cannot be captured is logged on jh, and only a failed snapshot is an error.
 func (s *SetupJobs) saveBeforeRestore(
-	ctx context.Context, jh *jobs.Handle, inst *store.Instance, target *store.SavedSetup,
-	current *SetupSnapshot, staging string,
-) func(context.Context, *sql.Tx) error {
-	before, refs, err := s.captureBeforeRestore(ctx, inst, target.Name, current, staging)
-	if err != nil {
-		jh.Log(fmt.Sprintf("warning: the setup before this restore was not saved: %v", err))
-		slog.WarnContext(ctx, "setup before restore not saved",
-			slog.String("instance_id", inst.ID), slog.Any("error", err))
-		return func(context.Context, *sql.Tx) error { return nil }
+	ctx context.Context, jh *jobs.Handle, plan *setupRestorePlan, row *store.SavedSetup, staging string,
+) (archived, saveBefore func(context.Context, *sql.Tx) error, err error) {
+	before := automaticSetup{
+		name: "Before restoring " + row.Name, spare: row.ID,
+		staging: filepath.Join(staging, "before"), before: "restore",
 	}
-	return func(ctx context.Context, tx *sql.Tx) error {
-		if err := store.TxSaveSetup(ctx, tx, before, refs); err != nil {
-			return err
+	if plan.ModsChanged {
+		jh.Progress(ctx, 55, "backing up the world")
+		world, err := s.Worlds.snapshotRow(ctx, plan.Instance, store.TriggerPreUpdate)
+		if err != nil {
+			return nil, nil, err
 		}
-		return store.TxPruneAutomaticSetups(ctx, tx, inst.ID, keepAutomaticSetups, target.ID)
+		if world != nil {
+			archived, before.worldID = recordSnapshot(world), world.ID
+		}
 	}
+	jh.Progress(ctx, 60, "saving the current setup")
+	return archived, s.saveAutomatic(ctx, jh, plan.Instance, &plan.Current, &before), nil
 }
 
 // trackReplacedConfigs records, in each file's history, the config files a restore is about to

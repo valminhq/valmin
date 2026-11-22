@@ -613,7 +613,7 @@ describe('the mod screen', () => {
 	});
 
 	// Q39: one combined diff from the daemon, confirmed once, with the backup said out loud.
-	it('updates all mods through one confirmed diff that says the world is backed up', async () => {
+	it('updates all mods through one confirmed diff that says the world and setup are saved', async () => {
 		await open(manage, { mods: [installed({ update_version: '1.2.0' })] });
 		const preview: UpdatePreview = {
 			targets: [{ full_name: 'Author-Sailing', source: 'thunderstore', version: '1.2.0' }],
@@ -636,7 +636,8 @@ describe('the mod screen', () => {
 				}
 			],
 			conflicts: [],
-			backup: true
+			backup: true,
+			setup: true
 		};
 		daemon.on('POST', `${base}/updates/resolve`, () => Response.json(preview));
 		daemon.on('POST', `${base}/updates`, () => Response.json(job(), { status: 202 }));
@@ -647,7 +648,9 @@ describe('the mod screen', () => {
 		const diff = within(dialog).getByTestId('update-all-diff');
 		expect(text(diff)).toContain('1.0.0 → 1.2.0');
 		expect(diff.textContent).toContain('new dependency');
-		expect(dialog.textContent).toContain('The world is backed up first.');
+		expect(dialog.textContent).toContain(
+			'The world and the current setup are saved first. Both are kept even if the update fails.'
+		);
 		expect(daemon.requests('POST', `${base}/updates`)).toHaveLength(0);
 
 		await click(within(dialog).getByRole('button', { name: 'Back up and update' }));
@@ -669,7 +672,8 @@ describe('the mod screen', () => {
 			],
 			nodes: [],
 			conflicts: [],
-			backup: true
+			backup: true,
+			setup: true
 		};
 		const queued = preview.targets.map((t) => ({ ...t, created_at: '2026-10-08T12:00:00Z' }));
 		daemon.on('POST', `${base}/updates/resolve`, () => Response.json(preview));
@@ -1056,6 +1060,7 @@ describe('the mod screen', () => {
 				conflicts: [],
 				problems: [],
 				backup: true,
+				setup: true,
 				...overrides
 			};
 		}

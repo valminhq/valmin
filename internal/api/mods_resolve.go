@@ -61,6 +61,9 @@ type resolveResponse struct {
 	// Backup reports whether the install archives the world first: it replaces or removes an
 	// installed version on a server that has a world.
 	Backup bool `json:"backup"`
+	// Setup reports whether the install first saves the current setup as an automatic one: it
+	// replaces or removes an installed version and the server saves setups before updates.
+	Setup bool `json:"setup"`
 }
 
 // resolve is POST /instances/{id}/mods/resolve (04 §3): a dry run over the cached index, no
@@ -111,6 +114,7 @@ func (m *Mods) resolve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := planResponse(&plan, idx)
+	resp.Setup = resp.Backup && savesSetup(inst)
 	resp.Backup = resp.Backup && hasWorlds(inst)
 	JSON(w, r, http.StatusOK, resp)
 }

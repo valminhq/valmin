@@ -728,7 +728,8 @@ installed files came from.
 Updating a single mod, or installing one that raises an installed package to a new
 version (a newer BepInEx, for example), shows each changed package's current and new
 version. On a server with a world, the job backs up the world first and keeps the
-backup even if the update fails.
+backup even if the update fails. It also saves the current setup first, so the update can
+be undone (see [Undo a mod update](#undo-a-mod-update)).
 
 The catalogue refreshes when the panel starts and then on a timer. An admin can refresh
 it sooner with the refresh button beside **Catalogue updated** on the **Browse mods**
@@ -749,9 +750,8 @@ downgrade below what that mod needs, Valmin names the mod and will not apply the
 A downgrade puts back the older version's files, including the config files it ships (see
 [Config files a mod ships](#config-files-a-mod-ships)). It does not restore the world or the
 settings a mod writes itself, and a world or setting that a newer version changed may not
-work with the older one. On a
-server with a world, Valmin backs up the world first, so restore that backup if you need
-to go back completely.
+work with the older one. Valmin backs up the world and saves the current setup first, so
+you can go back completely (see [Undo a mod update](#undo-a-mod-update)).
 
 ### Lock a mod version
 
@@ -785,13 +785,14 @@ When any installed mod has a newer version, the **Installed** tab shows
 **Update all mods**. It lists every package that will change in one view: each
 mod's current and new version, plus any new dependencies the updates need. Locked mods,
 modpacks, and the mods a modpack manages are left out. After
-you confirm, one job backs up the world, then updates the whole set. If any
-package fails, the job rolls back every package and keeps the backup. The backup
-appears on the **Backups** page as a pre-update backup.
+you confirm, one job backs up the world and saves the current setup, then updates the
+whole set. If any package fails, the job rolls back every package and keeps the backup. The
+backup appears on the **Backups** page as a pre-update backup, and the setup on **Saved
+setups** as an automatic one (see [Undo a mod update](#undo-a-mod-update)).
 
 On a running server, **Update when stopped** queues the updates instead. Once the server
 stops, or when you restart it, they run as one update the same way: one backup of the
-world, then the whole set. An install queued ahead of them runs first, on its own.
+world and one saved setup, then the whole set. An install queued ahead of them runs first, on its own.
 
 A mod marked **not in the index** is one its registry no longer lists, usually because
 the author or the registry removed it. Valmin cannot offer updates for it and leaves it
@@ -847,9 +848,36 @@ untick those.
 
 The server needs its mod framework, which arrives with the first mod you install from
 **Browse mods**; the framework is never installed from a code. The server must be stopped.
-**Back up and apply** backs up the world, then makes all the
+**Back up and apply** backs up the world and saves the current setup, then makes all the
 changes in one job. If any package fails, the job rolls back every package and keeps the
 backup.
+
+### Undo a mod update
+
+Every job that moves installed mods to other versions first backs up the world and saves
+the server's setup as an **Automatic** setup linked to that backup. The setup is named
+after what changes, such as **Before updating Author-Mod and 2 more**, or **Before
+changing mods** for a change that only adds or removes mods. This covers updating or
+downgrading a mod, **Update all mods**, updates queued with **Update when stopped**,
+**Update from code**, a modpack update and **Apply to the server**. Both are kept even if
+the update fails. A game update on its own changes no mods, so it saves no setup. The
+dialog before the change says what is saved.
+
+To undo an update, stop the server, open **Saved setups**, select the automatic setup and
+restore it: the mods, their configuration files and settings go back as they were (see
+[Save and restore a setup](#save-and-restore-a-setup)). If the update also changed the
+world, restore the linked backup on **Backups** too.
+
+Each server keeps its newest three automatic setups, counting those a setup restore saves.
+A linked backup is kept outside the backup retention counts until its setup is removed,
+and **Backups** marks it **Kept for setup** with the setup's name. Saving the setup adds the
+time it takes to read every installed mod file to each update.
+
+Under **Before mod updates** on **Saved setups**, an administrator can turn off **Save the
+setup before mod updates**, so that updates only back up the world, or turn off **Keep
+package files** to save light setups instead, which keep only mods that cannot be
+downloaded again. Package files the download cache holds take no extra space either way.
+A copy made by **Test an update on a copy** never saves one.
 
 ### Disable a mod without removing it
 
@@ -1134,6 +1162,8 @@ The page address names the other server, so you can share a comparison as a link
 
 A saved setup is a named snapshot of a server's mods, configuration and settings,
 kept on the same panel so you can go back after a change goes wrong.
+Mod updates save one on their own unless turned off; see
+[Undo a mod update](#undo-a-mod-update).
 
 Stop the server, then open **Saved setups**. The name field starts as **Working before
 update**; change it if needed, then choose **Save setup**. Under **Associated world backup**,
@@ -1158,7 +1188,8 @@ Select a setup to compare it with the current server. Under **Configuration file
 comparison lists the files the restore removes and adds, and each changed file opens to a
 line-by-line comparison. Review the restore preview, then restore while the server is
 stopped. Valmin first saves the current setup as an **Automatic** one named **Before
-restoring** and the setup's name, then applies the saved mod set, configuration, and settings
+restoring** and the setup's name, linked to the world backup the restore takes when mods
+change, then applies the saved mod set, configuration, and settings
 together. Restore the automatic setup to undo the restore. If installation fails, Valmin rolls
 back the changes. The server stays stopped; start it after checking the job result. A setup
 marked **Top-level .cfg only** was saved before setups held every config file, and restoring

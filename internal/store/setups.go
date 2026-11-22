@@ -23,7 +23,7 @@ type SavedSetup struct {
 	WorldName    string    `json:"world_name"`
 	SnapshotJSON string    `json:"-"`
 	BackupID     string    `json:"backup_id,omitempty"`
-	// Automatic marks a setup the panel saved before a restore.
+	// Automatic marks a setup the panel saved before a restore or a mod update.
 	Automatic bool `json:"automatic"`
 	// ConfigsTruncated reports that the config tree held files past the listing limits.
 	ConfigsTruncated bool `json:"configs_truncated"`

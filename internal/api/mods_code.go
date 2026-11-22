@@ -47,6 +47,8 @@ type codePreview struct {
 	Conflicts   []conflictView         `json:"conflicts"`
 	Problems    []string               `json:"problems"`
 	Backup      bool                   `json:"backup"`
+	// Setup reports whether the current setup is saved first as an automatic one.
+	Setup bool `json:"setup"`
 }
 
 // noFrameworkText is why a code cannot be applied to a server that has no mod framework: the
@@ -123,7 +125,7 @@ func (m *Mods) buildCodePreview(r *http.Request, inst *store.Instance, body *cod
 		Rows:    make([]codeRowView, 0, len(rows)),
 		Targets: manager.CodeTargets(rows, selected),
 		Nodes:   []updateNode{}, Conflicts: []conflictView{}, Problems: []string{},
-		Backup: hasWorlds(inst),
+		Backup: hasWorlds(inst), Setup: savesSetup(inst),
 	}
 	for i := range rows {
 		preview.Rows = append(

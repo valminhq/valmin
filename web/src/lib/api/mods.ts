@@ -255,6 +255,9 @@ export interface ResolveResult {
 	/** Whether the world is archived first: the install replaces an installed version on a
 	 * server with a world. */
 	backup: boolean;
+	/** Whether the current setup is saved first as an automatic one: the install replaces an
+	 * installed version on a server that saves setups before updates. */
+	setup: boolean;
 }
 
 /** One package in the client manifest, or one the export left behind. `reason` is `tagged`
@@ -330,7 +333,8 @@ export interface UpdatePreview {
 	conflicts: ModConflict[];
 	/** Whether the world is archived before any file changes. False only for a server with
 	 * no world yet. */
-	backup: boolean;
+	backup: boolean; /** Whether the current setup is saved first as an automatic one. */
+	setup: boolean;
 }
 
 /** Why a package in a profile code is left alone. */
@@ -372,6 +376,8 @@ export interface CodePreview {
 	conflicts: ModConflict[];
 	problems: string[];
 	backup: boolean;
+	/** Whether the current setup is saved first as an automatic one. */
+	setup: boolean;
 }
 
 export const mods = {
