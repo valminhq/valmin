@@ -233,4 +233,5 @@ func (h *Recovery) sweepSetupSave(ctx context.Context, job *store.Job) {
 			slog.WarnContext(ctx, "remove interrupted setup save staging", slog.Any("error", err))
 		}
 	}
+	h.sweepPlannedArchive(ctx, job)
 }

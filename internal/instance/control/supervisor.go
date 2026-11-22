@@ -243,7 +243,7 @@ func (s *Supervisor) sweepStaging(ctx context.Context, j *store.Job) {
 	case jobs.KindBackup.String():
 		recovery.sweepBackupPart(ctx, j)
 	case jobs.KindStop.String(), jobs.KindRestart.String():
-		recovery.sweepStopArchive(ctx, j)
+		recovery.sweepPlannedArchive(ctx, j)
 	case jobs.KindRestore.String():
 		recovery.sweepRestoreSwap(ctx, j)
 	case jobs.KindGameUpdate.String():

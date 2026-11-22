@@ -910,7 +910,13 @@ Saved setup routes require an administrator. Send `{"name":"Working before updat
 to `POST /instances/{id}/setups` while the server is stopped. Add
 `"world_backup_id":"BACKUP_ID"` to link a consistent backup from the same server, and
 `"light":true` to keep only the packages whose installed files differ from their cached
-registry archive or whose registry is disabled.
+registry archive or whose registry is disabled. `"back_up_world":true` takes a consistent
+backup during the save, with trigger `manual`, verified and world-checked like any manual
+backup, and links it. A backup that fails its check, or a data root below its free-space floor,
+fails the save job and publishes nothing. It needs `backups.create` and cannot be combined with
+`world_backup_id`, which is `422 validation_failed`. A server whose selected world has no
+`.db` or `.fwl` yet gets no backup; a failed check carries the error code
+`backup_unverifiable`, as a manual backup's does. A setup's `world_backup` includes the archive's `size_bytes`.
 The save job publishes the setup only after it captures every required package.
 Names can repeat; use the setup ID to identify one.
 
@@ -1468,6 +1474,9 @@ inside the archive (`null` when never measured) and `world_attention` is a list 
 `{code, message}` findings, empty when there are none. The codes are `world_shrunk`,
 `db_shorter_than_old`, `save_incomplete`, `version_mismatch`, `chunk_missing` and
 `db2_damaged`; `message` is written for people. A finding never refuses an archive.
+`kept_for_setup` is `true` while a saved setup links the archive, which keeps it out of
+retention and makes deleting it `409 invalid_state`; `linked_setups` lists those setups as
+`{id, name}` for a caller with `setups.manage` and is absent otherwise.
 
 Each rule sends its own message: a destination named by rules of different kinds, such as
 `job_failed` and `backup_failed`, gets one from each. A destination named by several rules of

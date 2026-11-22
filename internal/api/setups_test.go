@@ -707,3 +707,117 @@ func TestLightSetupRestoresPackagesFromTheCache(t *testing.T) {
 		t.Errorf("preview without the archive = %+v, want it reported", preview)
 	}
 }
+
+// TestSetupSaveBacksUpTheWorldAndLinksIt asserts a save with back_up_world takes a verified world
+// backup and links it, that the backup list marks it for everyone but names the setup only to those who
+// may manage setups, and that naming an existing backup as well is refused.
+func TestSetupSaveBacksUpTheWorldAndLinksIt(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, member, _ := setupTestWorld(t)
+	seedWorldOnDisk(t, db)
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL,
+		jsonBody(t, map[string]any{"name": "both", "back_up_world": true, "world_backup_id": "bk"})))
+	if rec.Code != http.StatusUnprocessableEntity || errCode(t, rec) != "validation_failed" {
+		t.Fatalf("save naming two backups = %d %s, want 422", rec.Code, rec.Body.String())
+	}
+	rec = as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL,
+		jsonBody(t, map[string]any{"name": "with world", "back_up_world": true})))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("save = %d %s, want 202", rec.Code, rec.Body.String())
+	}
+	var accepted jobView
+	decodeInto(t, rec, &accepted)
+	if job := waitJob(t, rt, admin, accepted.JobID); job.Status != "succeeded" {
+		t.Fatalf("save job = %+v, want succeeded", job)
+	}
+	rows, err := db.ListSetups(t.Context(), "inst-a")
+	if err != nil || len(rows) != 1 || rows[0].BackupID == "" {
+		t.Fatalf("setups = %+v, %v, want one linked to a backup", rows, err)
+	}
+	b, err := db.BackupByID(t.Context(), "inst-a", rows[0].BackupID)
+	if err != nil || b == nil || !b.Consistent || b.Trigger != store.TriggerManual || b.WorldBytes == nil {
+		t.Fatalf("linked backup = %+v, %v, want a consistent manual backup the world check measured", b, err)
+	}
+
+	for _, tc := range []struct {
+		user  *store.User
+		names []setupLinkView
+	}{
+		{admin, []setupLinkView{{ID: rows[0].ID, Name: "with world"}}},
+		{member, nil},
+	} {
+		rec := as(rt, tc.user, httptest.NewRequest(http.MethodGet, backupsPath, http.NoBody))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list as %s = %d %s", tc.user.Username, rec.Code, rec.Body.String())
+		}
+		var list backupList
+		decodeInto(t, rec, &list)
+		if len(list.Items) != 1 || !list.Items[0].KeptForSetup ||
+			!slices.Equal(list.Items[0].LinkedSetups, tc.names) {
+			t.Errorf("backups as %s = %+v, want kept for setup with names %v",
+				tc.user.Username, list.Items, tc.names)
+		}
+	}
+}
+
+// TestSetupSaveFailsOnAWorldBackupThatDoesNotVerify asserts a save whose world backup fails its
+// check, here a world with no .fwl, fails as a manual backup does, publishes no setup and leaves
+// no archive behind.
+func TestSetupSaveFailsOnAWorldBackupThatDoesNotVerify(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	world := filepath.Join(instance.WorldsDir(dataDir), "worlds_local", "World.db")
+	if err := os.MkdirAll(filepath.Dir(world), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(world, []byte("not a world"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL,
+		jsonBody(t, map[string]any{"name": "bad world", "back_up_world": true})))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("save = %d %s, want 202", rec.Code, rec.Body.String())
+	}
+	var accepted jobView
+	decodeInto(t, rec, &accepted)
+	job := waitJob(t, rt, admin, accepted.JobID)
+	if job.Status != "failed" || job.ErrorCode == nil || *job.ErrorCode != "backup_unverifiable" {
+		t.Fatalf("save job = %+v, want failed as backup_unverifiable", job)
+	}
+	if rows, err := db.ListSetups(t.Context(), "inst-a"); err != nil || len(rows) != 0 {
+		t.Errorf("setups = %+v, %v, want none", rows, err)
+	}
+	archives, err := filepath.Glob(filepath.Join(instance.BackupsDir(rt.instances.Cfg.Data.Root), "inst-a", "*"))
+	if err != nil || len(archives) != 0 {
+		t.Errorf("archives left = %v, %v, want none", archives, err)
+	}
+}
+
+// TestSetupSaveWithoutASavedWorldLinksNoBackup asserts a server whose world was never saved, but
+// which holds a player list, saves its setup unlinked.
+func TestSetupSaveWithoutASavedWorldLinksNoBackup(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	list := filepath.Join(instance.WorldsDir(dataDir), "adminlist.txt")
+	if err := os.MkdirAll(filepath.Dir(list), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(list, []byte("player-id\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL,
+		jsonBody(t, map[string]any{"name": "no world", "back_up_world": true})))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("save = %d %s, want 202", rec.Code, rec.Body.String())
+	}
+	var accepted jobView
+	decodeInto(t, rec, &accepted)
+	if job := waitJob(t, rt, admin, accepted.JobID); job.Status != "succeeded" {
+		t.Fatalf("save job = %+v, want succeeded", job)
+	}
+	rows, err := db.ListSetups(t.Context(), "inst-a")
+	if err != nil || len(rows) != 1 || rows[0].BackupID != "" {
+		t.Errorf("setups = %+v, %v, want one with no backup", rows, err)
+	}
+}

@@ -26,6 +26,9 @@ type setupSaveRequest struct {
 	WorldBackupID string `json:"world_backup_id,omitempty"`
 	// Light keeps only the packages their registry archives cannot reproduce.
 	Light bool `json:"light,omitempty"`
+	// BackUpWorld takes a world backup during the save and links it, in place of
+	// WorldBackupID.
+	BackUpWorld bool `json:"back_up_world,omitempty"`
 }
 
 func (h *Instances) setupStopped(w http.ResponseWriter, r *http.Request, inst *store.Instance) bool {
@@ -82,16 +85,9 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, err)
 		return
 	}
-	req.Name = strings.TrimSpace(req.Name)
-	if req.Name == "" || len(req.Name) > control.MaxSetupNameBytes {
-		apierr.Write(w, r, apierr.New(errcode.ValidationFailed).With("field", setupNameField))
+	if err := h.checkSetupSave(r.Context(), u, inst.ID, &req); err != nil {
+		apierr.Write(w, r, err)
 		return
-	}
-	if req.WorldBackupID != "" {
-		if err := h.validateSetupBackup(r.Context(), inst.ID, req.WorldBackupID); err != nil {
-			apierr.Write(w, r, err)
-			return
-		}
 	}
 
 	staging, err := h.setupStaging()
@@ -107,7 +103,13 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 	}()
 	payload := control.SetupJobPayload{
 		SetupID: store.NewID(), StagingDir: staging, Name: req.Name, BackupID: req.WorldBackupID,
-		Light: req.Light,
+		Light: req.Light, BackUpWorld: req.BackUpWorld,
+	}
+	if req.BackUpWorld {
+		archiveID := store.NewID()
+		payload.ArchivePlan = control.ArchivePlan{
+			ArchiveID: archiveID, ArchivePath: control.ArchivePath(h.Cfg.Data.Root, inst, archiveID),
+		}
 	}
 	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
 		Kind: jobs.KindSetupSave, LockKey: jobs.InstanceLockKey(id),
@@ -124,6 +126,7 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 				setupNameField:    req.Name,
 				"world_backup_id": req.WorldBackupID,
 				"light":           req.Light,
+				"back_up_world":   req.BackUpWorld,
 			},
 		),
 		OnClaim: control.SetupStoppedClaim(id),
@@ -134,6 +137,23 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	submitted = true
 	Accepted(w, r, job.ID, toJobView(job))
+}
+
+// checkSetupSave trims req's name and checks the request: a name of the right length, at most
+// one way to link a world backup, the backup permission for taking one, and a linkable backup.
+func (h *Instances) checkSetupSave(ctx context.Context, u *store.User, instanceID string, req *setupSaveRequest) error {
+	req.Name = strings.TrimSpace(req.Name)
+	switch {
+	case req.Name == "" || len(req.Name) > control.MaxSetupNameBytes:
+		return apierr.New(errcode.ValidationFailed).With("field", setupNameField)
+	case req.BackUpWorld && req.WorldBackupID != "":
+		return apierr.New(errcode.ValidationFailed).With("field", "back_up_world")
+	case req.BackUpWorld && !h.Authz.Can(ctx, u, authz.BackupsCreate, instanceID):
+		return apierr.New(errcode.Forbidden)
+	case req.WorldBackupID != "":
+		return h.validateSetupBackup(ctx, instanceID, req.WorldBackupID)
+	}
+	return nil
 }
 
 func (h *Instances) validateSetupBackup(ctx context.Context, instanceID, backupID string) error {

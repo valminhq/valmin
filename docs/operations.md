@@ -16,9 +16,10 @@ Open **Backups** on a server. Two buttons make a backup now:
 Each archive in the history shows when it was made, the world, whether it is
 **Consistent** or **Best-effort**, why it was made (manual, scheduled, pre update,
 pre restore or pre import), and its size. An archive that retention will remove at the next
-prune is marked **Pending deletion**. Below the archive size is the size of the world inside
-it, and an archive whose world needs a look carries an **Attention required** box (see
-[World check](#world-check)). **Download** saves an archive to your computer,
+prune is marked **Pending deletion**, and one a saved setup links is marked **Kept for setup**,
+with the setup's name for those who may manage setups; it cannot be deleted until that setup
+is. Below the archive size is the size of the world inside it, and an archive whose world needs
+a look carries an **Attention required** box (see [World check](#world-check)). **Download** saves an archive to your computer,
 and **Delete** removes it after you type the server's name. With
 [off-host copies](remote-backups.md) configured, **Upload now** sends an existing
 archive to the remote destination. Downloading needs operator access; deleting needs
@@ -191,10 +192,15 @@ undo the restore. Each server keeps its newest three automatic setups; delete on
 other setup. If the current setup cannot be saved, for example because an installed mod's
 files are missing, the restore goes ahead and its job log says so.
 
-You can link a consistent backup from the same server. Linked backups do not count
-toward retention and cannot be deleted until all setups that link to them are
-deleted. A linked backup is a reference to an existing world archive, not a second
-copy of it.
+You can link a consistent backup from the same server, or choose **Back up the world now** to
+take one while the setup is saved and link it. That backup is consistent, since the server is
+stopped, and is checked like **Stop and back up**: its world size and any **Attention required**
+findings show on **Backups**. If the archive fails its check, or the data root is below its
+free-space floor, the save fails and keeps nothing; save again without the backup if you need
+the setup anyway. A server whose world was never saved gets no backup, and the save job's log
+says so. Linked backups do not count toward retention and cannot be
+deleted until all setups that link to them are deleted, so each one adds to disk use; the setup
+shows its size. A linked backup is a reference to a world archive, not a second copy of it.
 
 Before restoring, compare the setup with the current server and review the preview.
 Stop the server, then start the restore. The preview expires when the server state

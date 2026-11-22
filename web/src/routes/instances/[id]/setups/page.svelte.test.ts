@@ -155,6 +155,27 @@ describe('Saved setups', () => {
 		});
 	});
 
+	it('backs up the world now and links it when chosen', async () => {
+		session.permissions = permissions('inst-a', [actions.setupsManage, actions.backupsCreate]);
+		serve();
+		daemon.on('POST', '/instances/inst-a/setups', () => Response.json(job()));
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
+		await open();
+		const selector = screen.getByLabelText(
+			'Associated world backup (optional)'
+		) as HTMLSelectElement;
+		await vi.waitFor(() => expect(selector.options).toHaveLength(3));
+		await fireEvent.change(selector, { target: { value: 'now' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Save setup' }));
+		await vi.waitFor(() =>
+			expect(daemon.requests('POST', '/instances/inst-a/setups')).toHaveLength(1)
+		);
+		expect(daemon.requests('POST', '/instances/inst-a/setups')[0].body).toEqual({
+			name: 'Working before update',
+			back_up_world: true
+		});
+	});
+
 	it('saves a light setup when package files are not kept', async () => {
 		serve();
 		daemon.on('POST', '/instances/inst-a/setups', () => Response.json(job()));

@@ -39,6 +39,17 @@ type backupView struct {
 	WorldBytes *int64 `json:"world_bytes"`
 	// WorldAttention is what the world check asks the operator to look at, empty when nothing.
 	WorldAttention []backup.Attention `json:"world_attention"`
+	// KeptForSetup is true while a saved setup links the archive, which keeps it out of
+	// retention and blocks deleting it.
+	KeptForSetup bool `json:"kept_for_setup"`
+	// LinkedSetups names those setups, for a caller who may manage setups; omitted otherwise.
+	LinkedSetups []setupLinkView `json:"linked_setups,omitempty"`
+}
+
+// setupLinkView names one saved setup that links a backup.
+type setupLinkView struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // backupRemoval names one archive a coming backup would remove.
@@ -120,6 +131,10 @@ func (h *Instances) listBackups(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
+	if err := h.markSetupLinks(r.Context(), u, inst.ID, list.Items); err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
 	JSON(w, r, http.StatusOK, list)
 }
 
@@ -155,6 +170,27 @@ func (h *Instances) backupList(
 		RemovedByNextConsistent: consistent,
 		RemovedByNextBestEffort: bestEffort,
 	}, nil
+}
+
+// markSetupLinks marks each archive in views that a saved setup links, naming the setups only
+// for a caller who may manage them, since setup names are not otherwise visible to the rest.
+func (h *Instances) markSetupLinks(ctx context.Context, u *store.User, instanceID string, views []backupView) error {
+	links, err := h.DB.BackupSetupLinks(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	names := h.Authz.Can(ctx, u, authz.SetupsManage, instanceID)
+	for i := range views {
+		setups := links[views[i].ID]
+		views[i].KeptForSetup = len(setups) > 0
+		if !names {
+			continue
+		}
+		for _, s := range setups {
+			views[i].LinkedSetups = append(views[i].LinkedSetups, setupLinkView{ID: s.ID, Name: s.Name})
+		}
+	}
+	return nil
 }
 
 // removals names each archive retention would remove, with the time it was taken, newest

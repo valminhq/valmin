@@ -556,6 +556,14 @@
 												<Badge variant="destructive">Pending deletion</Badge>
 												<span class="text-xs text-muted-foreground">removed at the next prune</span>
 											{/if}
+											{#if archive.kept_for_setup}
+												<Badge variant="outline">Kept for setup</Badge>
+												<span class="text-xs text-muted-foreground"
+													>{archive.linked_setups?.length
+														? archive.linked_setups.map((s) => s.name).join(', ')
+														: 'linked to a saved setup'}</span
+												>
+											{/if}
 										</div>
 										<div class="grid gap-0.5">
 											<span class="text-xs text-muted-foreground md:hidden">Size</span>
@@ -632,15 +640,22 @@
 													<History />
 													<span>Restore</span>
 												</Button>
-												<Button
-													variant="ghost"
-													size="sm"
-													disabled={jobRunning}
-													onclick={() => askDelete(archive)}
+												<!-- The title sits on a wrapper: a disabled button takes no pointer events. -->
+												<span
+													title={archive.kept_for_setup
+														? 'A saved setup links this backup. Delete the setup first.'
+														: undefined}
 												>
-													<Trash2 />
-													<span>Delete</span>
-												</Button>
+													<Button
+														variant="ghost"
+														size="sm"
+														disabled={jobRunning || archive.kept_for_setup}
+														onclick={() => askDelete(archive)}
+													>
+														<Trash2 />
+														<span>Delete</span>
+													</Button>
+												</span>
 											{/if}
 										</div>
 									</li>
