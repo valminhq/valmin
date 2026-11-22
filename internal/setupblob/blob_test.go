@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -121,6 +122,42 @@ func TestPutLinkSharesTheFile(t *testing.T) {
 	again, err := s.PutLink(t.Context(), src)
 	if err != nil || again != digest {
 		t.Errorf("second PutLink = %q, %v, want %q", again, err, digest)
+	}
+}
+
+// TestPutLinkConcurrent asserts that calls retaining the same file at once all succeed with one
+// intact blob, as jobs on different servers retaining one package do.
+func TestPutLinkConcurrent(t *testing.T) {
+	for range 20 {
+		dir := t.TempDir()
+		s := New(dir)
+		src := filepath.Join(dir, "cache.zip")
+		if err := os.WriteFile(src, []byte("shared package archive"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		const callers = 8
+		digests := make([]string, callers)
+		errs := make([]error, callers)
+		var wg sync.WaitGroup
+		for i := range callers {
+			wg.Go(func() { digests[i], errs[i] = s.PutLink(t.Context(), src) })
+		}
+		wg.Wait()
+		for i := range callers {
+			if errs[i] != nil || digests[i] != digests[0] {
+				t.Fatalf("PutLink %d = %q, %v, want %q", i, digests[i], errs[i], digests[0])
+			}
+		}
+		if _, err := s.Verify(digests[0]); err != nil {
+			t.Fatal(err)
+		}
+		entries, err := os.ReadDir(Dir(dir))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 1 {
+			t.Fatalf("blob directory holds %d entries, want only the blob", len(entries))
+		}
 	}
 }
 
