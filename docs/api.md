@@ -476,6 +476,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `DELETE` | `/instances/{id}/mods/queue/{full_name}`  | Remove a queued install.                                              |
 | `GET`    | `/instances/{id}/manifest`                | Server definition: settings, pinned mods, and config files.           |
 | `GET`    | `/instances/{id}/manifest/code`           | The server as a template code.                                        |
+| `GET`    | `/instances/{id}/manifest/files`          | The config files templates carry, and the changed ones they leave out. |
 | `POST`   | `/instances/manifest/preview`             | Check a server definition before importing it.                        |
 | `POST`   | `/instances/import`                       | Create a server from a definition; returns a job.                     |
 | `GET`    | `/templates`                              | Shared templates from the Valmin presets repository.                  |
@@ -856,14 +857,33 @@ whichever registry carries the version. The import installs each modpack before 
 other mods, so the mods it bundles arrive as its members, and it never lowers a mod that
 an earlier mod in the definition already raised.
 
+A definition's `configs` are the config files the panel changed, each whole: files the panel
+saved or a setup restore wrote, apart from the RCON plugin's file, whose bytes differ from the
+version the panel first found or the newest mod install wrote. A file left as found is not
+carried, since the mods create it again. `schema` is `1` when every file is a `.cfg` directly in
+`BepInEx/config` and `2` when one has a path into a subfolder or is a YAML, JSON or text file;
+`file` is then that path under `BepInEx/config`. The preview and import read both; a panel from
+before schema 2 refuses a schema 2 file. A `.cfg` over 1 MiB is left out. The export answers
+`422 validation_failed` when the changed files would be more than an import accepts: over 200
+files, or a document over about 8 MiB. Importing a definition writes each file whole, creating
+the folders its path needs; a schema 2 file whose path runs through another of its files is
+refused.
+
+`GET /instances/{id}/manifest/files` needs the same actions and returns
+`{"carried": [{"file", "size_bytes"}], "left_out": [{"file", "reason"}]}`: the files a definition
+carries, and the changed files templates leave out, such as one changed only outside the panel
+or one over 1 MiB, with `reason` written for people.
+
 `GET /instances/{id}/manifest/code` needs the same actions as the definition export and
 returns `{"code", "mods", "settings", "secrets_left_out", "disabled_left_out", "configs"}`. The
 code starts with `valmin1:` and carries enabled mods and the config settings changed in the
-panel. Each entry of `configs` is a file with changed settings: `file`, `excluded`,
-`secrets_included`, and `settings` with `key`, `value`, `secret` (the name looks like a
-credential) and `suspicious` (the value does). Secret settings are left out of the code and
-counted in `secrets_left_out`; repeat `?include_secrets=<file>` to keep a file's. Repeat
-`?exclude=<file>` to leave whole config files out; they stay listed with `excluded` set.
+panel, in the `.cfg` files directly in `BepInEx/config`: its format holds plain `.cfg` names only,
+so other config files go only in a definition. Each entry of `configs` is a file with changed
+settings: `file`, `excluded`, `secrets_included`, and `settings` with `key`, `value`, `secret`
+(the name looks like a credential) and `suspicious` (the value does). Secret settings are left
+out of the code and counted in `secrets_left_out`; repeat `?include_secrets=<file>` to keep a
+file's. Repeat `?exclude=<file>` to leave whole config files out; they stay listed with
+`excluded` set.
 Send it as `{"code": "valmin1:..."}` in place of `manifest` to the preview and import routes.
 For a code, each preview entry in `configs` also lists `settings`, shaped like the export's.
 Whitespace in the code is ignored. Dependencies the code leaves out are derived from the
@@ -1122,8 +1142,9 @@ folders, symlinked folders, symlinks that do not lead to a regular file inside t
 files with other extensions, files other than `.cfg` over 1 MiB and folders more than 8 deep,
 and returns at most 5,000 files; when a limit left a file out, `note` says so. Each
 item's `file` is its path, `dir` the directory it is relative to, and `portable` whether
-server definitions and template codes carry it: only a `.cfg` directly in `BepInEx/config`,
-other than the RCON plugin's. Saved setups hold every listed file in `BepInEx/config` except
+template codes carry its settings once the panel changes them: only a `.cfg` directly in
+`BepInEx/config`, other than the RCON plugin's. Server definitions carry the files the panel
+changed, as described under Server definitions, and saved setups hold every listed file except
 the RCON plugin's. `mod_replaced_edits` is
 `{"mod", "version", "created_at"}` while the file's newest version is one a mod install,
 update or downgrade wrote over bytes the mod had not shipped, and `null` otherwise.

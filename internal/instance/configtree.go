@@ -8,6 +8,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
@@ -26,10 +27,10 @@ const (
 var configExts = []string{".cfg", ".yaml", ".yml", ".json", ".txt"}
 
 // CheckConfigPath accepts a slash-separated path relative to the config directory: no `.` or
-// `..` element, no backslash, no folder starting with a dot, at most maxConfigDepth folders,
+// `..` element, no backslash or control character, no folder starting with a dot, at most maxConfigDepth folders,
 // and an extension from configExts. Kept copies (`.bak`, `.orig`, `.pending`) fail the last.
 func CheckConfigPath(name string) error {
-	if !fs.ValidPath(name) || strings.Contains(name, `\`) {
+	if !fs.ValidPath(name) || strings.Contains(name, `\`) || strings.ContainsFunc(name, unicode.IsControl) {
 		return fmt.Errorf("%q is not a relative path", name)
 	}
 	parts := strings.Split(name, "/")
@@ -54,25 +55,33 @@ type ConfigFile struct {
 	Size int64
 }
 
+// ConfigListing is one walk of the config tree.
+type ConfigListing struct {
+	Files []ConfigFile
+	// TooLarge are the YAML, JSON and text files left out for exceeding MaxConfigSize.
+	TooLarge []string
+	// Truncated reports that a limit left a file out, one in TooLarge included.
+	Truncated bool
+}
+
 // ConfigTree lists the config files under root, the opened config directory: every regular
 // file CheckConfigPath accepts, up to maxConfigFiles, leaving out a non-`.cfg` file larger than
 // MaxConfigSize. Hidden folders are not entered, and a symlink is listed only when it leads to
-// a regular file inside root. truncated reports that a limit left a file out.
-func ConfigTree(root *os.Root) (files []ConfigFile, truncated bool, err error) {
-	walk := configWalk{root: root, files: []ConfigFile{}}
+// a regular file inside root.
+func ConfigTree(root *os.Root) (ConfigListing, error) {
+	walk := configWalk{root: root, listing: ConfigListing{Files: []ConfigFile{}}}
 	// ponytail: visits every entry under the directory; bound the entries visited if a tree
 	// turns out huge.
 	if err := fs.WalkDir(root.FS(), ".", walk.visit); err != nil {
-		return nil, false, fmt.Errorf("list config files: %w", err)
+		return ConfigListing{}, fmt.Errorf("list config files: %w", err)
 	}
-	return walk.files, walk.truncated, nil
+	return walk.listing, nil
 }
 
 // configWalk collects the config tree during one fs.WalkDir over root.
 type configWalk struct {
-	root      *os.Root
-	files     []ConfigFile
-	truncated bool
+	root    *os.Root
+	listing ConfigListing
 }
 
 // visit is the fs.WalkDirFunc of configWalk. An unreadable subdirectory is skipped, and so is a
@@ -90,8 +99,8 @@ func (c *configWalk) visit(p string, d fs.DirEntry, err error) error {
 		return c.enter(p, d)
 	case !d.Type().IsRegular() && !link, CheckConfigPath(p) != nil:
 		return nil //nolint:nilerr // a name CheckConfigPath refuses is not listed
-	case len(c.files) == maxConfigFiles:
-		c.truncated = true
+	case len(c.listing.Files) == maxConfigFiles:
+		c.listing.Truncated = true
 		return fs.SkipAll
 	}
 	f, info, err := fsutil.OpenRegularIn(c.root, p)
@@ -103,10 +112,11 @@ func (c *configWalk) visit(p string, d fs.DirEntry, err error) error {
 	}
 	_ = f.Close()
 	if !strings.HasSuffix(p, ".cfg") && info.Size() > MaxConfigSize {
-		c.truncated = true
+		c.listing.Truncated = true
+		c.listing.TooLarge = append(c.listing.TooLarge, p)
 		return nil
 	}
-	c.files = append(c.files, ConfigFile{Path: p, Size: info.Size()})
+	c.listing.Files = append(c.listing.Files, ConfigFile{Path: p, Size: info.Size()})
 	return nil
 }
 
@@ -120,7 +130,7 @@ func (c *configWalk) enter(p string, d fs.DirEntry) error {
 		return fs.SkipDir
 	}
 	if strings.Count(p, "/") >= maxConfigDepth {
-		c.truncated = true
+		c.listing.Truncated = true
 		return fs.SkipDir
 	}
 	return nil

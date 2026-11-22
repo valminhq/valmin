@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/mods/manager"
@@ -38,10 +39,11 @@ const rconConfigFile = "org.tristan.rcon.cfg"
 func writeInstanceConfig(t *testing.T, inst *store.Instance, name, content string) {
 	t.Helper()
 	dir := filepath.Join(instance.ServerDir(inst.DataDir), filepath.FromSlash(instance.ConfigDir))
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	path := filepath.Join(dir, filepath.FromSlash(name))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -81,11 +83,24 @@ func manifestWorld(t *testing.T) (*Server, *store.DB, *store.User, *store.Instan
 	return rt, db, admin, reloaded
 }
 
-// TestManifestExportCarriesTheDefinition is 01 G6: launch fields, pinned mods and config
-// bytes, with the comments and the undeclared key intact.
+// seedPanelEdit records file's history as the panel first found it holding before and then
+// saved it as after.
+func seedPanelEdit(t *testing.T, db *store.DB, instanceID, file, before, after string) {
+	t.Helper()
+	if err := db.RecordConfigRevisions(t.Context(), []store.ConfigRevision{
+		{InstanceID: instanceID, File: file, Source: store.ConfigFound, Content: []byte(before)},
+		{InstanceID: instanceID, File: file, Source: store.ConfigEdit, Content: []byte(after)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestManifestExportCarriesTheDefinition is 01 G6: launch fields, pinned mods and the bytes of a
+// config file changed in the panel, with the comments and the undeclared key intact.
 func TestManifestExportCarriesTheDefinition(t *testing.T) {
 	t.Parallel()
-	rt, _, admin, inst := manifestWorld(t)
+	rt, db, admin, inst := manifestWorld(t)
+	seedPanelEdit(t, db, inst.ID, "Thing.cfg", "[General]\nThing = 0\n", aConfigFile)
 
 	rec := getManifest(t, rt, admin, inst.ID)
 	if rec.Code != http.StatusOK {
@@ -196,8 +211,22 @@ func TestManifestImportRefusesBeforeItWrites(t *testing.T) {
 		name     string
 		manifest map[string]any
 	}{
-		{"an unknown schema", map[string]any{"schema": 2}},
+		{"an unknown schema", map[string]any{"schema": 3}},
 		{"a schema of zero", map[string]any{"schema": 0}},
+		{"an absolute schema 2 path", map[string]any{
+			"schema":  manifestSchemaPaths,
+			"configs": []map[string]any{{"file": "/x.yaml", "content": "a"}},
+		}},
+		{"a control character in a schema 1 name", map[string]any{
+			"schema":  manifestSchema,
+			"configs": []map[string]any{{"file": "x\u0001.cfg", "content": "a"}},
+		}},
+		{"a config inside another config", map[string]any{
+			"schema": manifestSchemaPaths,
+			"configs": []map[string]any{
+				{"file": "a.yaml", "content": "a: 1"}, {"file": "a.yaml/b.yaml", "content": "b: 1"},
+			},
+		}},
 		{"a config path that escapes", map[string]any{
 			"schema":  manifestSchema,
 			"configs": []map[string]any{{"file": "../../evil.cfg", "content": "x"}},
@@ -591,4 +620,51 @@ func jsonEqual(t *testing.T, a, b any) bool {
 		t.Fatal(err)
 	}
 	return bytes.Equal(left, right)
+}
+
+// TestTemplatesCarryOnlyFilesThePanelChanged asserts a template file carries the config files
+// changed in the panel, whole and in subfolders, and none left as found nor the RCON file; that
+// a file changed only outside the panel is listed as left out; that a template file needing a
+// path is schema 2; and that a template code carries no file outside the top-level .cfg files.
+func TestTemplatesCarryOnlyFilesThePanelChanged(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, inst := manifestWorld(t)
+	writeInstanceConfig(t, inst, "EWD/a.yaml", "a: 2\n# note\n")
+	seedPanelEdit(t, db, inst.ID, "EWD/a.yaml", "a: 1\n", "a: 2\n# note\n")
+	writeInstanceConfig(t, inst, command.ConfigFile, "password = new\n")
+	seedPanelEdit(t, db, inst.ID, command.ConfigFile, "password = old\n", "password = new\n")
+	writeInstanceConfig(t, inst, "Other.cfg", "[A]\nk = 2\n")
+	if err := db.RecordConfigRevisions(t.Context(), []store.ConfigRevision{
+		{InstanceID: inst.ID, File: "Other.cfg", Source: store.ConfigFound, Content: []byte("[A]\nk = 1\n")},
+		{InstanceID: inst.ID, File: "Other.cfg", Source: store.ConfigOutside, Content: []byte("[A]\nk = 2\n")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := getManifest(t, rt, admin, inst.ID)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("export = %d (%s)", rec.Code, rec.Body)
+	}
+	var m instanceManifest
+	decodeInto(t, rec, &m)
+	if m.Schema != manifestSchemaPaths || len(m.Configs) != 1 ||
+		m.Configs[0].File != "EWD/a.yaml" || m.Configs[0].Content != "a: 2\n# note\n" {
+		t.Errorf("export = schema %d, configs %+v, want schema 2 with the changed YAML whole", m.Schema, m.Configs)
+	}
+
+	rec = as(rt, admin, httptest.NewRequest(http.MethodGet,
+		"/api/v1/instances/"+inst.ID+"/manifest/files", http.NoBody))
+	var files templateFilesView
+	decodeInto(t, rec, &files)
+	if len(files.Carried) != 1 || files.Carried[0].File != "EWD/a.yaml" ||
+		len(files.LeftOut) != 1 || files.LeftOut[0] != (templateLeftOut{File: "Other.cfg", Reason: leftOutOutside}) {
+		t.Errorf("files = %+v, want the YAML carried and Other.cfg left out", files)
+	}
+
+	rec = getManifestCode(t, rt, admin, inst.ID)
+	var view templateCodeView
+	decodeInto(t, rec, &view)
+	if len(view.Configs) != 0 {
+		t.Errorf("code configs = %+v, want none: a code carries only top-level .cfg settings", view.Configs)
+	}
 }

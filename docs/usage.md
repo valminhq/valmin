@@ -1175,10 +1175,16 @@ A template recreates a server's setup on any Valmin panel. Both forms are under
 **Share as a template** on the server's **Settings** page.
 
 **Download template file** saves the launch settings, the mods at their installed
-versions and the `.cfg` files directly in `BepInEx/config`. It carries no password and no
-world. A mod's config can hold a key or a webhook, so read the file before you share it.
-Neither the file nor the code carries config files in subfolders, YAML, JSON or text files,
-or server-root files; the section lists them under *config files are not included*.
+versions and, whole, every config file changed in the panel's config editor or by a setup
+restore, in `BepInEx/config` and its subfolders. A file still as the panel first found it, or as
+the newest mod install wrote it, is left out, since the mods create it again. The file carries
+no password and no world. A mod's config can hold a key or a webhook, so read the file before
+you share it. Neither the file nor the code carries the RCON plugin's file or server-root files.
+A changed file they leave out, such as one changed only outside the panel or one over 1 MiB, is
+listed under *changed config files are not included* with the reason. A template file holding a
+YAML, JSON or text file, or a file in a subfolder, needs a panel that reads such files. If the
+changed files are more than a panel imports, over 200 files or about 8 MiB, the download says so
+instead.
 
 A template code is a short text that recreates the server's mod setup. Choose **Create
 template code**, then **Copy code**. Codes start with `valmin1:`.
@@ -1190,7 +1196,9 @@ modpack's members, are left out and added again on import. The code excludes the
 world, disabled mods, mods installed outside Valmin, and changes made to config files outside
 the panel. The summary under the code lists what was left out.
 
-Under the code, each config file with changed settings is listed with those settings. A
+Under the code, each config file with changed settings is listed with those settings. A code
+carries only the `.cfg` files directly in `BepInEx/config`; share a template file for changes to
+other config files. A
 setting whose name looks like a password, a token, a key or a webhook is marked **left out**:
 the code skips it unless you turn on **Include secret settings** for its file. A setting
 the code carries is marked **looks secret** when its name or value looks like one, such as a
