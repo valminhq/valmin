@@ -347,8 +347,9 @@ server as running, and players cannot join. To be told, or to have Valmin restar
 **Maintenance** and choose under **Watchdog**:
 
 - **Do nothing**, the default.
-- **Alert me** sends one **Server stopped unexpectedly** notification when the server stops
-  responding, and leaves it running.
+- **Alert me** sends one **Server stopped unexpectedly** notification, to the channels of a
+  [Stopped unexpectedly rule](usage.md#add-a-rule), when the server stops responding, and
+  leaves it running.
 - **Alert me and restart the server** sends the same notification and restarts the server. It
   needs the right to restart the server as well as to change its settings, and Valmin restarts a
   server this way at most once an hour. A server that hangs again inside the hour is reported at
@@ -700,7 +701,8 @@ writes no entry.
 The panel, Caddy, Docker proxy, and managed game containers use `unless-stopped`.
 Docker restarts them after a reboot if they were left running. Deliberately stopped
 containers stay stopped. When a game server comes back this way, Valmin sends a
-"Server stopped unexpectedly" notification once it is running again. See [Docker restart policies](https://docs.docker.com/engine/containers/start-containers-automatically/).
+"Server stopped unexpectedly" notification once it is running again, to the channels of a
+[Stopped unexpectedly rule](usage.md#add-a-rule). See [Docker restart policies](https://docs.docker.com/engine/containers/start-containers-automatically/).
 
 Docker itself must start at boot. On a systemd host:
 

@@ -129,6 +129,10 @@ func TestHostLevelRuleCannotNameAServer(t *testing.T) {
 			"create a power cut rule", http.MethodPost, alertRulesPath,
 			`{"condition_kind":"power_cut","instance_id":"midgard","webhook_ids":["` + hook.ID + `"]}`,
 		},
+		{
+			"create a new game build rule", http.MethodPost, alertRulesPath,
+			`{"condition_kind":"new_game_build","instance_id":"midgard","webhook_ids":["` + hook.ID + `"]}`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
@@ -141,6 +145,27 @@ func TestHostLevelRuleCannotNameAServer(t *testing.T) {
 				t.Errorf("body does not name instance_id: %s", rec.Body)
 			}
 		})
+	}
+}
+
+// TestTheBuiltInEventRulesCanBeCreated asserts the rule kinds a channel's old built-in alerts
+// became are accepted through the API, with the message fields each can hide.
+func TestTheBuiltInEventRulesCanBeCreated(t *testing.T) {
+	t.Parallel()
+	rt, _, admin, _ := provisionWorld(t)
+	recordingReceiver(t, rt, http.StatusNoContent)
+	hook := createWebhook(t, rt, admin,
+		`{"name":"Discord","kind":"discord","url":"https://example.com/api/webhooks/1/x"}`)
+
+	for kind, field := range map[string]string{
+		"instance_down": "status", "backup_failed": "reason", "new_game_build": "build",
+	} {
+		req := httptest.NewRequest(http.MethodPost, alertRulesPath, strings.NewReader(
+			`{"condition_kind":"`+kind+`","webhook_ids":["`+hook.ID+`"],"params":{"hidden_fields":["`+field+`"]}}`))
+		req.Header.Set("Content-Type", "application/json")
+		if rec := as(rt, admin, req); rec.Code != http.StatusCreated {
+			t.Errorf("create a %s rule hiding %s = %d %s, want 201", kind, field, rec.Code, rec.Body)
+		}
 	}
 }
 

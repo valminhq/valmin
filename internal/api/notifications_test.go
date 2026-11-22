@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/valminhq/valmin/internal/alerts"
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/notify"
@@ -45,14 +46,15 @@ func deliveriesOfKind(t *testing.T, db *store.DB, kind notify.Kind) []store.Deli
 	return out
 }
 
-// TestABackupFailureOwesEveryDestinationANotification asserts the event that matters most: a
-// backup that failed is the one nobody finds out about on their own. The intent is written in
-// the job's own finish transaction, and a backup that succeeded says nothing.
-func TestABackupFailureOwesEveryDestinationANotification(t *testing.T) {
+// TestABackupFailureOwesItsRuleANotification asserts the event that matters most: a backup that
+// failed is the one nobody finds out about on their own. The intent is written in the job's own
+// finish transaction, and a backup that succeeded says nothing.
+func TestABackupFailureOwesItsRuleANotification(t *testing.T) {
 	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	recordingReceiver(t, rt, http.StatusNoContent)
 	destination := seedWebhook(t, db, "ops")
+	seedRule(t, db, alerts.KindBackupFailed, "", destination)
 	instanceID := seedStoppedInstance(t, db, "backup-fail").ID
 
 	finishJob(t, rt, db, &jobs.FinishedJob{
@@ -69,7 +71,7 @@ func TestABackupFailureOwesEveryDestinationANotification(t *testing.T) {
 	})
 	got := deliveriesOfKind(t, db, notify.KindBackupFailed)
 	if len(got) != 1 {
-		t.Fatalf("deliveries = %d, want one per enabled destination", len(got))
+		t.Fatalf("deliveries = %d, want one to the rule's destination", len(got))
 	}
 	if got[0].WebhookID != destination {
 		t.Errorf("delivery is against %s, want the enabled destination", got[0].WebhookID)
@@ -98,7 +100,7 @@ func finishJob(t *testing.T, rt *Server, db *store.DB, fin *jobs.FinishedJob) {
 func TestOperationFinishPrecedesNotificationIntent(t *testing.T) {
 	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
-	seedWebhook(t, db, "ops")
+	seedRule(t, db, alerts.KindBackupFailed, "", seedWebhook(t, db, "ops"))
 	inst := seedStoppedInstance(t, db, "finish-order")
 	if err := db.CreateOperation(t.Context(), &store.Operation{
 		ID: store.NewID(), InstanceID: inst.ID, Kind: "create", State: store.OperationRunning,
@@ -134,7 +136,7 @@ func TestAnUnchangedBuildObservationSaysNothing(t *testing.T) {
 	t.Parallel()
 	rt, db, _, _ := provisionWorld(t)
 	recordingReceiver(t, rt, http.StatusNoContent)
-	seedWebhook(t, db, "ops")
+	seedRule(t, db, alerts.KindNewGameBuild, "", seedWebhook(t, db, "ops"))
 
 	if owed := rt.notifier.NotifyPublicBuild(t.Context(), "21981590", "21981590"); owed != nil {
 		t.Error("an unchanged observation owes a notification")
@@ -174,7 +176,7 @@ func TestAnExpectedStopIsQuietAndAnUnexpectedOneIsNot(t *testing.T) {
 	t.Parallel()
 	rt, db, fake := supervisorWorld(t)
 	recordingReceiver(t, rt, http.StatusNoContent)
-	seedWebhook(t, db, "ops")
+	seedRule(t, db, alerts.KindInstanceDown, "", seedWebhook(t, db, "ops"))
 	containerID := seedInstance(t, rt, db, fake, "running")
 
 	seed(t, db, `INSERT INTO job_locks (lock_key, job_id, acquired_at) VALUES (?, ?, ?)`,

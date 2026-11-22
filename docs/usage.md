@@ -1455,12 +1455,15 @@ Under **Channels**, enter a name, choose the receiver and paste the webhook URL,
 panel stores it encrypted and never shows it again. It must be an `https://` address on the
 public internet. Names are unique among the shared channels and among each server's own.
 
-Three alerts are built in and need no rule: a server that stops unexpectedly, a failed
-backup and a new game build. **Also post built-in alerts** on a channel decides whether they
-reach it. A shared channel gets them for every server, a server's own channel for that
-server, and a new game build reaches shared channels only. A channel that a rule already
-sends the same news to gets it once. To style the unexpected-stop alert, add a **Stopped
-unexpectedly** rule: the channels it posts to get its message instead of the built-in one.
+A channel posts only what rules send it; a channel no enabled rule names says **No rule posts
+here yet**. While a page has no rules, **Add starter rules** under **Rules** adds a
+**Stopped unexpectedly** and a **Backup failed** rule, plus **New game build** on the
+Administration page, each posting to all of the page's own channels: the shared channels on
+the Administration page, the server's own channels on its tab. A channel that had **Also post
+built-in alerts** on in an older release was given these rules when the panel was upgraded.
+Each rule sends its own message, so a channel that a **Job failed**, **Update available**,
+**Crash loop** or **Server error** rule also posts to can get two messages about one
+incident: pause whichever you don't want.
 
 The switch on the right pauses a channel. A paused channel receives nothing, including
 messages that were still waiting to be sent when you paused it. Deleting a channel removes
@@ -1475,7 +1478,9 @@ Select **Add rule** and choose the event:
 | Server status          | **Server started**                    | Valmin started or restarted a server and its world loaded.           |
 | Server status          | **Server stopped**                    | Valmin stopped a server: by hand, by auto-stop or for a power cut.   |
 | Server status          | **Stopped unexpectedly**              | A server stopped or restarted on its own: a crash, running out of memory or a host reboot. Also a server the [watchdog](operations.md#restart-a-hung-server) found hung. |
+| Server status          | **Backup failed**                     | A backup failed. Sent for every failure, unlike **Job failed**, which covers every job and posts once until the job succeeds. |
 | Server status          | **Server updated**                    | A game update installed a new build, or applying tested updates updated mods. |
+| Server status          | **New game build**                    | Steam published a game build the panel has not seen before. Sent once per build, unlike **Update available**, which posts for each server that is behind. Administration page only. |
 | Server status          | **Power cut soon**                    | A planned power cut is close: players are being warned. Administration page only. |
 | Server status          | **Sign-ins blocked**                  | An account had too many failed sign-ins from anywhere and the panel is refusing it for a short while. At most once an hour per account, and only for an account that exists. Administration page only. |
 | Problems               | **Crash loop**                        | A server is crashing repeatedly.                                     |

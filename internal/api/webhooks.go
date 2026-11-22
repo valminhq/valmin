@@ -171,7 +171,6 @@ type webhookView struct {
 	Kind       string    `json:"kind"`
 	Enabled    bool      `json:"enabled"`
 	InstanceID *string   `json:"instance_id"`
-	CatchAll   bool      `json:"catch_all"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
@@ -179,7 +178,7 @@ type webhookView struct {
 func toWebhookView(w *store.Webhook) webhookView {
 	return webhookView{
 		ID: w.ID, Name: w.Name, Kind: w.Kind, Enabled: w.Enabled, InstanceID: w.InstanceID,
-		CatchAll: w.CatchAll, CreatedAt: w.CreatedAt, UpdatedAt: w.UpdatedAt,
+		CreatedAt: w.CreatedAt, UpdatedAt: w.UpdatedAt,
 	}
 }
 
@@ -227,6 +226,8 @@ func writeSeen[R, V any](
 	JSON(w, r, http.StatusOK, NewPage(views, nil))
 }
 
+// webhookRequest is the body of a create or update. CatchAll is accepted and ignored, so a client
+// that still sends it is not refused: what a webhook receives is decided by the rules naming it.
 type webhookRequest struct {
 	Name     *string `json:"name"`
 	Kind     *string `json:"kind"`
@@ -279,7 +280,7 @@ func (h *Webhooks) create(w http.ResponseWriter, r *http.Request) {
 	row := &store.Webhook{
 		ID: id, Name: name, Kind: kind, URL: envelope,
 		Enabled: body.Enabled == nil || *body.Enabled, InstanceID: s.owner(),
-		CatchAll: body.CatchAll == nil || *body.CatchAll, CreatedBy: &s.user.ID,
+		CreatedBy: &s.user.ID,
 	}
 	if err := h.DB.CreateWebhook(r.Context(), row); err != nil {
 		writeWebhookSaveError(w, r, err)
@@ -332,7 +333,7 @@ func (h *Webhooks) update(w http.ResponseWriter, r *http.Request) {
 		}
 		envelope = &sealed
 	}
-	patch := store.WebhookPatch{Name: body.Name, URL: envelope, Enabled: body.Enabled, CatchAll: body.CatchAll}
+	patch := store.WebhookPatch{Name: body.Name, URL: envelope, Enabled: body.Enabled}
 	if err := h.DB.UpdateWebhook(r.Context(), existing.ID, patch); err != nil {
 		writeWebhookSaveError(w, r, err)
 		return
