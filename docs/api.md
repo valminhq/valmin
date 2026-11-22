@@ -1278,7 +1278,7 @@ one they can see without it. Paths are relative to `/api/v1`, and `{scope}` is `
 | -------- | ---------------------------------- | ---------------------------------------------------------- |
 | `GET`    | `{scope}/webhooks`                 | Destinations.                                              |
 | `POST`   | `{scope}/webhooks`                 | Add a destination; returns `201`.                          |
-| `PATCH`  | `{scope}/webhooks/{wid}`           | Change `name`, `url`, `enabled` or `catch_all`.            |
+| `PATCH`  | `{scope}/webhooks/{wid}`           | Change `name`, `url` or `enabled`.                         |
 | `DELETE` | `{scope}/webhooks/{wid}`           | Delete a destination and remove it from every rule; `204`. |
 | `POST`   | `{scope}/webhooks/{wid}/test`      | Send a test notification; returns a job. Rate-limited.     |
 | `GET`    | `{scope}/webhooks/deliveries`      | Delivery records, newest first.                            |
@@ -1296,9 +1296,10 @@ and a server's prefix lists the server's rules and the rules for every server bu
 only the server's own. A rule created there is about the server; naming another
 `instance_id` is `422`. Deliveries under a server's prefix are only those about that server.
 
-A destination has `name`, `kind` (`discord` or `generic`), `url`, `enabled`, `instance_id`
-(the server it belongs to, `null` when shared) and `catch_all` (whether the three built-in
-events below reach it, `true` by default). `kind` and `instance_id` never change. A name is
+A destination has `name`, `kind` (`discord` or `generic`), `url`, `enabled` and `instance_id`
+(the server it belongs to, `null` when shared), and receives only what the rules naming it
+send. A `catch_all` field in a request is accepted and ignored. `kind` and `instance_id` never
+change. A name is
 unique among the shared destinations and among each server's own; a taken one is `409
 name_taken`. The URL is write-only: no response contains it, because it is the whole credential for posting to
 that channel. A URL the panel refuses, such as a private address, is `422` on `url`.
@@ -1314,31 +1315,30 @@ ones; any other is `422` on `webhook_ids`, worded as if it did not exist. The co
 `job_failed`, `job_stuck`, `crash_loop`, `unclean_stop`, `instance_error`,
 `restart_required`, `update_available`, `stale_backup`, `backup_attention`, `mods_failed`,
 `mod_updates` and `low_disk`, plus the one-off events `server_started`, `server_stopped`,
-`instance_down`, `game_updated`, `update_test_finished`, `power_cut` and `sign_ins_blocked`, and the game
-events below.
+`instance_down`, `backup_failed`, `game_updated`, `new_game_build`, `update_test_finished`,
+`power_cut` and `sign_ins_blocked`, and the game events below.
 
 `sign_ins_blocked` is sent when an account's failed sign-ins from any address reach the
 limit and the panel starts refusing it. It is sent at most once an hour for each username, and
 only for a username an account has, with the `username` and the `address` of the first refused
-attempt. It is host-wide, like `low_disk` and `power_cut`.
+attempt. It is host-wide, like `low_disk`, `power_cut` and `new_game_build`.
 
-Three events are sent without any rule to every enabled destination with `catch_all` on that
-serves the event's server, which is every shared destination and the server's own:
-`instance_down` (a server stopped on its own, or restarted outside the panel; the `Status`
-detail then reads `Running again`), `update_available` (a new public game
-build; servers on another branch are left out; it concerns no one server, so it reaches
-shared destinations only), and `backup_failed`. Alert rules (`/api/v1/admin/alert-rules`) route a condition kind
-to chosen destinations and send `alert_opened` and `alert_resolved`.
+Alert rules (`/api/v1/admin/alert-rules`) route a condition kind to chosen destinations and
+send `alert_opened` and `alert_resolved`.
 
-Six `condition_kind` values are one-off events rather than conditions, sent only to the
+The one-off `condition_kind` values are events rather than conditions, sent only to the
 destinations of an enabled rule for them. `server_started` sends `server_started` when a
 start or restart leaves a server running, once its log says the world loaded and, on
 crossplay, once it has a join code; it is sent without them after 15 minutes.
 `server_stopped` sends `server_stopped` when the panel stops a server, by hand, by auto-stop or for a power cut, with a `Reason` detail; a
 server that stops on its own is `instance_down`. Rules of the old `auto_stopped` kind became
 `server_stopped` rules. `instance_down` sends `instance_down` when a server stops or restarts
-on its own, as the built-in event below does; a destination the rule names gets the rule's
-message instead of the built-in one. `game_updated` sends `game_updated` when a game update
+on its own; after a restart outside the panel the `Status` detail reads `Running again`.
+`backup_failed` sends `backup_failed` for every backup that fails, recorded with the job's
+outcome, with the reason and the job id; `job_failed` also covers backups but announces a
+failure once, until a later run of the job succeeds. `new_game_build` (host-wide) sends
+`update_available` once for each public build the panel observes for the first time, with
+`build`; the `update_available` condition is per server instead. `game_updated` sends `game_updated` when a game update
 installs a build other than the one the server ran, with `build`, never for a copy made to test
 updates, and when applying tested updates updates mods, with
 `mods`; an apply that also installs a build sends the build in a message of its own.
@@ -1397,7 +1397,9 @@ kept. The names each kind fills:
 | `server_started`   | `server_name`, `world`, `join_code`, `port`, `time`           |
 | `server_stopped`   | `reason`, `server_name`, `world`, `time`                      |
 | `instance_down`    | `status`, `reason`, `what_to_do`, `time`                      |
+| `backup_failed`    | `reason`, `what_to_do`, `job_id`                              |
 | `game_updated`     | `build`, `mods`, `time`                                       |
+| `new_game_build`   | `build`, `what_to_do`                                         |
 | `update_test_finished` | `status`, `build`, `mods`, `failed_mods`, `time`          |
 | `power_cut`        | `power_off`, `stop_at`, `servers`                             |
 | `sign_ins_blocked` | `username`, `address`                                         |
@@ -1444,14 +1446,10 @@ inside the archive (`null` when never measured) and `world_attention` is a list 
 `db_shorter_than_old`, `save_incomplete`, `version_mismatch`, `chunk_missing` and
 `db2_damaged`; `message` is written for people. A finding never refuses an archive.
 
-When a rule covers the same incident as one of the first three events, the rule's destinations
-receive only the rule's alert. A failed backup is covered by a `job_failed` rule, a new
-build by an `update_available` rule, and an unexpected stop by a `crash_loop` or
-`instance_error` rule when this stop opens that condition. If the rule's condition is
-already open, the rule sends nothing new, so its destinations still receive the event. Only
-destinations of the rule's own scope count: a rule about one server never keeps these events
-from a shared destination. Catch-all destinations no such rule names still receive every
-event they serve.
+Each rule sends its own message: a destination named by rules of different kinds, such as
+`job_failed` and `backup_failed`, gets one from each. A destination named by several rules of
+one one-off kind gets that event once, rendered by a rule about the server when one names it,
+otherwise by a rule for every server.
 
 `{scope}/alert-rules/test` takes `condition_kind`, `params`, `webhook_id` and `fields`, the
 sample values to fill the template with (at most 16, each a lowercase name and a value of at

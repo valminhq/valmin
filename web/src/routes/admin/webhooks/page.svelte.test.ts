@@ -19,7 +19,6 @@ function webhook(overrides: Partial<Webhook> = {}): Webhook {
 		kind: 'discord',
 		enabled: true,
 		instance_id: null,
-		catch_all: true,
 		created_at: '2026-09-01T00:00:00Z',
 		updated_at: '2026-09-01T00:00:00Z',
 		...overrides
@@ -165,17 +164,44 @@ describe('the shared channels', () => {
 		expect(await screen.findByText(/That address is on a private network\./)).toBeTruthy();
 	});
 
-	it('turns the built-in alerts off for one channel', async () => {
+	it('says which channels no rule posts to', async () => {
+		const quiet = webhook({ id: 'wh-2', name: 'Quiet channel' });
+		await open([actions.panelSettings], [], [rule()], [ops, quiet]);
+
+		const routed = await screen.findByTestId('channel-wh-1');
+		expect(text(routed)).not.toContain('No rule posts here yet');
+		expect(text(screen.getByTestId('channel-wh-2'))).toContain('No rule posts here yet');
+	});
+
+	it('adds the starter rules for every shared channel', async () => {
 		await open([actions.panelSettings]);
-		daemon.on('PATCH', '/admin/webhooks/wh-1', () => Response.json(ops));
+		daemon.on('POST', '/admin/alert-rules', ({ body }) => Response.json(rule(body as AlertRule)));
 		await screen.findAllByText('Ops channel');
 
-		await click(screen.getByRole('switch', { name: 'Also post built-in alerts' }));
+		await click(screen.getByRole('button', { name: 'Add starter rules' }));
 		await vi.waitFor(() =>
-			expect(daemon.requests('PATCH', '/admin/webhooks/wh-1')[0]?.body).toEqual({
-				catch_all: false
-			})
+			expect(daemon.requests('POST', '/admin/alert-rules').map((r) => r.body)).toEqual([
+				{ condition_kind: 'instance_down', webhook_ids: ['wh-1'] },
+				{ condition_kind: 'backup_failed', webhook_ids: ['wh-1'] },
+				{ condition_kind: 'new_game_build', webhook_ids: ['wh-1'] }
+			])
 		);
+	});
+
+	it('keeps the starter rules that were created when one fails', async () => {
+		await open([actions.panelSettings]);
+		daemon.on('POST', '/admin/alert-rules', ({ body }) => {
+			const created = body as AlertRule;
+			if (created.condition_kind === 'new_game_build')
+				return envelope(422, 'validation_failed', 'condition_kind is invalid');
+			return Response.json(rule({ ...created, id: `rule-${created.condition_kind}` }));
+		});
+		await screen.findAllByText('Ops channel');
+
+		await click(screen.getByRole('button', { name: 'Add starter rules' }));
+		expect(await screen.findByTestId('rule-rule-instance_down')).toBeTruthy();
+		expect(screen.getByTestId('rule-rule-backup_failed')).toBeTruthy();
+		expect(screen.queryByRole('button', { name: 'Add starter rules' })).toBeNull();
 	});
 
 	it('deletes a channel only after its name is typed back', async () => {

@@ -6,7 +6,7 @@
 	import { actions, instances, type Instance } from '#lib/api/instances.js';
 	import { notifications, type AlertRule, type Webhook } from '#lib/api/notifications.js';
 	import { isGameKind } from '#lib/game-events.js';
-	import { HOST_WIDE } from '#lib/notification-events.js';
+	import { HOST_WIDE, starterKinds } from '#lib/notification-events.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import ChannelList from '#lib/components/channel-list.svelte';
@@ -37,6 +37,7 @@
 	let history = $state<DeliveryList>();
 
 	const own = $derived(rules.filter((r) => r.instance_id === id));
+	const ownChannels = $derived(channels.filter((c) => c.instance_id === id));
 	// Host-wide rules post about the host, never about this server.
 	const panelWide = $derived(
 		rules.filter((r) => r.instance_id === null && !HOST_WIDE.includes(r.condition_kind))
@@ -84,6 +85,21 @@
 			busy = false;
 		}
 	}
+
+	/** Creates the starter rules about this server, each posting to every channel of its own. */
+	const addStarterRules = () =>
+		act(async () => {
+			const results = await Promise.allSettled(
+				starterKinds(false).map((kind) =>
+					api.rules.create({ condition_kind: kind, webhook_ids: ownChannels.map((c) => c.id) })
+				)
+			);
+			const failed = results.find((r) => r.status === 'rejected');
+			if (!failed) return;
+			// Keeps what was created on screen, so the error stays and a retry adds no duplicate.
+			rules = [...rules, ...results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))];
+			throw failed.reason;
+		});
 
 	const removeRule = (rule: AlertRule) =>
 		act(async () => {
@@ -157,7 +173,7 @@
 				</p>
 			</div>
 
-			<ChannelList {api} {channels} server={id} onchange={refresh} />
+			<ChannelList {api} {channels} {rules} server={id} onchange={refresh} />
 		</section>
 
 		<section class="grid gap-3" aria-labelledby="rules-heading">
@@ -170,12 +186,21 @@
 				</div>
 				<Button size="sm" disabled={busy} onclick={() => editor?.add()}><Plus /> Add rule</Button>
 			</div>
-			{#if own.length === 0}
-				<p class="text-sm text-muted-foreground">
-					{channels.length === 0
-						? 'Add a channel first, then a rule to post to it.'
-						: 'No rules yet. Add one to choose what gets posted.'}
-				</p>
+			{#if own.length === 0 && channels.length === 0}
+				<p class="text-sm text-muted-foreground">Add a channel first, then a rule to post to it.</p>
+			{:else if own.length === 0}
+				<div class="flex flex-wrap items-center gap-3">
+					<p class="flex-1 text-sm text-muted-foreground">
+						No rules yet. Add one to choose what gets posted{ownChannels.length > 0
+							? ', or start with unexpected stops and failed backups.'
+							: '.'}
+					</p>
+					{#if ownChannels.length > 0}
+						<Button variant="outline" size="sm" disabled={busy} onclick={addStarterRules}>
+							Add starter rules
+						</Button>
+					{/if}
+				</div>
 			{:else}
 				<RuleList
 					rules={own}

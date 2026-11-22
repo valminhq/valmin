@@ -13,8 +13,7 @@ import (
 // address: it is a bearer credential, so nothing outside a delivery ever decrypts it and no
 // response, job payload or log line carries it (10 §3, 11 §9).
 //
-// InstanceID is the server the webhook belongs to, nil for a shared one. CatchAll is whether the
-// alerts no rule routes reach it.
+// InstanceID is the server the webhook belongs to, nil for a shared one.
 type Webhook struct {
 	ID         string
 	Name       string
@@ -22,7 +21,6 @@ type Webhook struct {
 	URL        string
 	Enabled    bool
 	InstanceID *string
-	CatchAll   bool
 	CreatedBy  *string
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
@@ -37,14 +35,14 @@ func (w *Webhook) Serves(instanceID string) bool {
 // ErrWebhookNameTaken reports a destination name collision.
 var ErrWebhookNameTaken = errors.New("webhook name already exists")
 
-const webhookColumns = `id, name, kind, url, enabled, instance_id, catch_all, created_by, created_at, updated_at`
+const webhookColumns = `id, name, kind, url, enabled, instance_id, created_by, created_at, updated_at`
 
 // CreateWebhook inserts a destination whose URL the caller has already sealed.
 func (db *DB) CreateWebhook(ctx context.Context, w *Webhook) error {
 	now := Now()
 	_, err := db.Writer.ExecContext(ctx, `
-		INSERT INTO webhooks (`+webhookColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		w.ID, w.Name, w.Kind, w.URL, w.Enabled, w.InstanceID, w.CatchAll, w.CreatedBy, now, now)
+		INSERT INTO webhooks (`+webhookColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		w.ID, w.Name, w.Kind, w.URL, w.Enabled, w.InstanceID, w.CreatedBy, now, now)
 	if isUniqueViolation(err) {
 		return ErrWebhookNameTaken
 	}
@@ -57,10 +55,9 @@ func (db *DB) CreateWebhook(ctx context.Context, w *Webhook) error {
 // WebhookPatch is the fields an update sets. A nil field is untouched, so a rename cannot
 // silently clear the stored URL.
 type WebhookPatch struct {
-	Name     *string
-	URL      *string
-	Enabled  *bool
-	CatchAll *bool
+	Name    *string
+	URL     *string
+	Enabled *bool
 }
 
 // UpdateWebhook applies p to the webhook id. Its kind and its server never change.
@@ -70,9 +67,8 @@ func (db *DB) UpdateWebhook(ctx context.Context, id string, p WebhookPatch) erro
 			name = COALESCE(?, name),
 			url = COALESCE(?, url),
 			enabled = COALESCE(?, enabled),
-			catch_all = COALESCE(?, catch_all),
 			updated_at = ?
-		WHERE id = ?`, p.Name, p.URL, p.Enabled, p.CatchAll, Now(), id)
+		WHERE id = ?`, p.Name, p.URL, p.Enabled, Now(), id)
 	if isUniqueViolation(err) {
 		return ErrWebhookNameTaken
 	}
@@ -146,7 +142,7 @@ func scanWebhook(s scanner) (Webhook, error) {
 	var instanceID, createdBy sql.NullString
 	var created, updated string
 	if err := s.Scan(
-		&w.ID, &w.Name, &w.Kind, &w.URL, &w.Enabled, &instanceID, &w.CatchAll, &createdBy,
+		&w.ID, &w.Name, &w.Kind, &w.URL, &w.Enabled, &instanceID, &createdBy,
 		&created, &updated,
 	); err != nil {
 		return Webhook{}, fmt.Errorf("scan webhook row: %w", err)

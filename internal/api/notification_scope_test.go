@@ -89,6 +89,7 @@ func TestAServerChangesOnlyItsOwnWebhooks(t *testing.T) {
 		want                     int
 	}{
 		{"rename own", http.MethodPatch, base + own, `{"name":"renamed"}`, http.StatusOK},
+		{"patch own with catch_all", http.MethodPatch, base + own, `{"catch_all":false}`, http.StatusOK},
 		{"pause shared", http.MethodPatch, base + shared, `{"enabled":false}`, http.StatusNotFound},
 		{"pause other", http.MethodPatch, base + other, `{"enabled":false}`, http.StatusNotFound},
 		{"test shared", http.MethodPost, base + shared + "/test", "", http.StatusNotFound},
@@ -103,8 +104,8 @@ func TestAServerChangesOnlyItsOwnWebhooks(t *testing.T) {
 	}
 }
 
-// TestAWebhookAddedOnAServerBelongsToIt asserts ownership, the catch-all default, and that a
-// name is unique per server rather than across the panel.
+// TestAWebhookAddedOnAServerBelongsToIt asserts ownership, and that a name is unique per server
+// rather than across the panel.
 func TestAWebhookAddedOnAServerBelongsToIt(t *testing.T) {
 	t.Parallel()
 	f := scopeWorld(t)
@@ -122,8 +123,8 @@ func TestAWebhookAddedOnAServerBelongsToIt(t *testing.T) {
 	}
 	var view webhookView
 	decodeInto(t, rec, &view)
-	if view.InstanceID == nil || *view.InstanceID != "inst-a" || !view.CatchAll {
-		t.Errorf("created = %+v, want inst-a's own with catch-all on", view)
+	if view.InstanceID == nil || *view.InstanceID != "inst-a" {
+		t.Errorf("created = %+v, want inst-a's own", view)
 	}
 	if rec := add("a-own"); rec.Code != http.StatusConflict {
 		t.Errorf("add a name inst-a already uses = %d %s, want 409", rec.Code, rec.Body)
@@ -260,22 +261,23 @@ func TestARuleTestSendsItsMessageOverTheSampleValues(t *testing.T) {
 	}
 }
 
-// TestBuiltInAlertsReachOnlyCatchAllWebhooksThatServeTheServer asserts a failed backup on one
-// server reaches the shared webhooks and that server's own, never another server's, and none
-// whose catch-all is off.
-func TestBuiltInAlertsReachOnlyCatchAllWebhooksThatServeTheServer(t *testing.T) {
+// TestBackupFailedRulesReachOnlyWebhooksThatServeTheServer asserts a failed backup on one
+// server reaches the backup_failed rules that cover it: the rule for every server and that
+// server's own, never another server's rule or a webhook no rule names.
+func TestBackupFailedRulesReachOnlyWebhooksThatServeTheServer(t *testing.T) {
 	t.Parallel()
 	f := scopeWorld(t)
 	rt, db, shared, own, other := f.rt, f.db, f.shared, f.own, f.other
 	recordingReceiver(t, rt, http.StatusNoContent)
-	quiet := seedWebhook(t, db, "no-catch-all")
-	seed(t, db, `UPDATE webhooks SET catch_all = FALSE WHERE id = ?`, quiet)
-	instanceID := "inst-b"
+	unnamed := seedWebhook(t, db, "unnamed")
+	seedRule(t, db, alerts.KindBackupFailed, "", shared)
+	for instanceID, webhookID := range map[string]string{"inst-a": own, "inst-b": other} {
+		rule := seedRule(t, db, alerts.KindBackupFailed, "", webhookID)
+		seed(t, db, `UPDATE alert_rules SET instance_id = ? WHERE id = ?`, instanceID, rule)
+	}
 
-	finishJob(t, rt, db, &jobs.FinishedJob{
-		ID: store.NewID(), Kind: jobs.KindBackup, InstanceID: &instanceID,
-		InstanceName: "inst-b", Status: jobs.StatusFailed,
-	})
+	failJob(t, rt, db, jobs.KindBackup, "inst-b")
+
 	sent := deliveriesOfKind(t, db, notify.KindBackupFailed)
 	got := make([]string, 0, len(sent))
 	for _, d := range sent {
@@ -286,26 +288,6 @@ func TestBuiltInAlertsReachOnlyCatchAllWebhooksThatServeTheServer(t *testing.T) 
 	slices.Sort(want)
 	if !slices.Equal(got, want) {
 		t.Errorf("delivered to %v, want the shared %s and inst-b's %s; not inst-a's %s or %s",
-			got, shared, other, own, quiet)
+			got, shared, other, own, unnamed)
 	}
-}
-
-// TestAServerRuleNeverWithholdsBuiltInAlertsFromASharedWebhook asserts that a rule about one
-// server takes only that server's own webhooks out of the built-in alerts. A shared webhook it
-// names still gets them, so a server's rule cannot keep its failures from the shared channel,
-// even inside its quiet hours.
-func TestAServerRuleNeverWithholdsBuiltInAlertsFromASharedWebhook(t *testing.T) {
-	t.Parallel()
-	f := scopeWorld(t)
-	rt, db, shared, own := f.rt, f.db, f.shared, f.own
-	recordingReceiver(t, rt, http.StatusNoContent)
-	rule := seedRule(t, db, alerts.KindJobFailed, "", shared, own)
-	seed(t, db, `UPDATE alert_rules SET instance_id = 'inst-a', quiet_start = 0,
-		quiet_end = 1439, quiet_tz = 'UTC' WHERE id = ?`, rule)
-
-	failJob(t, rt, db, jobs.KindBackup, "inst-a")
-
-	assertDeliveries(t, db, "the shared webhook", shared,
-		map[string]int{notify.KindBackupFailed.String(): 1})
-	assertDeliveries(t, db, "inst-a's own webhook, which the rule owns", own, map[string]int{})
 }

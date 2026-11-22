@@ -77,6 +77,10 @@ var (
 	KindGameUpdated = Kind{"game_updated"}
 	// KindUpdateTestFinished is an update test on a copy of a server that ended, passed or not.
 	KindUpdateTestFinished = Kind{"update_test_finished"}
+	// KindBackupFailed is a backup job that failed, each time one does.
+	KindBackupFailed = Kind{"backup_failed"}
+	// KindNewGameBuild is a public game build the panel has not seen before. Host-level.
+	KindNewGameBuild = Kind{"new_game_build"}
 )
 
 // Game event kinds are events ValminEye reports from inside the game. A rule renders them through
@@ -105,7 +109,7 @@ var gameEvents = []Kind{
 var events = slices.Concat(
 	[]Kind{
 		KindPowerCut, KindSignInsBlocked, KindServerStarted, KindServerStopped, KindInstanceDown,
-		KindGameUpdated, KindUpdateTestFinished,
+		KindGameUpdated, KindUpdateTestFinished, KindBackupFailed, KindNewGameBuild,
 	}, gameEvents)
 
 // ParseKind resolves a condition or event kind name to its constant. An unresolved name is the
@@ -124,7 +128,7 @@ func Kinds() []Kind { return append([]Kind(nil), all...) }
 
 // HostWide reports whether k never concerns one server, so a rule for it cannot name one.
 func HostWide(k Kind) bool {
-	return k == KindLowDisk || k == KindPowerCut || k == KindSignInsBlocked
+	return k == KindLowDisk || k == KindPowerCut || k == KindSignInsBlocked || k == KindNewGameBuild
 }
 
 // Condition is one thing currently believed true. InstanceID is empty for a host-level

@@ -99,6 +99,22 @@ export const PANEL_EVENTS: PanelEvent[] = [
 		}
 	},
 	{
+		kind: 'backup_failed',
+		group: 'Server status',
+		label: 'Backup failed',
+		when: 'A backup failed. Sent for every failure; Job failed covers every kind of job and posts once until the job next succeeds.',
+		headline: 'Backup failed',
+		accent: ALERT,
+		template: '**Reason:** {reason}\n**What to do:** {what_to_do}\n**Job ID:** {job_id}',
+		placeholders: ['reason', 'what_to_do', 'job_id', 'server', 'event'],
+		sample: {
+			reason: 'The archive could not be written.',
+			what_to_do:
+				'Open Operations on the server’s overview for the full log, then run the backup again.',
+			job_id: '019a4c2e-7b1d-7f3a-9c55-2d8e4b6a1f00'
+		}
+	},
+	{
 		kind: 'game_updated',
 		group: 'Server status',
 		label: 'Server updated',
@@ -111,6 +127,20 @@ export const PANEL_EVENTS: PanelEvent[] = [
 			build: '20012345',
 			mods: 'ValheimModding-Jotunn 2.20.2',
 			time: SERVER_TIME
+		}
+	},
+	{
+		kind: 'new_game_build',
+		group: 'Server status',
+		label: 'New game build',
+		when: 'Steam published a game build Valmin has not seen before. Sent once for each build; Update available posts for each server that is behind.',
+		headline: 'Server update available',
+		accent: '#5865F2',
+		template: '**Available build:** {build}\n**What to do:** {what_to_do}',
+		placeholders: ['build', 'what_to_do', 'event'],
+		sample: {
+			build: '20012345',
+			what_to_do: 'Stop each server, then update it from its page in Valmin.'
 		}
 	},
 	{
@@ -321,7 +351,18 @@ export const GROUPS: { name: string; note: string; game?: boolean }[] = [
 ];
 
 /** Kinds that never concern one server, so their rules cover every server. */
-export const HOST_WIDE: RuleKind[] = ['low_disk', 'power_cut', 'sign_ins_blocked'];
+export const HOST_WIDE: RuleKind[] = [
+	'low_disk',
+	'power_cut',
+	'sign_ins_blocked',
+	'new_game_build'
+];
+/** The rules Add starter rules creates: unexpected stops and failed backups, and new game builds
+ * where rules may be host-wide. */
+export const starterKinds = (hostWide: boolean): RuleKind[] =>
+	hostWide
+		? ['instance_down', 'backup_failed', 'new_game_build']
+		: ['instance_down', 'backup_failed'];
 /** Kinds whose messages show a time, so a rule can choose the zone. */
 export const TIMED: RuleKind[] = [
 	'power_cut',
@@ -344,7 +385,9 @@ export const isCondition = (kind: RuleKind) =>
 		'sign_ins_blocked',
 		'instance_down',
 		'game_updated',
-		'update_test_finished'
+		'update_test_finished',
+		'backup_failed',
+		'new_game_build'
 	].includes(kind);
 
 /** alerts.Params.Defaults: what an empty threshold means. */
