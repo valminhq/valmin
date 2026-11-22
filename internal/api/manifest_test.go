@@ -186,7 +186,7 @@ func TestManifestExportCarriesNoIdentityAndNoSecret(t *testing.T) {
 // validation, and an unsafe path that reaches the job is a write outside the config directory.
 func TestManifestImportRefusesBeforeItWrites(t *testing.T) {
 	t.Parallel()
-	oversized := strings.Repeat("x", control.MaxConfigSize+1)
+	oversized := strings.Repeat("x", instance.MaxConfigSize+1)
 	tooManyMods := make([]map[string]any, maxManifestMods+1)
 	for i := range tooManyMods {
 		tooManyMods[i] = map[string]any{"full_name": "Ns-Mod", "version": "1.0.0"}

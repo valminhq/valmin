@@ -19,9 +19,6 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// MaxConfigSize bounds one config file carried by a saved setup or a manifest.
-const MaxConfigSize = 1 << 20
-
 // SetupState captures and hashes the instance state stored in a saved setup.
 type SetupState struct{ DB *store.DB }
 
@@ -124,7 +121,7 @@ func readSetupConfigs(inst *store.Instance) ([]ManifestConfig, error) {
 		if err != nil {
 			return nil, fmt.Errorf("open configuration: %w", err)
 		}
-		raw, readErr := io.ReadAll(io.LimitReader(f, MaxConfigSize+1))
+		raw, readErr := io.ReadAll(io.LimitReader(f, instance.MaxConfigSize+1))
 		_ = f.Close()
 		if readErr != nil {
 			return nil, fmt.Errorf("read configuration %s: %w", name, readErr)
@@ -140,7 +137,7 @@ func readSetupConfigs(inst *store.Instance) ([]ManifestConfig, error) {
 }
 
 func setupConfigText(name string, raw []byte) (ManifestConfig, error) {
-	if len(raw) > MaxConfigSize {
+	if len(raw) > instance.MaxConfigSize {
 		return ManifestConfig{}, fmt.Errorf("configuration %s exceeds the supported size", name)
 	}
 	if !utf8.Valid(raw) {

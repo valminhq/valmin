@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/valminhq/valmin/internal/instance/control"
+	"github.com/valminhq/valmin/internal/instance"
 	modconfig "github.com/valminhq/valmin/internal/mods/config"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -67,8 +67,8 @@ func TestConfigListWalksSubdirectories(t *testing.T) {
 		"icons/a.png":                         "png",
 		"a/b/c/d/e/f/g/h/ok.yaml":             "a: 1\n",
 		"a/b/c/d/e/f/g/h/i/deep.yaml":         "a: 1\n",
-		"big.json":                            strings.Repeat(" ", control.MaxConfigSize+1),
-		"big.cfg":                             strings.Repeat("#\n", control.MaxConfigSize),
+		"big.json":                            strings.Repeat(" ", instance.MaxConfigSize+1),
+		"big.cfg":                             strings.Repeat("#\n", instance.MaxConfigSize),
 	})
 	for link, target := range map[string]string{
 		"linked.cfg": seededConfigFile,
@@ -118,34 +118,6 @@ func TestANestedPathThroughAFileIsNotFound(t *testing.T) {
 	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, nestedRawURL(seededConfigFile+"/x.yaml"), http.NoBody))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404 (%s)", rec.Code, rec.Body)
-	}
-}
-
-// TestCheckConfigPath asserts the API accepts a relative path into a subdirectory and refuses
-// anything that escapes, hides, nests too deep or is not a config file.
-func TestCheckConfigPath(t *testing.T) {
-	t.Parallel()
-	for _, name := range []string{
-		"com.example.mod.cfg",
-		"expand_world/expand_biomes.yaml",
-		"wackysDatabase/Items/a/b.yml",
-		"EpicLoot/patches/x.json",
-		"notes.txt",
-		"a/b/c/d/e/f/g/h/ok.yaml",
-		".hidden.cfg",
-	} {
-		if err := checkConfigPath(name); err != nil {
-			t.Errorf("checkConfigPath(%q) = %v, want accepted", name, err)
-		}
-	}
-	for _, name := range []string{
-		"", ".", "..", "/x.yaml", "a/../b.yaml", "a//b.yaml", "a/b.yaml/",
-		`a\b.yaml`, ".hidden/x.yaml", "a/.x/b.yaml", "x.png", "x.yaml.bak", "x.cfg.pending",
-		"a/b/c/d/e/f/g/h/i/deep.yaml",
-	} {
-		if err := checkConfigPath(name); err == nil {
-			t.Errorf("checkConfigPath(%q) accepted, want refused", name)
-		}
 	}
 }
 

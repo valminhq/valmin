@@ -45,7 +45,7 @@ func SetupPaths(mods []SetupMod, configs []ManifestConfig) (SetupFiles, error) {
 		if cfg.File == command.ConfigFile {
 			return nil, fmt.Errorf("invalid saved config name %q", cfg.File)
 		}
-		if len(cfg.Content) > MaxConfigSize {
+		if len(cfg.Content) > instance.MaxConfigSize {
 			return nil, fmt.Errorf("saved config %s exceeds size limit", cfg.File)
 		}
 		paths.add(SetupRoot{}, instance.ConfigDir+"/"+cfg.File)

@@ -8,7 +8,7 @@ import (
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/errcode"
-	"github.com/valminhq/valmin/internal/instance/control"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/profile"
@@ -195,7 +195,7 @@ func (m *Mods) readProfileCode(r *http.Request, code string) (*profile.Profile, 
 	}
 	p, err := profile.Read(archive, profile.Limits{
 		ManifestBytes: maxProfileManifestBytes, Configs: maxManifestConfigs,
-		ConfigBytes: control.MaxConfigSize, TotalBytes: maxManifestBytes,
+		ConfigBytes: instance.MaxConfigSize, TotalBytes: maxManifestBytes,
 	})
 	if err != nil {
 		return nil, source.Source{}, codeInvalid("This profile could not be read: " + err.Error() + ".")
