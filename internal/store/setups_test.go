@@ -1,9 +1,12 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/valminhq/valmin/internal/mods/source"
 )
@@ -183,5 +186,51 @@ func TestSavedSetupRestoreStateIsExact(t *testing.T) {
 	_ = tx.Rollback()
 	if !errors.Is(err, ErrInstanceNotStopped) {
 		t.Errorf("running restore = %v, want ErrInstanceNotStopped", err)
+	}
+}
+
+// TestSavedSetupConfigsAndAutomaticRetention asserts a setup's config files round-trip, count
+// as referenced blobs, and that pruning keeps only the newest automatic setups and the spared
+// one.
+func TestSavedSetupConfigsAndAutomaticRetention(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	seedInstance(t, db, "server-a", 28000)
+	const digest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	configs := []SetupConfigRef{{File: "EWD/a.yaml", SHA256: digest, SizeBytes: 3}}
+	for i, id := range []string{"auto-1", "auto-2", "auto-3", "manual"} {
+		s := &SavedSetup{
+			ID: id, InstanceID: "server-a", Name: id, SnapshotJSON: "{}",
+			Automatic: id != "manual", ConfigsTruncated: true, Configs: configs,
+			CreatedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
+		}
+		if err := db.SaveSetup(t.Context(), s, nil); err != nil {
+			t.Fatalf("SaveSetup(%s): %v", id, err)
+		}
+	}
+	one, _, err := db.SetupByID(t.Context(), "server-a", "auto-1")
+	if err != nil || one == nil || !one.Automatic || !one.ConfigsTruncated ||
+		!reflect.DeepEqual(one.Configs, configs) {
+		t.Fatalf("SetupByID = %+v, %v", one, err)
+	}
+	referenced, err := db.ReferencedSetupArtifacts(t.Context())
+	if err != nil || !referenced[digest] {
+		t.Fatalf("ReferencedSetupArtifacts = %v, %v, want the config digest", referenced, err)
+	}
+	if err := db.inTx(t.Context(), "prune", func(tx *sql.Tx) error {
+		return TxPruneAutomaticSetups(t.Context(), tx, "server-a", 1, "auto-1")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := db.ListSetups(t.Context(), "server-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(list))
+	for _, s := range list {
+		ids = append(ids, s.ID)
+	}
+	if want := []string{"manual", "auto-3", "auto-1"}; !reflect.DeepEqual(ids, want) {
+		t.Errorf("setups after pruning = %v, want %v", ids, want)
 	}
 }

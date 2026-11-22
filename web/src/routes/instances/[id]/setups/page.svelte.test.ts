@@ -54,7 +54,10 @@ const saved: SetupDetail = {
 			installed_as: 'explicit'
 		}
 	],
-	configs: [{ file: 'plugin.cfg', content: 'enabled = false\n' }]
+	configs: [{ file: 'plugin.cfg', content: 'enabled = false\n', sha256: 'saved', size_bytes: 16 }],
+	config_tree: true,
+	configs_truncated: false,
+	automatic: false
 };
 
 function preview(overrides: Partial<SetupPreview> = {}): SetupPreview {
@@ -76,7 +79,9 @@ function preview(overrides: Partial<SetupPreview> = {}): SetupPreview {
 					installed_as: 'explicit'
 				}
 			],
-			configs: [{ file: 'plugin.cfg', content: 'enabled = true\n' }]
+			configs: [
+				{ file: 'plugin.cfg', content: 'enabled = true\n', sha256: 'current', size_bytes: 15 }
+			]
 		},
 		setup: saved,
 		...overrides
@@ -149,35 +154,54 @@ describe('Saved setups', () => {
 		});
 	});
 
-	it('lists the config files a saved setup does not carry', async () => {
+	it('marks automatic setups, setups saved before full capture, and left-out files', async () => {
 		serve();
-		daemon.on('GET', '/instances/inst-a/configs', () =>
+		daemon.on('GET', '/instances/inst-a/setups', () =>
 			Response.json({
 				items: [
-					{
-						file: 'plugin.cfg',
-						plugin: '',
-						size_bytes: 1,
-						installed_mods: [],
-						dir: 'BepInEx/config',
-						portable: true
-					},
-					{
-						file: 'expand_world/expand_biomes.yaml',
-						plugin: '',
-						size_bytes: 1,
-						installed_mods: [],
-						dir: 'BepInEx/config',
-						portable: false
-					}
+					{ ...saved, id: 'auto', name: 'Before restoring x', automatic: true },
+					{ ...saved, id: 'old', name: 'Old', config_tree: false, configs_truncated: true }
 				]
 			})
 		);
 		await open();
+		expect(screen.getByText('Automatic')).toBeTruthy();
+		expect(screen.getByText('Top-level .cfg only')).toBeTruthy();
+		expect(screen.getByText(/Some config files are not included/)).toBeTruthy();
+	});
 
-		expect(await screen.findByText('1 config file is not included')).toBeTruthy();
-		expect(screen.getByText('expand_world/expand_biomes.yaml')).toBeTruthy();
-		expect(screen.queryByText('plugin.cfg')).toBeNull();
+	it('lists removed and added config files and loads a changed file only when opened', async () => {
+		const file = (name: string, sha256: string) => ({ file: name, sha256, size_bytes: 1 });
+		serve({
+			result: preview({
+				current: {
+					...preview().current,
+					configs: [file('EWD/a.yaml', 'now'), file('EWD/new.yaml', 'n')]
+				},
+				setup: { ...saved, configs: [file('EWD/a.yaml', 'then'), file('old.json', 'o')] }
+			})
+		});
+		daemon.on('GET', '/instances/inst-a/configs/EWD%2Fa.yaml/raw', () => new Response('a: 2\n'));
+		daemon.on(
+			'GET',
+			'/instances/inst-a/setups/setup-1/configs/EWD%2Fa.yaml',
+			() => new Response('a: 1\n')
+		);
+		await open();
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
+		await screen.findByRole('heading', { name: 'Removed by the restore (1)' });
+		expect(screen.getByText('EWD/new.yaml')).toBeTruthy();
+		expect(screen.getByRole('heading', { name: 'Added by the restore (1)' })).toBeTruthy();
+		expect(screen.getByText('old.json')).toBeTruthy();
+		expect(
+			daemon.requests('GET', '/instances/inst-a/setups/setup-1/configs/EWD%2Fa.yaml')
+		).toHaveLength(0);
+
+		const details = screen.getByText('EWD/a.yaml').closest('details')!;
+		details.open = true;
+		await fireEvent(details, new Event('toggle'));
+		await vi.waitFor(() => expect(within(details).getByText(/a: 1/)).toBeTruthy());
+		expect(within(details).getByText(/a: 2/)).toBeTruthy();
 	});
 
 	it('keeps save and restore unavailable while the server is running', async () => {

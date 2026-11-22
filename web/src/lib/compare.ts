@@ -1,5 +1,6 @@
 import type { ManifestConfig, ManifestLaunch } from '#lib/api/manifest.js';
 import type { InstalledMod } from '#lib/api/mods.js';
+import type { SetupConfig } from '#lib/api/setups.js';
 
 /** How one item on the first server relates to the same item on the second. */
 export type Change = 'same' | 'changed' | 'only-a' | 'only-b';
@@ -131,6 +132,16 @@ export function compareConfigs(a: ManifestConfig[], b: ManifestConfig[]): Row<Ma
 		b,
 		(config) => config.file,
 		(x, y) => x.content === y.content
+	);
+}
+
+/** A setup's config files by path; a file differs when its hash does. */
+export function compareSetupConfigs(a: SetupConfig[], b: SetupConfig[]): Row<SetupConfig>[] {
+	return pair(
+		a,
+		b,
+		(config) => config.file,
+		(x, y) => x.sha256 === y.sha256
 	);
 }
 

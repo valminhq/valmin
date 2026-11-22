@@ -141,6 +141,7 @@ B- GET /api/v1/instances/{id}/setups
 B- POST /api/v1/instances/{id}/setups
 B- DELETE /api/v1/instances/{id}/setups/{sid}
 B- GET /api/v1/instances/{id}/setups/{sid}
+B- GET /api/v1/instances/{id}/setups/{sid}/configs/{file}
 B- GET /api/v1/instances/{id}/setups/{sid}/preview
 B- POST /api/v1/instances/{id}/setups/{sid}/restore
 B- POST /api/v1/instances/{id}/start

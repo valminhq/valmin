@@ -11,7 +11,7 @@ import (
 
 func TestPutVerifyAndGC(t *testing.T) {
 	s := New(t.TempDir())
-	first, err := s.PutBytes([]byte("package archive"))
+	first, err := s.PutBytes(t.Context(), []byte("package archive"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,5 +67,31 @@ func TestPutRejectsIncompletePayload(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Errorf("failed Put left files: %v", entries)
+	}
+}
+
+// TestPutBytesReplacesADamagedCopy asserts PutBytes rewrites a stored blob whose bytes no
+// longer match its digest, and stores an empty payload.
+func TestPutBytesReplacesADamagedCopy(t *testing.T) {
+	s := New(t.TempDir())
+	digest, err := s.PutBytes(t.Context(), []byte("config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.root, digest), []byte("CONFIG"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PutBytes(t.Context(), []byte("config")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Verify(digest); err != nil {
+		t.Errorf("Verify after a second PutBytes = %v, want the blob repaired", err)
+	}
+	empty, err := s.PutBytes(t.Context(), nil)
+	if err != nil {
+		t.Fatalf("PutBytes(empty) = %v", err)
+	}
+	if _, err := s.Verify(empty); err != nil {
+		t.Errorf("Verify(empty) = %v", err)
 	}
 }

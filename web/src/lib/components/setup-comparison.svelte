@@ -1,20 +1,25 @@
 <script lang="ts">
-	import type { SetupPreview } from '#lib/api/setups.js';
+	import { setups, type SetupConfig, type SetupPreview } from '#lib/api/setups.js';
+	import { configs } from '#lib/api/configs.js';
 	import { modSides, sourceLabel } from '#lib/api/mods.js';
 	import {
-		compareConfigs,
 		compareMods,
 		compareSettings,
+		compareSetupConfigs,
 		modChanges,
-		type ModState
+		type ModState,
+		type Row
 	} from '#lib/compare.js';
 	import { diffLines, hunks } from '#lib/diff.js';
 	import { Badge } from '#lib/components/ui/badge/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
 	import DiffView from '#lib/components/diff-view.svelte';
+	import Problem from '#lib/components/problem.svelte';
 
-	let { preview }: { preview: SetupPreview } = $props();
+	let { preview, instanceId }: { preview: SetupPreview; instanceId: string } = $props();
 	let opened = $state<Record<string, boolean>>({});
+	/** Both texts of each changed file opened so far, or why they could not be read. */
+	let texts = $state<Record<string, { a: string; b: string } | { failure: unknown }>>({});
 
 	const settings = $derived(
 		compareSettings(preview.current, {
@@ -25,8 +30,28 @@
 	const settingDiffs = $derived(settings.filter((row) => row.change !== 'same'));
 	const modRows = $derived(compareMods(preview.current.mods, preview.setup.mods));
 	const modDiffs = $derived(modRows.filter((row) => row.change !== 'same'));
-	const configRows = $derived(compareConfigs(preview.current.configs, preview.setup.configs));
+	const configRows = $derived(compareSetupConfigs(preview.current.configs, preview.setup.configs));
 	const configDiffs = $derived(configRows.filter((row) => row.change !== 'same'));
+	const removed = $derived(configDiffs.filter((row) => row.change === 'only-a'));
+	const added = $derived(configDiffs.filter((row) => row.change === 'only-b'));
+	const changed = $derived(configDiffs.filter((row) => row.change === 'changed'));
+
+	/** Loads both texts of a changed file the first time it is opened. A top-level `.cfg`
+	 * arrives with the preview; any other file is read from the server and the saved setup. */
+	async function loadTexts(row: Row<SetupConfig>) {
+		if (texts[row.key] || !row.a || !row.b) return;
+		const { a, b } = row;
+		try {
+			const [current, saved] = await Promise.all([
+				a.content ?? configs.readRaw(instanceId, row.key).then((res) => res.text),
+				b.content ?? setups.config(instanceId, preview.setup.id, row.key)
+			]);
+			const lf = (text: string) => text.replaceAll('\r\n', '\n');
+			texts[row.key] = { a: lf(current), b: lf(saved) };
+		} catch (err) {
+			texts[row.key] = { failure: err };
+		}
+	}
 	const changes = $derived(settingDiffs.length + modDiffs.length + configDiffs.length);
 </script>
 
@@ -126,43 +151,50 @@
 		<Card.Header>
 			<Card.Title>Configuration files</Card.Title>
 			<Card.Description>
-				{configRows.length - configDiffs.length} matching supported configuration files.
+				{configRows.length - configDiffs.length} matching configuration files.
+				{preview.setup.config_tree
+					? 'The console password file is not compared.'
+					: 'This setup was saved before setups held every config file, so only its top-level .cfg files are compared and restored.'}
 			</Card.Description>
 		</Card.Header>
 		<Card.Content class="grid gap-3">
 			{#if configDiffs.length === 0}
-				<p class="text-sm text-muted-foreground">All supported configuration files match.</p>
+				<p class="text-sm text-muted-foreground">All configuration files match.</p>
 			{:else}
-				{@const onlyOne = configDiffs.filter((row) => row.change !== 'changed')}
-				{@const changed = configDiffs.filter((row) => row.change === 'changed')}
-				{#if onlyOne.length > 0}
-					<ul class="grid gap-1 text-sm">
-						{#each onlyOne as row (row.key)}
-							<li class="flex flex-wrap items-center gap-2">
-								<span class="font-mono break-all">{row.key}</span>
-								<Badge variant="outline">Only on {row.a ? 'current server' : 'saved setup'}</Badge>
-							</li>
-						{/each}
-					</ul>
-				{/if}
+				{@render fileList('Removed by the restore', removed)}
+				{@render fileList('Added by the restore', added)}
 				{#if changed.length > 0}
+					<h4 class="text-sm font-medium">Changed by the restore ({changed.length})</h4>
 					<p class="text-sm text-muted-foreground">
 						Lines marked − are from the current server; lines marked + are from the saved setup.
 					</p>
 					{#each changed as row (row.key)}
-						<details class="rounded-md border" bind:open={opened[row.key]}>
+						<details
+							class="rounded-md border"
+							bind:open={opened[row.key]}
+							ontoggle={(e) => {
+								if (e.currentTarget.open) void loadTexts(row);
+							}}
+						>
 							<summary class="cursor-pointer px-3 py-2 font-mono text-sm break-all">
 								{row.key}
 							</summary>
-							{#if opened[row.key] && row.a && row.b}
-								{@const groups = hunks(diffLines(row.a.content, row.b.content), 2)}
+							{#if opened[row.key]}
+								{@const loaded = texts[row.key]}
 								<div class="px-3 pb-3">
-									{#if groups.length > 0}
-										<DiffView {groups} />
+									{#if !loaded}
+										<p class="text-sm text-muted-foreground">Loading…</p>
+									{:else if 'failure' in loaded}
+										<Problem error={loaded.failure} />
 									{:else}
-										<p class="text-sm text-muted-foreground">
-											The files differ only in a final line break.
-										</p>
+										{@const groups = hunks(diffLines(loaded.a, loaded.b), 2)}
+										{#if groups.length > 0}
+											<DiffView {groups} />
+										{:else}
+											<p class="text-sm text-muted-foreground">
+												The files differ only in a final line break.
+											</p>
+										{/if}
 									{/if}
 								</div>
 							{/if}
@@ -173,6 +205,19 @@
 		</Card.Content>
 	</Card.Root>
 </div>
+
+{#snippet fileList(title: string, rows: Row<SetupConfig>[])}
+	{#if rows.length > 0}
+		<div class="grid gap-1">
+			<h4 class="text-sm font-medium">{title} ({rows.length})</h4>
+			<ul class="grid max-h-64 gap-1 overflow-y-auto font-mono text-sm">
+				{#each rows as row (row.key)}
+					<li class="break-all">{row.key}</li>
+				{/each}
+			</ul>
+		</div>
+	{/if}
+{/snippet}
 
 {#snippet modState(mod: ModState | null)}
 	{#if mod}

@@ -107,6 +107,7 @@ var instanceRouteAccess = map[string]string{
 	"POST /api/v1/instances/{id}/setups":                          accessAdmin,
 	"GET /api/v1/instances/{id}/setups/{sid}":                     accessAdmin,
 	"DELETE /api/v1/instances/{id}/setups/{sid}":                  accessAdmin,
+	"GET /api/v1/instances/{id}/setups/{sid}/configs/{file}":      accessAdmin,
 	"GET /api/v1/instances/{id}/setups/{sid}/preview":             accessAdmin,
 	"POST /api/v1/instances/{id}/setups/{sid}/restore":            accessAdmin,
 	"POST /api/v1/instances/{id}/start":                           "instance.start",

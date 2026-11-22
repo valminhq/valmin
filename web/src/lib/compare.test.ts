@@ -4,6 +4,7 @@ import {
 	compareConfigs,
 	compareMods,
 	compareSettings,
+	compareSetupConfigs,
 	modChanges,
 	pair,
 	type ModState,
@@ -309,5 +310,21 @@ describe('modChanges', () => {
 
 	it.each(cases)('$name', ({ row, want }) => {
 		expect(modChanges(row, 'Live', 'Test')).toEqual(want);
+	});
+});
+
+describe('compareSetupConfigs', () => {
+	it('compares files by hash and keeps files only one side has', () => {
+		const file = (name: string, sha256: string) => ({ file: name, sha256, size_bytes: 1 });
+		const rows = compareSetupConfigs(
+			[file('EWD/a.yaml', '1'), file('same.cfg', '2'), file('EWD/new.yaml', '3')],
+			[file('EWD/a.yaml', '9'), file('same.cfg', '2'), file('old.json', '4')]
+		);
+		expect(Object.fromEntries(rows.map((row) => [row.key, row.change]))).toEqual({
+			'EWD/a.yaml': 'changed',
+			'EWD/new.yaml': 'only-a',
+			'old.json': 'only-b',
+			'same.cfg': 'same'
+		});
 	});
 });

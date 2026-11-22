@@ -1,12 +1,14 @@
 package control
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -19,11 +21,13 @@ import (
 	modconfig "github.com/valminhq/valmin/internal/mods/config"
 	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/mods/source"
+	"github.com/valminhq/valmin/internal/setupblob"
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// SetupPaths is every file a setup of mods and configs manages, by root.
-func SetupPaths(mods []SetupMod, configs []ManifestConfig) (SetupFiles, error) {
+// SetupPaths is every file a setup of mods and config files manages, by root. configs are
+// paths under the config directory.
+func SetupPaths(mods []SetupMod, configs []string) (SetupFiles, error) {
 	paths := SetupFiles{}
 	for _, mod := range mods {
 		entries, err := setupManifest(&mod)
@@ -38,17 +42,14 @@ func SetupPaths(mods []SetupMod, configs []ManifestConfig) (SetupFiles, error) {
 			paths.add(root, e.Path)
 		}
 	}
-	for _, cfg := range configs {
-		if err := CheckManifestConfigName(cfg.File); err != nil {
+	for _, name := range configs {
+		if err := instance.CheckConfigPath(name); err != nil {
 			return nil, fmt.Errorf("invalid saved config: %w", err)
 		}
-		if cfg.File == command.ConfigFile {
-			return nil, fmt.Errorf("invalid saved config name %q", cfg.File)
+		if name == command.ConfigFile {
+			return nil, fmt.Errorf("invalid saved config name %q", name)
 		}
-		if len(cfg.Content) > instance.MaxConfigSize {
-			return nil, fmt.Errorf("saved config %s exceeds size limit", cfg.File)
-		}
-		paths.add(SetupRoot{}, instance.ConfigDir+"/"+cfg.File)
+		paths.add(SetupRoot{}, instance.ConfigDir+"/"+name)
 	}
 	return paths, nil
 }
@@ -92,7 +93,7 @@ func PreflightSetupTargets(inst *store.Instance, current, target SetupFiles) err
 			_, err := root.Stat(filepath.FromSlash(path))
 			if err == nil {
 				_ = root.Close()
-				return fmt.Errorf("unmanaged file already occupies %s", path)
+				return unmanagedTarget(path)
 			}
 			if !errors.Is(err, os.ErrNotExist) {
 				_ = root.Close()
@@ -104,17 +105,64 @@ func PreflightSetupTargets(inst *store.Instance, current, target SetupFiles) err
 	return nil
 }
 
-func writeSetupTargetConfigs(staging string, configs []ManifestConfig) error {
-	for _, cfg := range configs {
-		dest := filepath.Join(staging, "target", "server", filepath.FromSlash(instance.ConfigDir), cfg.File)
+// unmanagedTarget is the preflight error for a target path a file outside the current setup
+// occupies. A config file is outside it when the config editor does not list it, such as a
+// YAML, JSON or text file over 1 MiB.
+func unmanagedTarget(path string) error {
+	if installer.UserConfig(path) {
+		return fmt.Errorf("unmanaged file already occupies %s: the current setup leaves it out, "+
+			"as it does a YAML, JSON or text file over 1 MiB; move or shrink it first", path)
+	}
+	return fmt.Errorf("unmanaged file already occupies %s", path)
+}
+
+// stageSetupConfigs writes the config files of snap into staging's target tree: whole from the
+// snapshot for a setup saved before it held the config tree, from verified blobs otherwise.
+func stageSetupConfigs(dataRoot, staging string, snap *SetupSnapshot) error {
+	dir := filepath.Join(staging, "target", "server", filepath.FromSlash(instance.ConfigDir))
+	write := func(name string, content []byte) error {
+		dest := filepath.Join(dir, filepath.FromSlash(name))
 		if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
 			return fmt.Errorf("create config staging directory: %w", err)
 		}
-		if err := os.WriteFile(dest, []byte(cfg.Content), 0o600); err != nil {
-			return fmt.Errorf("stage config %s: %w", cfg.File, err)
+		if err := os.WriteFile(dest, content, 0o600); err != nil {
+			return fmt.Errorf("stage config %s: %w", name, err)
+		}
+		return nil
+	}
+	for _, cfg := range snap.Configs {
+		if len(cfg.Content) > instance.MaxConfigSize {
+			return fmt.Errorf("saved config %s exceeds size limit", cfg.File)
+		}
+		if err := write(cfg.File, []byte(cfg.Content)); err != nil {
+			return err
+		}
+	}
+	blobs := setupblob.New(dataRoot)
+	for _, c := range snap.ConfigFiles {
+		content, err := ReadSetupConfig(blobs, c)
+		if err != nil {
+			return err
+		}
+		if err := write(c.File, content); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// ReadSetupConfig returns the saved bytes of one config file of a setup, verified against its
+// digest.
+func ReadSetupConfig(blobs *setupblob.Store, c store.SetupConfigRef) ([]byte, error) {
+	path, err := blobs.Verify(c.SHA256)
+	if err != nil {
+		return nil, fmt.Errorf("verify saved config %s: %w", c.File, err)
+	}
+	content, err := os.ReadFile(path) // #nosec G304 -- Verify confines path to the blob directory.
+	if err != nil {
+		return nil, fmt.Errorf("read saved config %s: %w", c.File, err)
+	}
+	return content, nil
 }
 
 // ApplySetupPaths removes the current managed files and writes the target's from staging.
@@ -157,8 +205,9 @@ func applySetupRoot(inst *store.Instance, staging string, rootName SetupRoot, pa
 	return dropPendingConfigs(root, replaced, paths)
 }
 
-// dropPendingConfigs removes the pending copy of every config a restore replaced or removed,
-// so the next settle can't put an older edit back over the restored file.
+// dropPendingConfigs removes the pending copy of every config a restore replaced or removed, in
+// the config tree or as a `.cfg` elsewhere, so the next settle can't put an older edit back over
+// the restored file.
 func dropPendingConfigs(rootPath string, sets ...map[string]bool) error {
 	root, err := os.OpenRoot(rootPath)
 	if err != nil {
@@ -167,7 +216,7 @@ func dropPendingConfigs(rootPath string, sets ...map[string]bool) error {
 	defer func() { _ = root.Close() }()
 	for _, set := range sets {
 		for p := range set {
-			if !strings.HasSuffix(p, ".cfg") {
+			if !strings.HasSuffix(p, ".cfg") && !installer.UserConfig(p) {
 				continue
 			}
 			if err := modconfig.DropPending(root, filepath.FromSlash(p)); err != nil {
@@ -226,8 +275,10 @@ func setupStateRows(
 }
 
 type setupRestorePlan struct {
-	Instance     *store.Instance
-	Snapshot     SetupSnapshot
+	Instance *store.Instance
+	Snapshot SetupSnapshot
+	// Current is the server's setup before the restore, for the automatic setup.
+	Current      SetupSnapshot
 	CurrentPaths SetupFiles
 	TargetPaths  SetupFiles
 	Journal      SetupJournal
@@ -257,11 +308,12 @@ func (s *SetupJobs) prepareSetupRestore(
 	if err := s.ValidateSettings(ctx, inst, &snap.Instance); err != nil {
 		return setupRestorePlan{}, err
 	}
-	currentPaths, err := SetupPaths(current.Mods, current.Configs)
+	scoped := current.ScopedTo(&snap)
+	currentPaths, err := SetupPaths(current.Mods, scoped.ConfigPaths())
 	if err != nil {
 		return setupRestorePlan{}, err
 	}
-	targetPaths, err := SetupPaths(snap.Mods, snap.Configs)
+	targetPaths, err := SetupPaths(snap.Mods, snap.ConfigPaths())
 	if err != nil {
 		return setupRestorePlan{}, err
 	}
@@ -269,7 +321,7 @@ func (s *SetupJobs) prepareSetupRestore(
 	if err := (&setupArtifacts{DataRoot: s.DataRoot}).stage(ctx, &snap, refs, payload.StagingDir); err != nil {
 		return setupRestorePlan{}, err
 	}
-	if err := writeSetupTargetConfigs(payload.StagingDir, snap.Configs); err != nil {
+	if err := stageSetupConfigs(s.DataRoot, payload.StagingDir, &snap); err != nil {
 		return setupRestorePlan{}, err
 	}
 	if err := PreflightSetupTargets(inst, currentPaths, targetPaths); err != nil {
@@ -287,7 +339,7 @@ func (s *SetupJobs) prepareSetupRestore(
 		return setupRestorePlan{}, errors.New("server state changed after the restore preview")
 	}
 	return setupRestorePlan{
-		Instance: fresh, Snapshot: snap, CurrentPaths: currentPaths,
+		Instance: fresh, Snapshot: snap, Current: current, CurrentPaths: currentPaths,
 		TargetPaths: targetPaths, Journal: unionSetupPaths(currentPaths, targetPaths),
 		ModsChanged: setupModsChanged(current.Mods, snap.Mods),
 	}, nil
@@ -320,8 +372,9 @@ func (s *SetupJobs) applyStagedSetup(
 }
 
 // RunRestore applies a saved setup to a stopped instance: it snapshots the world when mods
-// change, saves the current files for rollback, applies the staged files, and commits the rows
-// in the job's finish. A failed apply rolls the files back.
+// change, saves the current setup as an automatic one and the current files for rollback,
+// applies the staged files, and commits the rows in the job's finish. A failed apply rolls the
+// files back.
 //
 //nolint:gocognit // The restore phases share a single rollback boundary.
 func (s *SetupJobs) RunRestore(
@@ -355,6 +408,8 @@ func (s *SetupJobs) RunRestore(
 				return fail(err, nil)
 			}
 		}
+		jh.Progress(ctx, 60, "saving the current setup")
+		saveBefore := s.saveBeforeRestore(ctx, jh, inst, row, &plan.Current, payload.StagingDir)
 		jh.Progress(ctx, 65, "saving current files for rollback")
 		if err := BackupSetupPaths(inst, payload.StagingDir, plan.Journal); err != nil {
 			return fail(err, archived)
@@ -365,13 +420,8 @@ func (s *SetupJobs) RunRestore(
 		if err := jh.Checkpoint(ctx, "backed_up"); err != nil {
 			return fail(err, archived)
 		}
-		if err := s.trackReplacedConfigs(
-			ctx,
-			inst,
-			payload.StagingDir,
-			plan.Journal,
-			plan.Snapshot.Configs,
-		); err != nil {
+		written, err := s.trackReplacedConfigs(ctx, inst, payload.StagingDir, plan.Journal, plan.Snapshot.ConfigPaths())
+		if err != nil {
 			return fail(err, archived)
 		}
 		rollback := func(cause error) jobs.Outcome {
@@ -401,7 +451,10 @@ func (s *SetupJobs) RunRestore(
 				if err := store.TxApplySetupState(ctx, tx, inst.ID, mods, &launch, backup); err != nil {
 					return err
 				}
-				return store.TxRecordConfigRevisions(ctx, tx, setupRevisions(inst.ID, plan.Snapshot.Configs))
+				if err := store.TxRecordConfigRevisions(ctx, tx, written); err != nil {
+					return err
+				}
+				return saveBefore(ctx, tx)
 			},
 			AfterFinish: cleanup,
 		}
@@ -409,50 +462,80 @@ func (s *SetupJobs) RunRestore(
 	}
 }
 
+// saveBeforeRestore captures current as the automatic setup saved before restoring target, and
+// returns the finish step that publishes it and prunes older automatic setups other than target.
+// A capture that fails is logged on the job and publishes nothing, so the restore goes ahead.
+func (s *SetupJobs) saveBeforeRestore(
+	ctx context.Context, jh *jobs.Handle, inst *store.Instance, target *store.SavedSetup,
+	current *SetupSnapshot, staging string,
+) func(context.Context, *sql.Tx) error {
+	before, refs, err := s.captureBeforeRestore(ctx, inst, target.Name, current, staging)
+	if err != nil {
+		jh.Log(fmt.Sprintf("warning: the setup before this restore was not saved: %v", err))
+		slog.WarnContext(ctx, "setup before restore not saved",
+			slog.String("instance_id", inst.ID), slog.Any("error", err))
+		return func(context.Context, *sql.Tx) error { return nil }
+	}
+	return func(ctx context.Context, tx *sql.Tx) error {
+		if err := store.TxSaveSetup(ctx, tx, before, refs); err != nil {
+			return err
+		}
+		return store.TxPruneAutomaticSetups(ctx, tx, inst.ID, keepAutomaticSetups, target.ID)
+	}
+}
+
 // trackReplacedConfigs records, in each file's history, the config files a restore is about to
-// replace or remove, reading the copies the rollback backup just saved. A target file that does
-// not exist yet is recorded empty, so its restored settings count as tweaks.
+// replace with other bytes or remove, reading the copies the rollback backup just saved, and
+// returns the revisions of the files it writes, leaving out any too large to keep. A target file
+// that does not exist yet is
+// recorded empty, so its restored settings count as tweaks. targets are paths under the config
+// directory, already staged.
 func (s *SetupJobs) trackReplacedConfigs(
-	ctx context.Context, inst *store.Instance, staging string, journal SetupJournal, targets []ManifestConfig,
-) error {
+	ctx context.Context, inst *store.Instance, staging string, journal SetupJournal, targets []string,
+) ([]store.ConfigRevision, error) {
 	saved, err := savedSetupConfigs(staging, journal)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	for _, cfg := range targets {
-		if _, ok := saved[cfg.File]; !ok {
-			saved[cfg.File] = []byte{}
+	stagedDir := filepath.Join(staging, "target", "server", filepath.FromSlash(instance.ConfigDir))
+	var written []store.ConfigRevision
+	for _, name := range targets {
+		next, err := os.ReadFile(filepath.Join(stagedDir, filepath.FromSlash(name)))
+		if err != nil {
+			return nil, fmt.Errorf("read the staged %s: %w", name, err)
+		}
+		current, ok := saved[name]
+		if ok && bytes.Equal(current, next) {
+			delete(saved, name)
+			continue
+		}
+		if !ok {
+			saved[name] = []byte{}
+		}
+		if len(next) <= store.MaxConfigRevisionBytes {
+			written = append(written, store.ConfigRevision{
+				InstanceID: inst.ID, File: name, Source: store.ConfigSetup, Content: next,
+			})
 		}
 	}
 	if len(saved) == 0 {
-		return nil
+		return written, nil
 	}
 	dir, err := instance.OpenConfigDir(inst.DataDir)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		dir = nil
 	case err != nil:
-		return fmt.Errorf("open config directory: %w", err)
+		return nil, fmt.Errorf("open config directory: %w", err)
 	default:
 		defer func() { _ = dir.Close() }()
 	}
 	for name, raw := range saved {
 		if err := trackBefore(ctx, s.DB, dir, inst.ID, name, raw); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
-}
-
-// setupRevisions is the config files a restore wrote, as revisions.
-func setupRevisions(instanceID string, configs []ManifestConfig) []store.ConfigRevision {
-	out := make([]store.ConfigRevision, 0, len(configs))
-	for _, cfg := range configs {
-		out = append(out, store.ConfigRevision{
-			InstanceID: instanceID, File: cfg.File, Source: store.ConfigSetup, Content: []byte(cfg.Content),
-		})
-	}
-	return out
+	return written, nil
 }
 
 // savedSetupConfigs reads the config files the rollback backup saved from the server root, by

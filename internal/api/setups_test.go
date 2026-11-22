@@ -505,3 +505,145 @@ func TestSetupRestoreRollsBackAfterFileWriteFailure(t *testing.T) {
 		t.Errorf("settings after failed restore = %+v, want original stopped settings", inst)
 	}
 }
+
+// TestLegacySetupRestoreLeavesSubfolderConfigs asserts a setup saved before setups held the
+// whole config tree restores only its top-level .cfg files and leaves every other config file
+// as it is.
+func TestLegacySetupRestoreLeavesSubfolderConfigs(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	writeServerFile(t, dataDir, "BepInEx/config/Mod.cfg", "saved config")
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/a.yaml", "saved yaml")
+	saved := setupTestSave(t, rt, db, admin, "legacy")
+	var snap map[string]any
+	if err := json.Unmarshal([]byte(saved.SnapshotJSON), &snap); err != nil {
+		t.Fatal(err)
+	}
+	delete(snap, "config_tree")
+	snap["configs"] = []map[string]string{{"file": "Mod.cfg", "content": "saved config"}}
+	legacy, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed(t, db, `DELETE FROM saved_setup_configs WHERE setup_id = ?`, saved.ID)
+	seed(t, db, `UPDATE saved_setups SET snapshot_json = ? WHERE id = ?`, string(legacy), saved.ID)
+
+	writeServerFile(t, dataDir, "BepInEx/config/Mod.cfg", "changed config")
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/a.yaml", "changed yaml")
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/new.yaml", "new yaml")
+	preview := setupTestPreview(t, rt, admin, saved.ID)
+	if !preview.Ready {
+		t.Fatalf("preview = %+v, want ready", preview)
+	}
+	for _, c := range preview.Current.Configs {
+		if c.File != "Mod.cfg" {
+			t.Errorf("legacy comparison lists current %s, want top-level .cfg files only", c.File)
+		}
+	}
+	if job := setupTestRestore(t, rt, admin, saved.ID, preview.ETag); job.Status != "succeeded" {
+		t.Fatalf("restore job = %+v, want succeeded", job)
+	}
+	setupTestFile(t, serverPath(dataDir, "BepInEx/config/Mod.cfg"), "saved config")
+	setupTestFile(t, serverPath(dataDir, "BepInEx/config/EWD/a.yaml"), "changed yaml")
+	setupTestFile(t, serverPath(dataDir, "BepInEx/config/EWD/new.yaml"), "new yaml")
+}
+
+// TestSetupRestoresTheWholeConfigTree asserts a setup holds every config file the editor lists
+// apart from the RCON file, stores their bytes as blobs rather than in its snapshot, restores
+// them, removes config files created after it, and leaves an automatic setup that undoes the
+// restore.
+func TestSetupRestoresTheWholeConfigTree(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	writeServerFile(t, dataDir, "BepInEx/config/Mod.cfg", "saved config")
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/a.yaml", "saved yaml")
+	writeServerFile(t, dataDir, "BepInEx/config/EpicLoot/patches/b.json", "{}")
+	writeServerFile(t, dataDir, "BepInEx/config/"+command.ConfigFile, "secret")
+	saved := setupTestSave(t, rt, db, admin, "tree")
+	if strings.Contains(saved.SnapshotJSON, "saved yaml") {
+		t.Error("snapshot holds config bytes, want them stored as blobs")
+	}
+	row, _, err := db.SetupByID(t.Context(), "inst-a", saved.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := make([]string, 0, len(row.Configs))
+	for _, c := range row.Configs {
+		files = append(files, c.File)
+	}
+	if want := []string{"EWD/a.yaml", "EpicLoot/patches/b.json", "Mod.cfg"}; !slices.Equal(files, want) {
+		t.Errorf("saved config files = %v, want %v", files, want)
+	}
+
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/a.yaml", "changed yaml")
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/a.yaml.pending", "pending edit")
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/new.yaml", "new yaml")
+	preview := setupTestPreview(t, rt, admin, saved.ID)
+	if !preview.Ready {
+		t.Fatalf("preview = %+v, want ready", preview)
+	}
+	if job := setupTestRestore(t, rt, admin, saved.ID, preview.ETag); job.Status != "succeeded" {
+		t.Fatalf("restore job = %+v, want succeeded", job)
+	}
+	setupTestFile(t, serverPath(dataDir, "BepInEx/config/EWD/a.yaml"), "saved yaml")
+	setupTestFile(t, serverPath(dataDir, "BepInEx/config/EpicLoot/patches/b.json"), "{}")
+	setupTestFile(t, serverPath(dataDir, "BepInEx/config/"+command.ConfigFile), "secret")
+	for _, path := range []string{"BepInEx/config/EWD/new.yaml", "BepInEx/config/EWD/a.yaml.pending"} {
+		if _, err := os.Stat(serverPath(dataDir, path)); !os.IsNotExist(err) {
+			t.Errorf("%s after restore: %v, want absent", path, err)
+		}
+	}
+	for file, want := range map[string][]string{
+		"EWD/a.yaml":   {"setup", "found"},
+		"EWD/new.yaml": {"found"},
+	} {
+		revs, err := db.ConfigRevisions(t.Context(), "inst-a", file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for i := range revs {
+			got = append(got, string(revs[i].Source))
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("%s history = %v, want %v", file, got, want)
+		}
+	}
+
+	rows, err := db.ListSetups(t.Context(), "inst-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || !rows[0].Automatic || rows[0].Name != "Before restoring tree" {
+		t.Fatalf("setups after restore = %+v, want an automatic one first", rows)
+	}
+	undo := setupTestPreview(t, rt, admin, rows[0].ID)
+	if job := setupTestRestore(t, rt, admin, rows[0].ID, undo.ETag); job.Status != "succeeded" {
+		t.Fatalf("undo job = %+v, want succeeded", job)
+	}
+	setupTestFile(t, serverPath(dataDir, "BepInEx/config/EWD/a.yaml"), "changed yaml")
+	setupTestFile(t, serverPath(dataDir, "BepInEx/config/EWD/new.yaml"), "new yaml")
+}
+
+// TestSetupSavesShareUnchangedConfigBlobs asserts a second setup stores only the config files
+// that changed since the first.
+func TestSetupSavesShareUnchangedConfigBlobs(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/a.yaml", "a")
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/b.yaml", "b")
+	blobs := func() int {
+		entries, err := os.ReadDir(setupblob.Dir(rt.instances.Cfg.Data.Root))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(entries)
+	}
+	setupTestSave(t, rt, db, admin, "first")
+	first := blobs()
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/b.yaml", "b changed")
+	setupTestSave(t, rt, db, admin, "second")
+	if got := blobs(); got != first+1 {
+		t.Errorf("blobs after a second save = %d, want %d", got, first+1)
+	}
+}

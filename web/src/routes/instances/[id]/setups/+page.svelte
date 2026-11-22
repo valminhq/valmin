@@ -18,7 +18,6 @@
 	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import Problem from '#lib/components/problem.svelte';
-	import ConfigLeftOut from '#lib/components/config-left-out.svelte';
 	import SetupComparison from '#lib/components/setup-comparison.svelte';
 
 	const id = $derived(page.params.id ?? '');
@@ -78,6 +77,7 @@
 			if (selectedId && !saved.items.some((setup) => setup.id === selectedId)) {
 				selectedId = '';
 				preview = null;
+				previewFailure = null;
 			}
 		} catch (err) {
 			if (request === loadRequest) failure = err;
@@ -181,8 +181,9 @@
 
 <div class="grid gap-6">
 	<PageHeader title="Saved setups" level={2}>
-		Save exact mod versions and supported configuration, then compare and restore them later. World
-		backups are linked for reference and restored separately.
+		Save exact mod versions and every configuration file, then compare and restore them later.
+		Restoring saves the current setup first, so a restore can be undone. World backups are linked
+		for reference and restored separately.
 	</PageHeader>
 
 	{#if !canManage}
@@ -196,12 +197,12 @@
 				<Card.Header>
 					<Card.Title>Save current setup</Card.Title>
 					<Card.Description>
-						Captures launch and backup settings, managed mods, and supported mod configuration
-						files. The server must be stopped. Credentials and world files are not included.
+						Captures launch and backup settings, managed mods, and every file in the configuration
+						editor except the console password file. The server must be stopped. Credentials and
+						world files are not included.
 					</Card.Description>
 				</Card.Header>
 				<Card.Content class="grid gap-4">
-					<ConfigLeftOut {id} />
 					<div class="grid max-w-lg gap-2">
 						<Label for="setup-name">Name</Label>
 						<Input id="setup-name" bind:value={name} required />
@@ -257,6 +258,20 @@
 									<div class="grid min-w-0 gap-1">
 										<strong class="break-words">{setup.name}</strong>
 										<span class="text-sm text-muted-foreground">{when(setup.created_at)}</span>
+										{#if setup.automatic || !setup.config_tree}
+											<span class="flex flex-wrap gap-1">
+												{#if setup.automatic}<Badge variant="outline">Automatic</Badge>{/if}
+												{#if !setup.config_tree}
+													<Badge variant="outline">Top-level .cfg only</Badge>
+												{/if}
+											</span>
+										{/if}
+										{#if setup.configs_truncated}
+											<span class="text-sm text-muted-foreground">
+												Some config files are not included: larger than 1 MiB, more than 8 folders
+												deep, or past the first 5,000.
+											</span>
+										{/if}
 										{#if setup.world_backup}
 											<span class="text-sm">
 												{setup.world_backup.available === false
@@ -301,14 +316,15 @@
 					{/if}
 					<Problem error={previewFailure} />
 					{#if preview}
-						<SetupComparison {preview} />
+						<SetupComparison {preview} instanceId={id} />
 						<Card.Root>
 							<Card.Header>
 								<Card.Title>Restore preview</Card.Title>
 								<Card.Description>
-									Restoring applies the saved mods, supported configuration, and launch and backup
-									settings while stopped. It does not change the game build, selected world,
-									credentials, or world files. The server stays stopped.
+									Restoring applies the saved mods, configuration files, and launch and backup
+									settings while stopped, after saving the current setup as an automatic one. It
+									does not change the game build, selected world, credentials, or world files. The
+									server stays stopped.
 								</Card.Description>
 							</Card.Header>
 							<Card.Content class="grid gap-4">
@@ -364,7 +380,7 @@
 	bind:open={restoreOpen}
 	name={instance?.name ?? ''}
 	title="Restore this setup?"
-	description="This replaces the server's managed mods, supported configuration files, and included settings with the saved setup. Valmin rolls these changes back if the restore fails. World files and the selected world are unchanged. The server stays stopped."
+	description="This replaces the server's managed mods, configuration files, and included settings with the saved setup, after saving the current setup as an automatic one. Valmin rolls these changes back if the restore fails. World files and the selected world are unchanged. The server stays stopped."
 	confirmLabel="Restore setup"
 	onconfirm={restore}
 />

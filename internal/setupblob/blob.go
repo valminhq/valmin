@@ -1,4 +1,5 @@
-// Package setupblob stores immutable package archives by SHA-256 for saved setups.
+// Package setupblob stores the immutable package archives and config files of saved setups by
+// SHA-256.
 package setupblob
 
 import (
@@ -64,9 +65,16 @@ func (s *Store) PutFileContext(ctx context.Context, path string) (string, error)
 	return s.Put(ctx, f)
 }
 
-// PutBytes retains a small in-memory payload, such as a generated fallback archive.
-func (s *Store) PutBytes(data []byte) (string, error) {
-	return s.Put(context.Background(), bytes.NewReader(data))
+// PutBytes retains a small in-memory payload, such as a config file or a generated fallback
+// archive. Bytes the store already holds intact are not written again; a damaged copy is
+// replaced.
+func (s *Store) PutBytes(ctx context.Context, data []byte) (string, error) {
+	sum := sha256.Sum256(data)
+	digest := hex.EncodeToString(sum[:])
+	if _, err := s.Verify(digest); err == nil {
+		return digest, nil
+	}
+	return s.Put(ctx, bytes.NewReader(data))
 }
 
 // Put streams a payload to a temporary file, hashes its bytes, then publishes it under
@@ -87,14 +95,12 @@ func (s *Store) Put(ctx context.Context, src io.Reader) (string, error) {
 		return "", fmt.Errorf("chmod setup blob temp file: %w", err)
 	}
 	h := sha256.New()
-	n, copyErr := io.CopyN(io.MultiWriter(tmp, h), contextReader{ctx: ctx, reader: src}, s.maxBytes+1)
+	_, copyErr := io.CopyN(io.MultiWriter(tmp, h), contextReader{ctx: ctx, reader: src}, s.maxBytes+1)
 	switch {
 	case copyErr == nil:
 		return "", ErrTooLarge
 	case !errors.Is(copyErr, io.EOF):
 		return "", fmt.Errorf("copy setup payload: %w", copyErr)
-	case n == 0:
-		return "", errors.New("setup payload is empty")
 	}
 	if err := tmp.Sync(); err != nil {
 		return "", fmt.Errorf("sync setup blob: %w", err)
