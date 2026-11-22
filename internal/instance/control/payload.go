@@ -48,6 +48,10 @@ type (
 		Name       string `json:"name,omitempty"`
 		BackupID   string `json:"world_backup_id,omitempty"`
 		Light      bool   `json:"light,omitempty"`
+		// BackUpWorld takes a world backup during the save, to the archive ArchivePlan names,
+		// and links it to the setup.
+		BackUpWorld bool `json:"back_up_world,omitempty"`
+		ArchivePlan
 	}
 	ConfigApplyPayload struct {
 		Files int `json:"files"`

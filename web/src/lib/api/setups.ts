@@ -9,6 +9,7 @@ export interface LinkedWorldBackup {
 	created_at: string;
 	consistent: boolean;
 	available?: boolean;
+	size_bytes?: number;
 }
 
 export interface SavedSetup {
@@ -30,9 +31,11 @@ export interface SavedSetup {
 	light: boolean;
 }
 
-/** How a setup is saved: which world backup to link, and whether to keep every package. */
+/** How a setup is saved: which world backup to link, or to take one now, and whether to keep
+ * every package. */
 export interface SetupSaveOptions {
 	worldBackupId?: string;
+	backUpWorld?: boolean;
 	light?: boolean;
 }
 
@@ -78,6 +81,7 @@ export const setups = {
 		api.post<Job>(path(instanceId), {
 			name,
 			...(options.worldBackupId ? { world_backup_id: options.worldBackupId } : {}),
+			...(options.backUpWorld ? { back_up_world: true } : {}),
 			...(options.light ? { light: true } : {})
 		}),
 	get: (instanceId: string, setupId: string) => api.get<SetupDetail>(path(instanceId, setupId)),

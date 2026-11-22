@@ -54,6 +54,7 @@ type setupBackupView struct {
 	CreatedAt  time.Time `json:"created_at"`
 	Consistent bool      `json:"consistent"`
 	Available  bool      `json:"available"`
+	SizeBytes  int64     `json:"size_bytes"`
 }
 
 type setupDetailView struct {
@@ -287,7 +288,7 @@ func (h *Instances) setupDetail(
 	available, err := setupBackupAvailable(h.Cfg.Data.Root, b.Path)
 	view.WorldBackup = &setupBackupView{
 		ID: b.ID, WorldName: b.WorldName, CreatedAt: b.CreatedAt,
-		Consistent: b.Consistent, Available: available,
+		Consistent: b.Consistent, Available: available, SizeBytes: b.SizeBytes,
 	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return view, fmt.Errorf("inspect linked backup %s: %w", b.ID, err)

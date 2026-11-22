@@ -176,6 +176,7 @@ export function backup(overrides: Partial<Backup> = {}): Backup {
 		prunes_next: false,
 		world_bytes: 2 * 1024 * 1024,
 		world_attention: [],
+		kept_for_setup: false,
 		...overrides
 	};
 }

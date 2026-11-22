@@ -160,7 +160,7 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	c.UpdateChecker = &UpdateChecker{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Config: cfg, Notifier: d.Notifier,
 	}
-	c.SetupJobs = newSetupJobs(d, dataRoot)
+	c.SetupJobs = newSetupJobs(d, dataRoot, c.Backupper)
 	c.SetupState = &SetupState{DB: d.DB}
 	c.Supervisor = &Supervisor{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Keeper: d.Keeper, Streams: d.Streams, Logs: logs,
@@ -182,10 +182,12 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	return c, nil
 }
 
-// newSetupJobs builds the setup jobs over d, fetching light setups' packages through its
-// installer when it has one.
-func newSetupJobs(d *Deps, dataRoot string) *SetupJobs {
-	s := &SetupJobs{DB: d.DB, Runtime: d.Runtime, DataRoot: dataRoot, Keeper: d.Keeper, Worlds: d.Worlds}
+// newSetupJobs builds the setup jobs over d, taking world backups through backups and fetching
+// light setups' packages through d's installer when it has one.
+func newSetupJobs(d *Deps, dataRoot string, backups *Backupper) *SetupJobs {
+	s := &SetupJobs{
+		DB: d.DB, Runtime: d.Runtime, DataRoot: dataRoot, Keeper: d.Keeper, Worlds: d.Worlds, Backups: backups,
+	}
 	if d.Installer != nil {
 		s.Archives = d.Installer
 	}

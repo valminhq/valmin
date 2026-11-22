@@ -2,6 +2,7 @@
 	import { NativeSelect } from '#lib/components/ui/native-select/index.js';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { formatInstant } from '#lib/api/schedules.js';
+	import { formatBytes } from '#lib/format.js';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { actions, instances, type Instance } from '#lib/api/instances.js';
@@ -23,6 +24,9 @@
 
 	const id = $derived(page.params.id ?? '');
 	const canManage = $derived(session.allowed(id).includes(actions.setupsManage));
+	const canBackUp = $derived(session.allowed(id).includes(actions.backupsCreate));
+	/** The world backup choice that takes a backup during the save. */
+	const backUpNow = 'now';
 
 	let instance = $state<Instance | null>(null);
 	const stopped = $derived(instance?.state === 'stopped');
@@ -151,7 +155,11 @@
 		const value = name.trim();
 		if (!value || !stopped || jobRunning) return;
 		void run('save', '', () =>
-			setups.save(id, value, { worldBackupId: worldBackupId || undefined, light: !keepPackages })
+			setups.save(id, value, {
+				worldBackupId: worldBackupId === backUpNow ? undefined : worldBackupId || undefined,
+				backUpWorld: worldBackupId === backUpNow,
+				light: !keepPackages
+			})
 		);
 	}
 
@@ -215,13 +223,17 @@
 						<Label for="setup-backup">Associated world backup (optional)</Label>
 						<NativeSelect id="setup-backup" bind:value={worldBackupId}>
 							<option value="">None</option>
+							{#if canBackUp}
+								<option value={backUpNow}>Back up the world now</option>
+							{/if}
 							{#each linkedBackups as backup (backup.id)}
 								<option value={backup.id}>{when(backup.created_at)} · {backup.world_name}</option>
 							{/each}
 						</NativeSelect>
 						<p class="text-xs text-muted-foreground">
 							Only consistent backups from this server can be linked. A linked backup is kept until
-							the setup is deleted. Linking does not restore the world.
+							the setup is deleted, outside the backup retention counts, so each one adds to disk
+							use. Linking does not restore the world.
 						</p>
 						<Problem error={backupFailure} />
 						{#if backupCursor}
@@ -292,7 +304,7 @@
 											<span class="text-sm">
 												{setup.world_backup.available === false
 													? 'Linked world backup unavailable'
-													: `World backup linked: ${when(setup.world_backup.created_at)} · ${setup.world_backup.world_name}`}
+													: `World backup linked: ${when(setup.world_backup.created_at)} · ${setup.world_backup.world_name}${setup.world_backup.size_bytes ? ` · ${formatBytes(setup.world_backup.size_bytes)}` : ''}`}
 											</span>
 										{/if}
 									</div>
@@ -406,7 +418,7 @@
 	title="Delete this setup?"
 	description="{selected?.name ?? ''} · {selected
 		? when(selected.created_at)
-		: ''}. The saved setup and its retained package copies are released. A linked world backup remains in the backup catalogue."
+		: ''}. The saved setup and its retained package copies are released. A linked world backup remains in the backup catalogue and counts toward retention again."
 	confirmLabel="Delete setup"
 	onconfirm={remove}
 />

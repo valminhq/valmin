@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -38,6 +39,8 @@ type SetupJobs struct {
 	// Archives fetches the packages a light setup does not keep; nil leaves light setups unable
 	// to restore them.
 	Archives PackageArchives
+	// Backups takes and checks the world backup a save links.
+	Backups *Backupper
 	// Apply replaces ApplySetupPaths, so a test can fail a restore after it placed files.
 	Apply func(inst *store.Instance, staging string, current, target SetupFiles) error
 }
@@ -167,17 +170,98 @@ func (s *SetupJobs) RunSave(inst *store.Instance, payload *SetupJobPayload, requ
 		if err != nil {
 			return jobs.Failed(errcode.Internal, err)
 		}
+		backupID, archived, err := s.setupWorldBackup(ctx, jh, inst, payload)
+		if err != nil {
+			return jobs.Outcome{Status: jobs.StatusFailed, ErrorCode: archiveFailureCode(err), Error: err.Error()}
+		}
 		row := &store.SavedSetup{
 			ID: payload.SetupID, InstanceID: inst.ID, Name: payload.Name,
 			CreatedBy: requestedBy, GameBuildID: deref(inst.GameBuildID),
-			WorldName: inst.WorldName, SnapshotJSON: string(raw), BackupID: payload.BackupID,
+			WorldName: inst.WorldName, SnapshotJSON: string(raw), BackupID: backupID,
 			Configs: snap.ConfigFiles, ConfigsTruncated: snap.ConfigsTruncated,
 		}
 		jh.Progress(ctx, 100, "setup saved")
-		return jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: func(ctx context.Context, tx *sql.Tx) error {
+		out := jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: func(ctx context.Context, tx *sql.Tx) error {
 			return store.TxSaveSetup(ctx, tx, row, refs)
 		}}
+		return out.PrependFinish(archived)
 	}
+}
+
+// setupWorldBackup returns the backup a setup save links: the one payload names, or with
+// BackUpWorld a verified backup of the world taken now to its planned archive, with the finish
+// step that records it. A server whose selected world has no file yet gets no backup, which the
+// job log says; a backup that cannot be taken or does not verify fails the save.
+func (s *SetupJobs) setupWorldBackup(
+	ctx context.Context, jh *jobs.Handle, inst *store.Instance, payload *SetupJobPayload,
+) (backupID string, record func(context.Context, *sql.Tx) error, err error) {
+	if !payload.BackUpWorld {
+		return payload.BackupID, nil, nil
+	}
+	saved, err := hasSavedWorld(inst)
+	if err != nil {
+		return "", nil, err
+	}
+	if !saved {
+		jh.Log("warning: the server has no saved world yet, so no world backup was linked")
+		return "", nil, nil
+	}
+	if reason := s.Backups.noRoom(); reason != "" {
+		return "", nil, fmt.Errorf("no world backup was taken: %s", reason)
+	}
+	jh.Progress(ctx, 80, "backing up the world")
+	row, err := s.verifiedWorldBackup(ctx, jh, inst, payload.ArchivePlan)
+	if err != nil {
+		return "", nil, fmt.Errorf("back up the world: %w", err)
+	}
+	return row.ID, func(ctx context.Context, tx *sql.Tx) error {
+		if err := store.TxCreateBackup(ctx, tx, row); err != nil {
+			return fmt.Errorf("record the world backup: %w", err)
+		}
+		return nil
+	}, nil
+}
+
+// hasSavedWorld reports whether inst's selected world has a file in worlds_local, its .db or its
+// .fwl. A server can hold other files under worlds/, such as player lists, before the game first
+// saves the world.
+func hasSavedWorld(inst *store.Instance) (bool, error) {
+	for _, ext := range []string{".db", ".fwl"} {
+		p, err := instance.WorldPath(inst.DataDir, filepath.Join(instance.WorldsLocalDir, inst.WorldName+ext))
+		if err != nil {
+			return false, err
+		}
+		_, err = os.Lstat(p)
+		if err == nil {
+			return true, nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return false, fmt.Errorf("inspect the world of %s: %w", inst.ID, err)
+		}
+	}
+	return false, nil
+}
+
+// verifiedWorldBackup archives inst's stopped world to plan's archive and checks it as a manual
+// backup is checked, with the server seen down on both sides of the copy. Whatever fails after
+// the archive is written removes it, so no file is left that no catalogue row names.
+func (s *SetupJobs) verifiedWorldBackup(
+	ctx context.Context, jh *jobs.Handle, inst *store.Instance, plan ArchivePlan,
+) (*store.Backup, error) {
+	if err := AssertStopped(ctx, s.Runtime, inst); err != nil {
+		return nil, err
+	}
+	row, err := s.Backups.archiveAndVerify(ctx, jh, inst, plan.ArchiveID, plan.ArchivePath, store.TriggerManual, true)
+	if err == nil {
+		err = AssertStopped(ctx, s.Runtime, inst)
+	}
+	if err != nil {
+		// plan.ArchivePath is built from data.root, the instance id and the planned id. An
+		// archive can fail after publishing its file, so it is removed whatever failed.
+		_ = os.Remove(plan.ArchivePath)
+		return nil, err
+	}
+	return row, nil
 }
 
 // UnavailableArchives names each package of a light setup that it does not keep, has files to

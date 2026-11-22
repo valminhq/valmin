@@ -1136,9 +1136,10 @@ A saved setup is a named snapshot of a server's mods, configuration and settings
 kept on the same panel so you can go back after a change goes wrong.
 
 Stop the server, then open **Saved setups**. The name field starts as **Working before
-update**; change it if needed, then choose **Save setup**. You can link one consistent
-world backup from this server. A linked backup stays outside retention and cannot
-be deleted while a setup links to it.
+update**; change it if needed, then choose **Save setup**. Under **Associated world backup**,
+link one consistent world backup from this server, or choose **Back up the world now** to take
+a backup during the save and link it. A linked backup stays outside retention and cannot
+be deleted while a setup links to it; **Backups** marks it **Kept for setup**.
 
 A setup keeps launch and backup settings, Valmin-managed mods with their exact
 registries, versions, locks, enabled states, and client labels, plus every configuration

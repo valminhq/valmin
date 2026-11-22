@@ -27,6 +27,11 @@ export interface Backup {
 	/** What the world check asks the operator to look at; empty when nothing. The daemon writes
 	 * the messages, so the SPA holds no knowledge of world files. */
 	world_attention: WorldAttention[];
+	/** True while a saved setup links the archive, which keeps it out of retention and blocks
+	 * deleting it. */
+	kept_for_setup: boolean;
+	/** The setups linking it, sent only to someone who may manage setups. */
+	linked_setups?: { id: string; name: string }[];
 }
 
 /** An archive that retention deletes once the next backup of a kind is taken. */

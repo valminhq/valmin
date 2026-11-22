@@ -16,6 +16,7 @@ function archive(id: string, createdAt: string, extra: Partial<Backup> = {}): Ba
 		prunes_next: false,
 		world_bytes: null,
 		world_attention: [],
+		kept_for_setup: false,
 		...extra
 	};
 }

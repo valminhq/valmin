@@ -130,6 +130,15 @@ describe('the backups panel', () => {
 		expect(screen.getByLabelText('Consistent backups to keep')).toBeTruthy();
 	});
 
+	it('marks a backup a saved setup keeps and does not offer to delete it', async () => {
+		await open([actions.backupsList, actions.backupsRestore], {
+			archives: [backup({ kept_for_setup: true, linked_setups: [{ id: 's1', name: 'Working' }] })]
+		});
+		expect(screen.getByText('Kept for setup')).toBeTruthy();
+		expect(screen.getByText('Working')).toBeTruthy();
+		expect(disabled(button('Delete'))).toBe(true);
+	});
+
 	it('offers Upload now only once an off-host destination is set up', async () => {
 		const summary = { destination_id: null, enabled: false, pending: 0, failed: 0 };
 		daemon.on('GET', '/instances/inst-a/remote-copies', () =>

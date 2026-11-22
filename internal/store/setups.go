@@ -318,6 +318,37 @@ func (db *DB) DeleteBackupUnpinned(ctx context.Context, instanceID, backupID str
 	})
 }
 
+// SetupLink names a saved setup that links a backup.
+type SetupLink struct {
+	ID   string
+	Name string
+}
+
+// BackupSetupLinks maps each backup of an instance that saved setups link to those setups,
+// oldest first.
+func (db *DB) BackupSetupLinks(ctx context.Context, instanceID string) (map[string][]SetupLink, error) {
+	rows, err := db.Reader.QueryContext(ctx, `
+		SELECT backup_id, id, name FROM saved_setups
+		WHERE instance_id = ? AND backup_id IS NOT NULL ORDER BY created_at, id`, instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("list setup links of %s: %w", instanceID, err)
+	}
+	defer func() { _ = rows.Close() }()
+	links := map[string][]SetupLink{}
+	for rows.Next() {
+		var backupID string
+		var link SetupLink
+		if err := rows.Scan(&backupID, &link.ID, &link.Name); err != nil {
+			return nil, fmt.Errorf("scan setup link: %w", err)
+		}
+		links[backupID] = append(links[backupID], link)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list setup links of %s: %w", instanceID, err)
+	}
+	return links, nil
+}
+
 // BackupPinned reports whether any saved setup references an instance's backup.
 func (db *DB) BackupPinned(ctx context.Context, instanceID, backupID string) (bool, error) {
 	var pinned bool
