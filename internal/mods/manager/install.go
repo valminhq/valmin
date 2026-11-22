@@ -37,13 +37,14 @@ const (
 
 // Installer owns mod install submissions, staging, placement, and rollback.
 type Installer struct {
-	DB            *store.DB
-	Engine        *jobs.Engine
-	Commands      *command.Manager
-	Clients       map[source.Source]*thunderstore.Client
-	Caches        map[source.Source]*cache.Cache
-	DataRoot      string
-	ArchiveWorlds ArchiveWorlds
+	DB       *store.DB
+	Engine   *jobs.Engine
+	Commands *command.Manager
+	Clients  map[source.Source]*thunderstore.Client
+	Caches   map[source.Source]*cache.Cache
+	DataRoot string
+	// Checkpoint saves the world and setup before an update; nil refuses updates.
+	Checkpoint Checkpoint
 }
 
 func (i *Installer) enabledSources() []source.Source {
@@ -235,7 +236,8 @@ func (i *Installer) runModInstall(inst *store.Instance, payload *InstallPayload)
 				return jobs.Outcome{Status: jobs.StatusCancelled}
 			}
 			var err error
-			if archived, err = archiveBeforeUpdate(ctx, h, inst, i.ArchiveWorlds); err != nil {
+			archived, err = checkpointBeforeUpdate(ctx, h, inst, i.Checkpoint, pkgs, payload.StagingDir)
+			if err != nil {
 				return jobs.Failed(i.failureCode(err), err)
 			}
 		}

@@ -185,7 +185,7 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	hub = w.hub(external, streams, grants)
 
 	worlds := &control.Worlds{DataRoot: w.cfg.Data.Root, Runtime: w.runtime}
-	mods := w.mods(worlds)
+	mods := w.mods()
 	// Outside the API chain and outside the API subtree, on a thin chain of its own: it is the
 	// only route a stranger can reach, and it authorizes on a column rather than a session. Its
 	// limiter is its own, so a flood of status reads cannot spend the login route's budget.
@@ -203,6 +203,8 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build instance control: %w", err)
 	}
+	// The installer exists before the setup jobs, which fetch light setups' packages through it.
+	mods.install.Checkpoint = ctl.SetupJobs.Checkpoint
 	instances := &Instances{
 		ctl:    ctl,
 		alerts: w.alertScanner(ctl.Starter, streams, mods, notifier),
@@ -420,7 +422,7 @@ func (w *wiring) hub(external *url.URL, streams *instance.Streams, grants *Grant
 
 // mods builds the mod engine: one client and one zip cache per enabled registry, the planner,
 // the installer and the registry sync. A disabled registry is absent from both maps.
-func (w *wiring) mods(worlds *control.Worlds) *Mods {
+func (w *wiring) mods() *Mods {
 	clients := map[source.Source]*thunderstore.Client{
 		source.Thunderstore: thunderstore.New(w.cfg.Thunderstore.BaseURL),
 	}
@@ -438,7 +440,7 @@ func (w *wiring) mods(worlds *control.Worlds) *Mods {
 	m.plan = &manager.Planner{DB: w.db, Enabled: m.enabledSources()}
 	m.install = &manager.Installer{
 		DB: w.db, Engine: w.engine, Commands: w.commands, Clients: clients, Caches: caches,
-		DataRoot: w.cfg.Data.Root, ArchiveWorlds: worlds.Snapshot,
+		DataRoot: w.cfg.Data.Root,
 	}
 	m.syncer = &manager.Syncer{
 		DB: w.db, Engine: w.engine, Clients: clients, Interval: w.cfg.Thunderstore.SyncInterval.Std(),

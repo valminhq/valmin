@@ -131,6 +131,8 @@ export interface Instance {
 	auto_stop_minutes: number;
 	/** What happens to a running server whose log has gone quiet: nothing, an alert, or a restart. */
 	watchdog: WatchdogMode;
+	/** What a mod update saves of the setup before it changes anything. */
+	setup_before_update: SetupBeforeUpdate;
 	remote_backup_enabled?: boolean;
 	remote_keep_cold?: number;
 	remote_keep_hot?: number;
@@ -296,6 +298,8 @@ export interface PatchInstance {
 	auto_stop_minutes?: number;
 	/** `restart` needs the right to restart the server as well as to change its settings. */
 	watchdog?: WatchdogMode;
+	/** Needs the right to manage saved setups. */
+	setup_before_update?: SetupBeforeUpdate;
 	/** The branch the next game update installs. Sent with the password for a password branch;
 	 * a branch sent without one clears the stored password. */
 	game_branch?: string;
@@ -308,6 +312,10 @@ export const GAME_BACKUPS_MAX = 50;
 
 /** What the daemon does about a running server whose log has gone quiet. */
 export type WatchdogMode = 'off' | 'alert' | 'restart';
+
+/** What a mod update saves of the setup first: a full setup, a light one, or nothing beyond the
+ * world backup. */
+export type SetupBeforeUpdate = 'full' | 'light' | 'off';
 
 /** The range of idle minutes auto-stop accepts when it is on. */
 export const AUTO_STOP_MIN = 5;

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -103,13 +104,13 @@ func TestASingleModInstallBacksUpOnlyAnUpdate(t *testing.T) {
 			giveWorld(t, dataDir)
 
 			seen := make(chan string, 1)
-			archive := rt.mods.install.ArchiveWorlds
-			rt.mods.install.ArchiveWorlds = func(
-				ctx context.Context, inst *store.Instance, trigger string,
+			checkpoint := rt.mods.install.Checkpoint
+			rt.mods.install.Checkpoint = func(
+				ctx context.Context, h *jobs.Handle, inst *store.Instance, name, scratch string,
 			) (func(context.Context, *sql.Tx) error, error) {
 				body, _ := os.ReadFile(serverPath(dataDir, "BepInEx/plugins/Only.dll"))
 				seen <- string(body)
-				return archive(ctx, inst, trigger)
+				return checkpoint(ctx, h, inst, name, scratch)
 			}
 			installOK(t, rt, admin, "Ns-Only", tc.install)
 

@@ -283,6 +283,9 @@ type patchInstanceRequest struct {
 	// Watchdog is "off", "alert" or "restart": what the panel does about a running server whose
 	// log has gone quiet. It takes effect immediately.
 	Watchdog *string `json:"watchdog"`
+	// SetupBeforeUpdate is "full", "light" or "off": what a mod update saves of the setup before
+	// it changes anything. It takes effect immediately.
+	SetupBeforeUpdate *string `json:"setup_before_update"`
 	// GameBranch and GameBranchPassword choose the Steam branch the next game update installs.
 	// They are applied together: a password branch needs its password each time it is chosen,
 	// and a branch set without one clears the stored password.
@@ -345,6 +348,10 @@ func (b *patchInstanceRequest) actions() []authz.Action {
 	// stops new off-host copies: both belong to whoever may delete backups.
 	if b.retention() {
 		need = append(need, authz.BackupsRestore)
+	}
+	// It decides which saved setups the panel makes, so it belongs to whoever manages them.
+	if b.SetupBeforeUpdate != nil {
+		need = append(need, authz.SetupsManage)
 	}
 	// Auto-stop stops the server, so it also needs the right to stop it.
 	if b.AutoStopMinutes != nil {
@@ -477,6 +484,16 @@ func addWatchdogViolations(val *apierr.Validation, body *patchInstanceRequest) {
 	}
 }
 
+// addSetupBeforeUpdateViolations rejects a setup_before_update value other than full, light or
+// off.
+func addSetupBeforeUpdateViolations(val *apierr.Validation, body *patchInstanceRequest) {
+	if v := body.SetupBeforeUpdate; v != nil {
+		if _, ok := control.ParseSetupBeforeUpdate(*v); !ok {
+			val.Add("setup_before_update", apierr.FieldInvalid, "Use full, light or off.")
+		}
+	}
+}
+
 // addGameBackupsViolations rejects a rolling backup count outside minGameBackups..maxGameBackups.
 func addGameBackupsViolations(val *apierr.Validation, body *patchInstanceRequest) {
 	if v := body.GameBackups; v != nil && (*v < minGameBackups || *v > maxGameBackups) {
@@ -532,6 +549,7 @@ func (h *Instances) mergePatch(
 	addStatusTextViolations(&val, body)
 	addAutoStopViolations(&val, body)
 	addWatchdogViolations(&val, body)
+	addSetupBeforeUpdateViolations(&val, body)
 	addJoinHostViolations(&val, body)
 	addGameBackupsViolations(&val, body)
 
@@ -717,8 +735,8 @@ func branchUpdate(current *store.Instance, branch *branchPatch) (*store.Instance
 	return &store.InstanceBranch{Name: branch.name, Password: branch.envelope}, changes
 }
 
-// settingsUpdate validates the launch, retention, auto-stop, watchdog, join host, branch and
-// remote-policy fields the body sets, adds them to update, and returns what changes. It writes
+// settingsUpdate validates the launch, retention, auto-stop, watchdog, setup-before-update, join
+// host, branch and remote-policy fields the body sets, adds them to update, and returns what changes. It writes
 // nothing; it reports false after writing the error.
 func (h *Instances) settingsUpdate(
 	w http.ResponseWriter, r *http.Request, current *store.Instance, body *patchInstanceRequest,
@@ -744,6 +762,7 @@ func (h *Instances) settingsUpdate(
 		addStatusTextViolations(&val, body)
 		addAutoStopViolations(&val, body)
 		addWatchdogViolations(&val, body)
+		addSetupBeforeUpdateViolations(&val, body)
 		addJoinHostViolations(&val, body)
 		if err := val.Err(); err != nil {
 			apierr.Write(w, r, err)
@@ -764,6 +783,10 @@ func (h *Instances) settingsUpdate(
 	if v := body.Watchdog; v != nil && *v != current.Watchdog {
 		update.Watchdog = v
 		changes = fieldChange(changes, "watchdog", current.Watchdog, *v)
+	}
+	if v := body.SetupBeforeUpdate; v != nil && *v != current.SetupBeforeUpdate {
+		update.SetupBeforeUpdate = v
+		changes = fieldChange(changes, "setup_before_update", current.SetupBeforeUpdate, *v)
 	}
 	if v := body.JoinHost; v != nil {
 		if host := strings.TrimSpace(*v); host != current.JoinHost {

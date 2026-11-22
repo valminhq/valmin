@@ -821,3 +821,35 @@ func TestSetupSaveWithoutASavedWorldLinksNoBackup(t *testing.T) {
 		t.Errorf("setups = %+v, %v, want one with no backup", rows, err)
 	}
 }
+
+// TestSetupRestoreLinksTheWorldItBacksUp asserts a restore that changes mods links the
+// automatic setup it saves to the world backup it takes first, so undoing it brings both back.
+func TestSetupRestoreLinksTheWorldItBacksUp(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	setupTestMod(t, db, dataDir, "Ns-One", source.Thunderstore,
+		"1.0.0", "one", false, true, false, "unknown")
+	giveWorld(t, dataDir)
+	saved := setupTestSave(t, rt, db, admin, "one")
+
+	seed(t, db, `DELETE FROM instance_mods WHERE instance_id = 'inst-a'`)
+	if err := os.Remove(serverPath(dataDir, "BepInEx/plugins/Ns-One.dll")); err != nil {
+		t.Fatal(err)
+	}
+	setupTestMod(t, db, dataDir, "Ns-Two", source.Thunderstore,
+		"2.0.0", "two", false, true, false, "unknown")
+	preview := setupTestPreview(t, rt, admin, saved.ID)
+	if job := setupTestRestore(t, rt, admin, saved.ID, preview.ETag); job.Status != "succeeded" {
+		t.Fatalf("restore job = %+v, want succeeded", job)
+	}
+
+	backups := preUpdateBackupIDs(t, db)
+	setups := automaticSetups(t, db)
+	if len(backups) != 1 || len(setups) != 1 {
+		t.Fatalf("pre_update backups = %v, automatic setups = %+v, want one of each", backups, setups)
+	}
+	if setups[0].Name != "Before restoring one" || setups[0].BackupID != backups[0] {
+		t.Errorf("automatic setup = %q linked to %q, want \"Before restoring one\" linked to %q",
+			setups[0].Name, setups[0].BackupID, backups[0])
+	}
+}

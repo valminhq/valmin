@@ -9,8 +9,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
-	"unicode/utf8"
 
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/errcode"
@@ -313,41 +311,4 @@ func (s *SetupJobs) retainSetup(
 		return nil, err
 	}
 	return refs, nil
-}
-
-// captureBeforeRestore saves current, the server's setup before a restore of the setup named
-// name, as an automatic setup for the restore's finish to publish.
-func (s *SetupJobs) captureBeforeRestore(
-	ctx context.Context, inst *store.Instance, name string, current *SetupSnapshot, staging string,
-) (*store.SavedSetup, []store.SetupArtifactRef, error) {
-	dir := filepath.Join(staging, "before")
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return nil, nil, fmt.Errorf("create staging for the setup before restore: %w", err)
-	}
-	snap := *current
-	snap.Mods = slices.Clone(current.Mods)
-	refs, err := s.retainSetup(ctx, inst, &snap, dir)
-	if err != nil {
-		return nil, nil, err
-	}
-	raw, err := json.Marshal(snap)
-	if err != nil {
-		return nil, nil, fmt.Errorf("encode the setup before restore: %w", err)
-	}
-	return &store.SavedSetup{
-		ID: store.NewID(), InstanceID: inst.ID, Name: automaticSetupName(name),
-		GameBuildID: deref(inst.GameBuildID), WorldName: inst.WorldName, SnapshotJSON: string(raw),
-		Automatic: true, Configs: snap.ConfigFiles, ConfigsTruncated: snap.ConfigsTruncated,
-	}, refs, nil
-}
-
-// automaticSetupName names the setup saved before restoring the setup named name, cut to
-// MaxSetupNameBytes without splitting a character.
-func automaticSetupName(name string) string {
-	full := "Before restoring " + name
-	for len(full) > MaxSetupNameBytes {
-		_, size := utf8.DecodeLastRuneInString(full)
-		full = full[:len(full)-size]
-	}
-	return full
 }

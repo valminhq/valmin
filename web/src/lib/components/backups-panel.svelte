@@ -707,7 +707,8 @@
 							<p class="text-sm text-muted-foreground">
 								Older backups are deleted after the next backup or scheduled cleanup. Set a count to
 								0 to keep all backups of that type. Snapshots taken before a restore, import or
-								update are kept apart, up to the same number as consistent backups.
+								update are kept apart, up to the same number as consistent backups. A backup linked
+								to a saved setup is kept until the setup is deleted.
 							</p>
 						</div>
 						<div class="grid gap-3">

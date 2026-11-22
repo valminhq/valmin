@@ -73,7 +73,7 @@ type setupDetailView struct {
 	// ConfigsTruncated reports that the config tree held files past the listing limits, which
 	// the setup left out.
 	ConfigsTruncated bool `json:"configs_truncated"`
-	// Automatic marks a setup the panel saved before a restore.
+	// Automatic marks a setup the panel saved before a restore or a mod update.
 	Automatic bool `json:"automatic"`
 	// Light marks a setup that keeps only the packages their registry archives cannot
 	// reproduce, and downloads the rest on restore.
