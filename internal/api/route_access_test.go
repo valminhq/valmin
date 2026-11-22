@@ -72,6 +72,7 @@ var instanceRouteAccess = map[string]string{
 	"GET /api/v1/instances/{id}/logs":                             accessView,
 	"GET /api/v1/instances/{id}/manifest":                         "instance.settings",
 	"GET /api/v1/instances/{id}/manifest/code":                    "instance.settings",
+	"GET /api/v1/instances/{id}/manifest/files":                   "instance.settings",
 	"GET /api/v1/instances/{id}/mods":                             accessView,
 	"POST /api/v1/instances/{id}/mods":                            "mods.manage",
 	"GET /api/v1/instances/{id}/mods/export":                      accessView,

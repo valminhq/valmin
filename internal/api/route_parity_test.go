@@ -106,6 +106,7 @@ B- GET /api/v1/instances/{id}/jobs
 B- GET /api/v1/instances/{id}/logs
 B- GET /api/v1/instances/{id}/manifest
 B- GET /api/v1/instances/{id}/manifest/code
+B- GET /api/v1/instances/{id}/manifest/files
 B- GET /api/v1/instances/{id}/mods
 B- POST /api/v1/instances/{id}/mods
 B- POST /api/v1/instances/{id}/mods/code/apply

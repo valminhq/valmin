@@ -49,8 +49,8 @@ func putNestedRaw(t *testing.T, rt *Server, u *store.User, name, content string)
 }
 
 // TestConfigListWalksSubdirectories asserts the list reaches config files in subdirectories,
-// leaves out hidden, binary, kept, too deep and too large files with a note, and marks only
-// what saved setups carry as portable.
+// leaves out hidden, binary, kept, too deep and too large files with a note, and marks only the
+// files template codes carry as portable.
 func TestConfigListWalksSubdirectories(t *testing.T) {
 	t.Parallel()
 	rt, db, fake, admin, _ := lifecycleWorld(t)

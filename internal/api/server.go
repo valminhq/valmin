@@ -197,8 +197,7 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 		Worlds: worlds, Installer: mods.install, Notifier: notifier, Commands: w.commands,
 		PublishState: hub.PublishState, PublishMods: hub.PublishMods,
 		ReadMods: func(ctx context.Context, inst *store.Instance) ([]store.InstanceMod, error) {
-			_, installed, err := instanceDefinition(ctx, w.db, inst)
-			return installed, err
+			return w.db.InstanceMods(ctx, inst.ID)
 		},
 	})
 	if err != nil {

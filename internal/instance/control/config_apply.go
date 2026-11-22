@@ -9,8 +9,10 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/errcode"
@@ -21,13 +23,14 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// CheckManifestConfigName accepts one plain .cfg filename: no directory, no separator and no
-// "..".
+// CheckManifestConfigName accepts one plain .cfg filename: no directory, no separator, no ".."
+// and no control character.
 func CheckManifestConfigName(name string) error {
 	if name == "" {
 		return fmt.Errorf("a config entry has no filename")
 	}
-	if name != filepath.Base(name) || strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
+	if name != filepath.Base(name) || strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") ||
+		strings.ContainsFunc(name, unicode.IsControl) {
 		return fmt.Errorf("%q is not a plain filename", name)
 	}
 	if !strings.HasSuffix(name, ".cfg") {
@@ -36,16 +39,18 @@ func CheckManifestConfigName(name string) error {
 	return nil
 }
 
-// CarriedConfig reports whether saved setups, definitions and template codes carry the config
-// file at name, relative to the config directory: a plain .cfg other than the RCON plugin's.
+// CarriedConfig reports whether the config file at name, relative to the config directory, is a
+// plain .cfg other than the RCON plugin's: what a setup saved before setups held the config tree
+// carried, and what a schema 1 definition can hold.
 func CarriedConfig(name string) bool {
 	return CheckManifestConfigName(name) == nil && name != command.ConfigFile
 }
 
-// ApplyManifestConfigs writes the configuration files of an imported definition. With merge
-// set, each file's settings are applied over the file already on disk instead of replacing it.
-// Each file's history records the bytes a write replaces and the bytes written; a file whose
-// bytes would not change is not rewritten.
+// ApplyManifestConfigs writes the configuration files of an imported definition, each at its
+// path under the config directory, creating the folders it needs. With merge set, a .cfg file's
+// settings are applied over the file already on disk instead of replacing it; any other file is
+// replaced whole. Each file's history records the bytes a write replaces and the bytes written;
+// a file whose bytes would not change is not rewritten.
 func ApplyManifestConfigs(
 	ctx context.Context, db *store.DB, inst *store.Instance, configs []ManifestConfig, merge bool,
 ) error {
@@ -53,7 +58,7 @@ func ApplyManifestConfigs(
 		return nil
 	}
 	for _, cfg := range configs {
-		if err := CheckManifestConfigName(cfg.File); err != nil {
+		if err := instance.CheckConfigPath(cfg.File); err != nil {
 			return err
 		}
 	}
@@ -85,7 +90,7 @@ func applyManifestConfig(
 		return fmt.Errorf("read config %s: %w", cfg.File, err)
 	}
 	next := []byte(cfg.Content)
-	if merge {
+	if merge && strings.HasSuffix(cfg.File, ".cfg") {
 		next = modconfig.Merge(current, next)
 	}
 	if err := modconfig.DropPending(dir, cfg.File); err != nil {
@@ -95,6 +100,9 @@ func applyManifestConfig(
 		return nil
 	}
 	if err := trackBefore(ctx, db, dir, instanceID, cfg.File, current); err != nil {
+		return err
+	}
+	if err := mkdirAllIn(dir, path.Dir(cfg.File)); err != nil {
 		return err
 	}
 	if err := fsutil.WriteFileAtomicIn(dir, cfg.File, next); err != nil {
@@ -139,18 +147,28 @@ func mkdirConfigDir(dataDir string) error {
 		return fmt.Errorf("open server directory: %w", err)
 	}
 	defer func() { _ = server.Close() }()
+	return mkdirAllIn(server, instance.ConfigDir)
+}
+
+// mkdirAllIn creates each missing folder of the slash path rel inside root, with the exact mode
+// fsutil.MkdirAllExact gives. An existing folder, or a symlink root resolves inside itself, is
+// kept; root refuses one that leads out.
+func mkdirAllIn(root *os.Root, rel string) error {
+	if rel == "." || rel == "" {
+		return nil
+	}
 	var p string
-	for _, part := range strings.Split(instance.ConfigDir, "/") {
+	for _, part := range strings.Split(rel, "/") {
 		p = filepath.Join(p, part)
-		if _, err := server.Lstat(p); err == nil {
+		if _, err := root.Lstat(p); err == nil {
 			continue
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("inspect %s: %w", p, err)
 		}
-		if err := server.Mkdir(p, fsutil.DirMode); err != nil {
+		if err := root.Mkdir(p, fsutil.DirMode.Perm()); err != nil {
 			return fmt.Errorf("create %s: %w", p, err)
 		}
-		if err := server.Chmod(p, fsutil.DirMode); err != nil {
+		if err := root.Chmod(p, fsutil.DirMode); err != nil {
 			return fmt.Errorf("set mode of %s: %w", p, err)
 		}
 	}

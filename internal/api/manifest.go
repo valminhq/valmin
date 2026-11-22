@@ -2,12 +2,11 @@ package api
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
-	"io/fs"
 	"net/http"
+	"path"
 	"slices"
-	"sort"
 	"strings"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -16,15 +15,22 @@ import (
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
-	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// manifestSchema is the only version this build writes and the only one it reads. An unknown
-// value is refused rather than best-effort parsed (ADR-151).
-const manifestSchema = 1
+// The manifest versions this build reads and writes; any other value is refused rather than
+// best-effort parsed. Schema 1 carries only plain .cfg names directly in BepInEx/config; schema 2
+// also carries paths into its subfolders and YAML, JSON and text files. Export writes 1 when
+// the file needs nothing more, so older panels can still read it.
+const (
+	manifestSchema      = 1
+	manifestSchemaPaths = 2
+)
+
+// configsField names the manifest's config files in a problem.
+const configsField = "configs"
 
 // The manifest's bounds, enforced on the way in. An importer reads untrusted bytes, so every
 // dimension it could grow along has a ceiling (ADR-151).
@@ -32,7 +38,10 @@ const (
 	// maxManifestBytes is the whole document's cap, applied by the handler because 11 §8.3's
 	// 1 MiB JSON limit is exempted for these two routes — a real modpack's config is bigger
 	// than that, and a manifest missing config is not a definition (ADR-151).
-	maxManifestBytes   = 8 << 20
+	maxManifestBytes = 8 << 20
+	// importWrapperBytes is room kept, under maxManifestBytes, for an import request's fields
+	// around the document.
+	importWrapperBytes = 64 << 10
 	maxManifestMods    = 1000
 	maxManifestConfigs = 200
 )
@@ -113,34 +122,68 @@ func (h *Instances) exportManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	manifest, _, err := instanceDefinition(r.Context(), h.DB, inst)
+	manifest, err := instanceDefinition(r.Context(), h.DB, inst)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	detail, err := importableDetail(manifest)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if detail != "" {
+		apierr.Write(w, r, apierr.New(errcode.ValidationFailed).Msg(detail))
 		return
 	}
 	JSON(w, r, http.StatusOK, manifest)
 }
 
-// instanceDefinition is the single read path for G6's reproducible definition. Export returns
-// its document; clone consumes the same snapshot while also retaining the richer installed rows
-// needed to preserve file manifests and explicit/dependency provenance.
-func instanceDefinition(
-	ctx context.Context, db *store.DB, inst *store.Instance,
-) (*instanceManifest, []store.InstanceMod, error) {
+// importableDetail says why no panel would import m, which an export refuses rather than hands
+// out: more config files than an import accepts, or a document larger than an import request may
+// be. It is empty when m fits.
+func importableDetail(m *instanceManifest) (string, error) {
+	if len(m.Configs) > maxManifestConfigs {
+		return fmt.Sprintf("This server has %d changed config files, more than a template file can "+
+			"carry (%d). Restore their originals in the config editor, or share a template code.",
+			len(m.Configs), maxManifestConfigs), nil
+	}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return "", fmt.Errorf("encode definition: %w", err)
+	}
+	// The import request wraps the document with a name and a password.
+	if len(raw) > maxManifestBytes-importWrapperBytes {
+		return fmt.Sprintf("This server's changed config files come to %d MiB, more than a template "+
+			"file can carry. Restore the largest to their originals, or share a template code.",
+			len(raw)>>20), nil
+	}
+	return "", nil
+}
+
+// instanceDefinition is the server's definition for export: launch settings, installed mods,
+// and the config files the panel changed, whole, apart from a .cfg too large to carry.
+func instanceDefinition(ctx context.Context, db *store.DB, inst *store.Instance) (*instanceManifest, error) {
 	installed, err := db.InstanceMods(ctx, inst.ID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read installed mods for instance %s: %w", inst.ID, err)
+		return nil, fmt.Errorf("read installed mods for instance %s: %w", inst.ID, err)
 	}
-	configs, err := readInstanceConfigs(inst)
+	carried, _, err := templateFiles(ctx, db, inst)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
+	}
+	configs := make([]control.ManifestConfig, 0, len(carried))
+	for _, f := range carried {
+		if !f.TooLarge {
+			configs = append(configs, control.ManifestConfig{File: f.File, Content: string(f.Content)})
+		}
 	}
 	launch, err := control.LaunchOf(inst)
 	if err != nil {
-		return nil, nil, fmt.Errorf("read launch settings: %w", err)
+		return nil, fmt.Errorf("read launch settings: %w", err)
 	}
 	manifest := &instanceManifest{
-		Schema:   manifestSchema,
+		Schema:   schemaFor(configs),
 		Name:     inst.Name,
 		Instance: launch,
 		Mods:     make([]control.ManifestMod, 0, len(installed)),
@@ -152,38 +195,40 @@ func instanceDefinition(
 			Version: installed[i].Version, Side: installed[i].Side,
 		})
 	}
-	return manifest, installed, nil
+	return manifest, nil
 }
 
-// readInstanceConfigs reads every carried config in the instance's config directory whole. A
-// server that has never started has none, which is an empty list rather than an error (03 §9).
-func readInstanceConfigs(inst *store.Instance) ([]control.ManifestConfig, error) {
-	dir, err := instance.OpenConfigDir(inst.DataDir)
-	if errors.Is(err, fs.ErrNotExist) {
-		return []control.ManifestConfig{}, nil
+// nestedConfigProblems names each config file whose path runs through another config file of
+// the same definition, which no import could write. names are relative paths the name check
+// accepted, so walking up each one ends at ".".
+func nestedConfigProblems(names []string) []manifestProblem {
+	files := make(map[string]bool, len(names))
+	for _, name := range names {
+		files[name] = true
 	}
-	if err != nil {
-		return nil, fmt.Errorf("read config directory: %w", err)
-	}
-	defer func() { _ = dir.Close() }()
-	entries, err := fs.ReadDir(dir.FS(), ".")
-	if err != nil {
-		return nil, fmt.Errorf("read config directory: %w", err)
-	}
-	out := []control.ManifestConfig{}
-	for _, e := range entries {
-		// Type is the entry's own, unfollowed: a symlink is skipped rather than read.
-		if !e.Type().IsRegular() || !control.CarriedConfig(e.Name()) {
-			continue
+	var problems []manifestProblem
+	for _, name := range names {
+		for dir := path.Dir(name); dir != "." && dir != "/"; dir = path.Dir(dir) {
+			if files[dir] {
+				problems = append(problems, manifestProblem{
+					Field: configsField, Detail: fmt.Sprintf("%s is inside %s, which is a file.", name, dir),
+				})
+				break
+			}
 		}
-		raw, _, err := fsutil.ReadRegularIn(dir, e.Name())
-		if err != nil {
-			return nil, fmt.Errorf("read config: %w", err)
-		}
-		out = append(out, control.ManifestConfig{File: e.Name(), Content: string(raw)})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
-	return out, nil
+	return problems
+}
+
+// schemaFor is the manifest schema that carries configs: 1 when every file is a plain .cfg name,
+// 2 otherwise.
+func schemaFor(configs []control.ManifestConfig) int {
+	for _, c := range configs {
+		if control.CheckManifestConfigName(c.File) != nil {
+			return manifestSchemaPaths
+		}
+	}
+	return manifestSchema
 }
 
 // portableConfigs drops the config files that belong to one installation rather than to its
@@ -365,10 +410,11 @@ func (h *Instances) packsFirst(ctx context.Context, mods []control.ManifestMod) 
 // cannot disagree about what would be refused.
 func validateManifest(m *instanceManifest) []manifestProblem {
 	problems := []manifestProblem{}
-	if m.Schema != manifestSchema {
+	if m.Schema != manifestSchema && m.Schema != manifestSchemaPaths {
 		problems = append(problems, manifestProblem{
-			Field:  "schema",
-			Detail: fmt.Sprintf("This panel reads manifest schema %d, not %d.", manifestSchema, m.Schema),
+			Field: "schema",
+			Detail: fmt.Sprintf("This panel reads manifest schema %d or %d, not %d.",
+				manifestSchema, manifestSchemaPaths, m.Schema),
 		})
 		// Every rule below describes schema 1's shape, so there is nothing more to say about
 		// a document that is not one.
@@ -393,31 +439,37 @@ func validateManifest(m *instanceManifest) []manifestProblem {
 	}
 	if len(m.Configs) > maxManifestConfigs {
 		problems = append(problems, manifestProblem{
-			Field: "configs",
+			Field: configsField,
 			Detail: fmt.Sprintf("%d config files; this panel imports at most %d.",
 				len(m.Configs), maxManifestConfigs),
 		})
 	}
 	seen := map[string]bool{}
+	checkName := control.CheckManifestConfigName
+	if m.Schema == manifestSchemaPaths {
+		checkName = instance.CheckConfigPath
+	}
+	valid := make([]string, 0, len(m.Configs))
 	for _, cfg := range m.Configs {
-		if err := control.CheckManifestConfigName(cfg.File); err != nil {
-			problems = append(problems, manifestProblem{Field: "configs", Detail: err.Error()})
+		if err := checkName(cfg.File); err != nil {
+			problems = append(problems, manifestProblem{Field: configsField, Detail: err.Error()})
 			continue
 		}
+		valid = append(valid, cfg.File)
 		if seen[cfg.File] {
 			problems = append(problems, manifestProblem{
-				Field: "configs", Detail: cfg.File + " appears twice.",
+				Field: configsField, Detail: cfg.File + " appears twice.",
 			})
 		}
 		seen[cfg.File] = true
 		if len(cfg.Content) > instance.MaxConfigSize {
 			problems = append(problems, manifestProblem{
-				Field:  "configs",
+				Field:  configsField,
 				Detail: fmt.Sprintf("%s is larger than %d bytes.", cfg.File, instance.MaxConfigSize),
 			})
 		}
 	}
-	return problems
+	return append(problems, nestedConfigProblems(valid)...)
 }
 
 // modProblems is what is wrong with one manifest mod's registry and side tag.

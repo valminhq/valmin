@@ -73,7 +73,8 @@ type configFileView struct {
 	// InstalledMods names the installed mods the file belongs to, matched by name; empty for a
 	// file no installed mod claims.
 	InstalledMods []string `json:"installed_mods"`
-	// Portable is whether saved setups, definitions and template codes carry the file.
+	// Portable is whether template codes carry the file's settings once the panel has changed
+	// them: a plain .cfg directly in the config directory, other than the RCON plugin's.
 	Portable bool `json:"portable"`
 	// ModReplacedEdits names the mod update whose new version of the file replaced edited
 	// bytes, while that is still the file's newest version; null otherwise.
@@ -141,14 +142,14 @@ func listConfigDir(dataDir string) (configListView, error) {
 		return configListView{}, err
 	}
 	defer func() { _ = root.Close() }()
-	files, truncated, err := instance.ConfigTree(root)
+	listing, err := instance.ConfigTree(root)
 	if err != nil {
 		return configListView{}, err
 	}
-	if truncated {
+	if listing.Truncated {
 		view.Note = skippedConfigNote
 	}
-	for _, f := range files {
+	for _, f := range listing.Files {
 		item := configFileView{File: f.Path, Bytes: f.Size}
 		if isSettingsFile(f.Path) {
 			var skip bool

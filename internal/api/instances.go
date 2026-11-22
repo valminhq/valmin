@@ -117,6 +117,7 @@ func instanceRoutes(rt *routeTable, h *Instances) {
 	rt.Large("POST /api/v1/instances/manifest/preview", http.HandlerFunc(h.previewManifest))
 	rt.Handle("GET /api/v1/instances/{id}/manifest", http.HandlerFunc(h.exportManifest))
 	rt.Handle("GET /api/v1/instances/{id}/manifest/code", http.HandlerFunc(h.exportManifestCode))
+	rt.Handle("GET /api/v1/instances/{id}/manifest/files", http.HandlerFunc(h.listTemplateFiles))
 	// Registered ahead of /instances/{id}, which ServeMux would resolve the same way.
 	rt.Handle("GET /api/v1/instances/orphans", http.HandlerFunc(h.orphans))
 	rt.Handle("GET /api/v1/instances/inbox", http.HandlerFunc(h.inbox))

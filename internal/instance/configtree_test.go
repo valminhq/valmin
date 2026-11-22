@@ -22,7 +22,7 @@ func TestCheckConfigPath(t *testing.T) {
 	for _, name := range []string{
 		"", ".", "..", "/x.yaml", "a/../b.yaml", "a//b.yaml", "a/b.yaml/",
 		`a\b.yaml`, ".hidden/x.yaml", "a/.x/b.yaml", "x.png", "x.yaml.bak", "x.cfg.pending",
-		"a/b/c/d/e/f/g/h/i/deep.yaml",
+		"a/b/c/d/e/f/g/h/i/deep.yaml", "a\nb.yaml",
 	} {
 		if err := CheckConfigPath(name); err == nil {
 			t.Errorf("CheckConfigPath(%q) accepted, want refused", name)

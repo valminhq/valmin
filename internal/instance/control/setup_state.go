@@ -115,12 +115,12 @@ func captureSetupConfigs(inst *store.Instance) (configs []store.SetupConfigRef, 
 		return nil, false, err
 	}
 	defer func() { _ = root.Close() }()
-	files, truncated, err := instance.ConfigTree(root)
+	listing, err := instance.ConfigTree(root)
 	if err != nil {
 		return nil, false, err
 	}
-	configs = make([]store.SetupConfigRef, 0, len(files))
-	for _, f := range files {
+	configs = make([]store.SetupConfigRef, 0, len(listing.Files))
+	for _, f := range listing.Files {
 		if f.Path == command.ConfigFile {
 			continue
 		}
@@ -137,7 +137,7 @@ func captureSetupConfigs(inst *store.Instance) (configs []store.SetupConfigRef, 
 		})
 	}
 	sort.Slice(configs, func(i, j int) bool { return configs[i].File < configs[j].File })
-	return configs, truncated, nil
+	return configs, listing.Truncated, nil
 }
 
 // retainSetupConfigs stores the bytes of each captured config file of inst in the blob store,

@@ -187,6 +187,40 @@ func (db *DB) LatestConfigRevisions(ctx context.Context, instanceID string) (map
 	return out, nil
 }
 
+// ConfigHistory is what one file's revisions say about who changed it.
+type ConfigHistory struct {
+	// Written is true once the panel saved the file or a setup restore wrote it.
+	Written bool
+	// Outside is true once the panel noticed a change made outside it.
+	Outside bool
+}
+
+// ConfigHistories maps each file of an instance with revisions to what they say about who
+// changed it.
+func (db *DB) ConfigHistories(ctx context.Context, instanceID string) (map[string]ConfigHistory, error) {
+	rows, err := db.Reader.QueryContext(ctx, `
+		SELECT file, MAX(source IN (?, ?)), MAX(source = ?) FROM config_revisions
+		WHERE instance_id = ? GROUP BY file`,
+		string(ConfigEdit), string(ConfigSetup), string(ConfigOutside), instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("read config histories: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]ConfigHistory{}
+	for rows.Next() {
+		var file string
+		var h ConfigHistory
+		if err := rows.Scan(&file, &h.Written, &h.Outside); err != nil {
+			return nil, fmt.Errorf("scan config history: %w", err)
+		}
+		out[file] = h
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read config histories: %w", err)
+	}
+	return out, nil
+}
+
 // configRevisionWithContent selects configRevisionColumns and the content, for a WHERE clause
 // to follow.
 const configRevisionWithContent = `SELECT ` + configRevisionColumns + `, r.content` + configRevisionsFrom
