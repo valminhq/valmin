@@ -926,7 +926,7 @@ Adding `?q=` and some text to the page address opens the list already filtered.
 Some mods keep a `.cfg` at the root of the server installation instead, usually to hold a
 secret such as a bot token. The list shows such a file, marked **Server root**, when its
 name starts with an installed mod's name, for example `FiresDiscordIntegration_BotToken.cfg`.
-Shared setups and template codes never include these files.
+Saved setups, template files and template codes never include these files.
 
 If a new mod has no configuration file yet, start the server once so it can generate
 one.
@@ -1141,20 +1141,24 @@ world backup from this server. A linked backup stays outside retention and canno
 be deleted while a setup links to it.
 
 A setup keeps launch and backup settings, Valmin-managed mods with their exact
-registries, versions, locks, enabled states, and client labels, plus supported mod
-configuration files: `.cfg` files directly in `BepInEx/config`, up to 1 MiB each. Files in
-subfolders, YAML, JSON and text files, and server-root files are not carried; **Save current
-setup** lists them under *config files are not included*, and a restore leaves them as they
-are. Valmin keeps the
-required package files, so a restore does not need the registry or its download
-cache. Saving fails if a required package cannot be captured. Game build and world
-name appear in the comparison but do not change on restore. The server password and
-world files are excluded.
+registries, versions, locks, enabled states, and client labels, plus every configuration
+file the config editor lists in `BepInEx/config` and its subfolders, YAML, JSON and text
+files included, except the RCON plugin's file. Server-root files are not saved. A file the
+editor leaves out for its limits is not saved either, and the setup says **Some config files
+are not included**. Valmin keeps the required package files, so a restore does not need the
+registry or its download cache. Saving fails if a required package cannot be captured. Game
+build and world name appear in the comparison but do not change on restore. The server
+password and world files are excluded.
 
-Select a setup to compare it with the current server. Review the restore preview,
-then restore while the server is stopped. Valmin applies the saved mod set,
-configuration, and settings together. If installation fails, it rolls back the
-changes. The server stays stopped; start it after checking the job result.
+Select a setup to compare it with the current server. Under **Configuration files**, the
+comparison lists the files the restore removes and adds, and each changed file opens to a
+line-by-line comparison. Review the restore preview, then restore while the server is
+stopped. Valmin first saves the current setup as an **Automatic** one named **Before
+restoring** and the setup's name, then applies the saved mod set, configuration, and settings
+together. Restore the automatic setup to undo the restore. If installation fails, Valmin rolls
+back the changes. The server stays stopped; start it after checking the job result. A setup
+marked **Top-level .cfg only** was saved before setups held every config file, and restoring
+it changes only the `.cfg` files directly in `BepInEx/config`.
 
 To recover the world too, restore the linked backup separately on **Backups**. World
 restoration replaces world files, so choose it only when needed. Delete a setup to

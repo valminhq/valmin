@@ -440,6 +440,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `GET`    | `/instances/{id}/setups`                  | Saved setups for the server.                                          |
 | `POST`   | `/instances/{id}/setups`                  | Save a setup from a stopped server; returns a job.                    |
 | `GET`    | `/instances/{id}/setups/{sid}`            | One saved setup and its linked world backup.                          |
+| `GET`    | `/instances/{id}/setups/{sid}/configs/{file}` | The saved text of one config file of the setup.                   |
 | `GET`    | `/instances/{id}/setups/{sid}/preview`    | Compare and validate a restore; returns an `etag`.                    |
 | `POST`   | `/instances/{id}/setups/{sid}/restore`    | Restore a stopped server; requires `If-Match`, returns a job.         |
 | `DELETE` | `/instances/{id}/setups/{sid}`            | Delete a setup and release its links; returns a job.                  |
@@ -912,19 +913,35 @@ The save job publishes the setup only after it captures every required package.
 Names can repeat; use the setup ID to identify one.
 
 A setup records launch and backup settings, exact versions and registries of
-Valmin-managed mods, their locks, enabled states and client tags, and supported
-configuration files. Configuration capture covers regular UTF-8 `.cfg` files
-directly in `BepInEx/config`, up to 1 MiB each; nested files and generated RCON
-configuration are excluded. It retains package payloads for offline restore.
-Game build and world name are comparison-only. The server password, selected
-world, and world files are not restored.
+Valmin-managed mods, their locks, enabled states and client tags, and every file
+`GET /instances/{id}/configs` lists under `BepInEx/config` except the RCON plugin's file.
+Config bytes are stored once per content and shared between setups. It retains package
+payloads for offline restore. Game build and world name are comparison-only. The server
+password, selected world, and world files are not restored.
+
+Each setup has `config_tree`, `configs_truncated` and `automatic`. `config_tree` is `false`
+for a setup saved before setups held the whole config tree: it holds only the `.cfg` files
+directly in `BepInEx/config`, and restoring it changes only those. `configs_truncated` is
+`true` when the listing limits left files out of the setup; a restore leaves such files
+alone. `automatic` marks a setup the restore job saved from the server just before it
+changed anything, named `Before restoring <name>`. Each server keeps its newest three
+automatic setups. If that capture fails, the restore goes ahead and its job log says so.
+
+Each entry of `configs`, in a setup and in a preview's `current`, has `file` (the path under
+`BepInEx/config`), `sha256` and `size_bytes`; `content` is included for a `.cfg` directly in
+`BepInEx/config` only. Read any other saved file from
+`GET /instances/{id}/setups/{sid}/configs/{file}`, with the path's slashes escaped as on the
+config routes, and the current one from `GET /instances/{id}/configs/{file}/raw`.
 
 `GET /instances/{id}/setups/{sid}/preview` compares the saved setup with the
-current server and checks whether its packages and settings can be applied. The
-response contains `etag`, `ready`, `problems`, `current`, and `setup`. Send that
-`etag` as `If-Match` to `POST /instances/{id}/setups/{sid}/restore` while the server
-is stopped. Missing or stale fingerprints return `412 stale_write`. A failed
-installation rolls back its changes, and the restore never starts the server.
+current server and checks whether its packages, config files and settings can be applied.
+For a setup whose `config_tree` is `false`, `current.configs` lists only the files that
+restore would change. The response contains `etag`, `ready`, `problems`, `current`, and
+`setup`. Send that `etag` as `If-Match` to `POST /instances/{id}/setups/{sid}/restore` while
+the server is stopped. Missing or stale fingerprints return `412 stale_write`. A restore
+removes config files the setup does not hold and keeps each file it replaces or removes in
+that file's history. A failed installation rolls back its changes, and the restore never
+starts the server.
 
 A linked backup stays outside retention. Deleting it returns `409 invalid_state`
 while any setup links to it. Deleting the setup releases the link. Restore the
@@ -1093,9 +1110,10 @@ file that is not `.cfg` lists no settings.
 folders, symlinked folders, symlinks that do not lead to a regular file inside the directory,
 files with other extensions, files other than `.cfg` over 1 MiB and folders more than 8 deep,
 and returns at most 5,000 files; when a limit left a file out, `note` says so. Each
-item's `file` is its path, `dir` the directory it is relative to, and `portable` whether saved
-setups, server definitions and template codes carry it: only a `.cfg` directly in
-`BepInEx/config`, other than the RCON plugin's. `mod_replaced_edits` is
+item's `file` is its path, `dir` the directory it is relative to, and `portable` whether
+server definitions and template codes carry it: only a `.cfg` directly in `BepInEx/config`,
+other than the RCON plugin's. Saved setups hold every listed file in `BepInEx/config` except
+the RCON plugin's. `mod_replaced_edits` is
 `{"mod", "version", "created_at"}` while the file's newest version is one a mod install,
 update or downgrade wrote over bytes the mod had not shipped, and `null` otherwise.
 

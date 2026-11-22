@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,6 +16,7 @@ import (
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
+	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/setupblob"
 	"github.com/valminhq/valmin/internal/store"
 )
@@ -29,10 +32,20 @@ type setupModView struct {
 }
 
 type setupStateView struct {
-	Build   string                   `json:"build"`
-	Launch  control.ManifestLaunch   `json:"launch"`
-	Mods    []setupModView           `json:"mods"`
-	Configs []control.ManifestConfig `json:"configs"`
+	Build   string                 `json:"build"`
+	Launch  control.ManifestLaunch `json:"launch"`
+	Mods    []setupModView         `json:"mods"`
+	Configs []setupConfigView      `json:"configs"`
+}
+
+// setupConfigView is one config file of a setup or of the current server, by path under
+// BepInEx/config. Content is set for a top-level .cfg file only; the SPA reads any other file
+// through the saved-file and config routes.
+type setupConfigView struct {
+	File      string  `json:"file"`
+	Content   *string `json:"content,omitempty"`
+	SHA256    string  `json:"sha256"`
+	SizeBytes int64   `json:"size_bytes"`
 }
 
 type setupBackupView struct {
@@ -44,15 +57,23 @@ type setupBackupView struct {
 }
 
 type setupDetailView struct {
-	ID          string                   `json:"id"`
-	Name        string                   `json:"name"`
-	CreatedAt   time.Time                `json:"created_at"`
-	GameBuildID string                   `json:"game_build_id"`
-	WorldName   string                   `json:"world_name"`
-	Instance    control.ManifestLaunch   `json:"instance"`
-	Mods        []setupModView           `json:"mods"`
-	Configs     []control.ManifestConfig `json:"configs"`
-	WorldBackup *setupBackupView         `json:"world_backup,omitempty"`
+	ID          string                 `json:"id"`
+	Name        string                 `json:"name"`
+	CreatedAt   time.Time              `json:"created_at"`
+	GameBuildID string                 `json:"game_build_id"`
+	WorldName   string                 `json:"world_name"`
+	Instance    control.ManifestLaunch `json:"instance"`
+	Mods        []setupModView         `json:"mods"`
+	Configs     []setupConfigView      `json:"configs"`
+	WorldBackup *setupBackupView       `json:"world_backup,omitempty"`
+	// ConfigTree is false for a setup saved before setups held the whole config tree, which
+	// restores only top-level .cfg files.
+	ConfigTree bool `json:"config_tree"`
+	// ConfigsTruncated reports that the config tree held files past the listing limits, which
+	// the setup left out.
+	ConfigsTruncated bool `json:"configs_truncated"`
+	// Automatic marks a setup the panel saved before a restore.
+	Automatic bool `json:"automatic"`
 }
 
 type setupPreviewView struct {
@@ -78,6 +99,7 @@ func (h *Instances) setupRoutes(rt *routeTable) {
 	rt.Handle("GET /api/v1/instances/{id}/setups", http.HandlerFunc(h.listSetups))
 	rt.Handle("POST /api/v1/instances/{id}/setups", http.HandlerFunc(h.saveSetup))
 	rt.Handle("GET /api/v1/instances/{id}/setups/{sid}", http.HandlerFunc(h.getSetup))
+	rt.Handle("GET /api/v1/instances/{id}/setups/{sid}/configs/{file}", http.HandlerFunc(h.readSetupConfig))
 	rt.Handle("GET /api/v1/instances/{id}/setups/{sid}/preview", http.HandlerFunc(h.previewSetup))
 	rt.Handle("POST /api/v1/instances/{id}/setups/{sid}/restore", http.HandlerFunc(h.restoreSetup))
 	rt.Handle("DELETE /api/v1/instances/{id}/setups/{sid}", http.HandlerFunc(h.deleteSetup))
@@ -168,13 +190,84 @@ func (h *Instances) getSetup(w http.ResponseWriter, r *http.Request) {
 	JSON(w, r, http.StatusOK, view)
 }
 
+// readSetupConfig handles GET /instances/{id}/setups/{sid}/configs/{file}: the saved bytes of
+// one config file of a setup, as text. file is a path under BepInEx/config with its slashes
+// escaped; a file the setup does not hold is a 404.
+func (h *Instances) readSetupConfig(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	if !h.Authz.Can(r.Context(), u, authz.SetupsManage, id) {
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
+		return
+	}
+	inst, ok := h.setupInstance(w, r)
+	if !ok {
+		return
+	}
+	row, _, err := h.DB.SetupByID(r.Context(), inst.ID, r.PathValue("sid"))
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if row == nil {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	snap, err := control.DecodeSetupSnapshot(row)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	raw, found, err := savedConfig(setupblob.New(h.Cfg.Data.Root), &snap, r.PathValue("file"))
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
+	if !found {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	//nolint:gosec // served as text/plain, never interpreted
+	_, _ = w.Write(raw)
+}
+
+// savedConfig returns the saved bytes of the config file at name in snap, reporting whether
+// snap holds it.
+func savedConfig(
+	blobs *setupblob.Store, snap *control.SetupSnapshot, name string,
+) (raw []byte, found bool, err error) {
+	for _, c := range snap.Configs {
+		if c.File == name {
+			return []byte(c.Content), true, nil
+		}
+	}
+	for _, c := range snap.ConfigFiles {
+		if c.File == name {
+			raw, err = control.ReadSetupConfig(blobs, c)
+			return raw, err == nil, err
+		}
+	}
+	return nil, false, nil
+}
+
 func (h *Instances) setupDetail(
 	ctx context.Context, row *store.SavedSetup, snap *control.SetupSnapshot,
 ) (setupDetailView, error) {
 	view := setupDetailView{
 		ID: row.ID, Name: row.Name, CreatedAt: row.CreatedAt,
 		GameBuildID: row.GameBuildID, WorldName: row.WorldName,
-		Instance: snap.Instance, Mods: setupModsView(snap.Mods), Configs: snap.Configs,
+		Instance: snap.Instance, Mods: setupModsView(snap.Mods),
+		Configs:    savedConfigViews(setupblob.New(h.Cfg.Data.Root), snap),
+		ConfigTree: snap.ConfigTree, ConfigsTruncated: snap.ConfigsTruncated, Automatic: row.Automatic,
 	}
 	if row.BackupID == "" {
 		return view, nil
@@ -269,7 +362,7 @@ func (h *Instances) setupPreview(
 	if err != nil {
 		return setupPreviewView{}, err
 	}
-	current, etag, err := h.currentSetupState(ctx, inst)
+	current, currentSnap, etag, err := h.currentSetupState(ctx, inst, &snap)
 	if err != nil {
 		return setupPreviewView{}, err
 	}
@@ -290,15 +383,11 @@ func (h *Instances) setupPreview(
 	if err := h.ctl.SetupJobs.ValidateSettings(ctx, inst, &snap.Instance); err != nil {
 		p.Problems = append(p.Problems, err.Error())
 	}
-	targetPaths, err := control.SetupPaths(snap.Mods, snap.Configs)
+	targetPaths, err := control.SetupPaths(snap.Mods, snap.ConfigPaths())
 	if err != nil {
 		p.Problems = append(p.Problems, fmt.Sprintf("Saved setup files or configuration are invalid: %v", err))
 	} else {
-		currentSnap, err := h.ctl.SetupState.Capture(ctx, inst)
-		if err != nil {
-			return p, err
-		}
-		currentPaths, err := control.SetupPaths(currentSnap.Mods, currentSnap.Configs)
+		currentPaths, err := control.SetupPaths(currentSnap.Mods, currentSnap.ConfigPaths())
 		if err != nil {
 			return p, err
 		}
@@ -309,25 +398,100 @@ func (h *Instances) setupPreview(
 	if err := control.ValidateSetupRefs(snap.Mods, refs); err != nil {
 		p.Problems = append(p.Problems, "A saved package payload is missing or invalid.")
 	}
-	blobs := setupblob.New(h.Cfg.Data.Root)
-	for _, ref := range refs {
-		if _, err := blobs.Verify(ref.SHA256); err != nil {
-			p.Problems = append(p.Problems, fmt.Sprintf("Package files for %s are unavailable.", ref.FullName))
-		}
-	}
+	p.Problems = append(p.Problems, unavailableSetupBlobs(setupblob.New(h.Cfg.Data.Root), refs, &snap)...)
 	p.Ready = len(p.Problems) == 0
 	return p, nil
 }
 
+// unavailableSetupBlobs names each saved package and config file of a setup whose blob is
+// missing or no longer matches its digest.
+func unavailableSetupBlobs(
+	blobs *setupblob.Store, refs []store.SetupArtifactRef, snap *control.SetupSnapshot,
+) []string {
+	var problems []string
+	for _, ref := range refs {
+		if _, err := blobs.Verify(ref.SHA256); err != nil {
+			problems = append(problems, fmt.Sprintf("Package files for %s are unavailable.", ref.FullName))
+		}
+	}
+	for _, c := range snap.ConfigFiles {
+		if _, err := blobs.Verify(c.SHA256); err != nil {
+			problems = append(problems, fmt.Sprintf("The saved %s is unavailable.", c.File))
+		}
+	}
+	return problems
+}
+
+// currentSetupState captures inst's setup as a restore of target would compare it: with only
+// the config files that restore manages. It returns the view, the full capture cut to that
+// scope, and the capture's ETag.
 func (h *Instances) currentSetupState(
-	ctx context.Context, inst *store.Instance,
-) (setupStateView, string, error) {
+	ctx context.Context, inst *store.Instance, target *control.SetupSnapshot,
+) (setupStateView, control.SetupSnapshot, string, error) {
 	snap, etag, err := h.ctl.SetupState.Current(ctx, inst)
 	if err != nil {
-		return setupStateView{}, "", err
+		return setupStateView{}, control.SetupSnapshot{}, "", err
+	}
+	snap = snap.ScopedTo(target)
+	configs, err := currentConfigViews(inst, snap.ConfigFiles)
+	if err != nil {
+		return setupStateView{}, control.SetupSnapshot{}, "", err
 	}
 	return setupStateView{
 		Build: deref(inst.GameBuildID), Launch: snap.Instance,
-		Mods: setupModsView(snap.Mods), Configs: snap.Configs,
-	}, etag, nil
+		Mods: setupModsView(snap.Mods), Configs: configs,
+	}, snap, etag, nil
+}
+
+// savedConfigViews lists the config files of a saved setup, with the content of each top-level
+// .cfg file. A saved file whose blob cannot be read is listed without content; the preview
+// reports it.
+func savedConfigViews(blobs *setupblob.Store, snap *control.SetupSnapshot) []setupConfigView {
+	views := make([]setupConfigView, 0, len(snap.Configs)+len(snap.ConfigFiles))
+	for _, c := range snap.Configs {
+		sum := sha256.Sum256([]byte(c.Content))
+		content := c.Content
+		views = append(views, setupConfigView{
+			File: c.File, Content: &content,
+			SHA256: hex.EncodeToString(sum[:]), SizeBytes: int64(len(c.Content)),
+		})
+	}
+	for _, c := range snap.ConfigFiles {
+		v := setupConfigView{File: c.File, SHA256: c.SHA256, SizeBytes: c.SizeBytes}
+		if control.CarriedConfig(c.File) {
+			if raw, err := control.ReadSetupConfig(blobs, c); err == nil {
+				content := string(raw)
+				v.Content = &content
+			}
+		}
+		views = append(views, v)
+	}
+	return views
+}
+
+// currentConfigViews lists the server's captured config files, with the content of each
+// top-level .cfg file read from disk.
+func currentConfigViews(inst *store.Instance, configs []store.SetupConfigRef) ([]setupConfigView, error) {
+	views := make([]setupConfigView, 0, len(configs))
+	if len(configs) == 0 {
+		return views, nil
+	}
+	dir, err := instance.OpenConfigDir(inst.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = dir.Close() }()
+	for _, c := range configs {
+		v := setupConfigView{File: c.File, SHA256: c.SHA256, SizeBytes: c.SizeBytes}
+		if control.CarriedConfig(c.File) {
+			raw, _, err := fsutil.ReadRegularIn(dir, c.File)
+			if err != nil {
+				return nil, fmt.Errorf("read configuration %s: %w", c.File, err)
+			}
+			content := string(raw)
+			v.Content = &content
+		}
+		views = append(views, v)
+	}
+	return views, nil
 }

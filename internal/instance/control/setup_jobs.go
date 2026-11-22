@@ -7,13 +7,24 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"slices"
+	"unicode/utf8"
 
 	"github.com/valminhq/valmin/internal/crypto"
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/runtime"
+	"github.com/valminhq/valmin/internal/setupblob"
 	"github.com/valminhq/valmin/internal/store"
+)
+
+const (
+	// MaxSetupNameBytes bounds a saved setup's name.
+	MaxSetupNameBytes = 120
+	// keepAutomaticSetups is how many automatic setups each server keeps.
+	keepAutomaticSetups = 3
 )
 
 // SetupJobs owns saved setup capture and restore work.
@@ -50,11 +61,15 @@ func SubmitSetupDelete(
 	})
 }
 
-// DecodeSetupSnapshot reads the durable snapshot attached to a saved setup.
+// DecodeSetupSnapshot reads the durable snapshot attached to a saved setup, with the config
+// files row carries.
 func DecodeSetupSnapshot(row *store.SavedSetup) (SetupSnapshot, error) {
 	var snap SetupSnapshot
 	if err := json.Unmarshal([]byte(row.SnapshotJSON), &snap); err != nil {
 		return snap, fmt.Errorf("decode saved setup %s: %w", row.ID, err)
+	}
+	if snap.ConfigTree {
+		snap.ConfigFiles, snap.ConfigsTruncated = row.Configs, row.ConfigsTruncated
 	}
 	return snap, nil
 }
@@ -124,8 +139,8 @@ func (s *SetupJobs) RunSave(inst *store.Instance, payload *SetupJobPayload, requ
 		if err != nil {
 			return jobs.Failed(errcode.Internal, err)
 		}
-		jh.Progress(ctx, 30, "retaining package files")
-		refs, err := artifacts.Save(ctx, inst, &snap, payload.StagingDir)
+		jh.Progress(ctx, 30, "retaining package and config files")
+		refs, err := s.retainSetup(ctx, inst, &snap, payload.StagingDir)
 		if err != nil {
 			return jobs.Failed(errcode.Internal, err)
 		}
@@ -151,10 +166,63 @@ func (s *SetupJobs) RunSave(inst *store.Instance, payload *SetupJobPayload, requ
 			ID: payload.SetupID, InstanceID: inst.ID, Name: payload.Name,
 			CreatedBy: requestedBy, GameBuildID: deref(inst.GameBuildID),
 			WorldName: inst.WorldName, SnapshotJSON: string(raw), BackupID: payload.BackupID,
+			Configs: snap.ConfigFiles, ConfigsTruncated: snap.ConfigsTruncated,
 		}
 		jh.Progress(ctx, 100, "setup saved")
 		return jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: func(ctx context.Context, tx *sql.Tx) error {
 			return store.TxSaveSetup(ctx, tx, row, refs)
 		}}
 	}
+}
+
+// retainSetup stores the package and config file bytes snap names, returning the package
+// references. It records each package's freshly hashed files in snap.
+func (s *SetupJobs) retainSetup(
+	ctx context.Context, inst *store.Instance, snap *SetupSnapshot, staging string,
+) ([]store.SetupArtifactRef, error) {
+	refs, err := (&setupArtifacts{DataRoot: s.DataRoot}).Save(ctx, inst, snap, staging)
+	if err != nil {
+		return nil, err
+	}
+	if err := retainSetupConfigs(ctx, inst, setupblob.New(s.DataRoot), snap.ConfigFiles); err != nil {
+		return nil, err
+	}
+	return refs, nil
+}
+
+// captureBeforeRestore saves current, the server's setup before a restore of the setup named
+// name, as an automatic setup for the restore's finish to publish.
+func (s *SetupJobs) captureBeforeRestore(
+	ctx context.Context, inst *store.Instance, name string, current *SetupSnapshot, staging string,
+) (*store.SavedSetup, []store.SetupArtifactRef, error) {
+	dir := filepath.Join(staging, "before")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return nil, nil, fmt.Errorf("create staging for the setup before restore: %w", err)
+	}
+	snap := *current
+	snap.Mods = slices.Clone(current.Mods)
+	refs, err := s.retainSetup(ctx, inst, &snap, dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	raw, err := json.Marshal(snap)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode the setup before restore: %w", err)
+	}
+	return &store.SavedSetup{
+		ID: store.NewID(), InstanceID: inst.ID, Name: automaticSetupName(name),
+		GameBuildID: deref(inst.GameBuildID), WorldName: inst.WorldName, SnapshotJSON: string(raw),
+		Automatic: true, Configs: snap.ConfigFiles, ConfigsTruncated: snap.ConfigsTruncated,
+	}, refs, nil
+}
+
+// automaticSetupName names the setup saved before restoring the setup named name, cut to
+// MaxSetupNameBytes without splitting a character.
+func automaticSetupName(name string) string {
+	full := "Before restoring " + name
+	for len(full) > MaxSetupNameBytes {
+		_, size := utf8.DecodeLastRuneInString(full)
+		full = full[:len(full)-size]
+	}
+	return full
 }

@@ -23,6 +23,21 @@ type SavedSetup struct {
 	WorldName    string    `json:"world_name"`
 	SnapshotJSON string    `json:"-"`
 	BackupID     string    `json:"backup_id,omitempty"`
+	// Automatic marks a setup the panel saved before a restore.
+	Automatic bool `json:"automatic"`
+	// ConfigsTruncated reports that the config tree held files past the listing limits.
+	ConfigsTruncated bool `json:"configs_truncated"`
+	// Configs are the config files the setup holds. SetupByID and TxSaveSetup fill and read
+	// them; ListSetups leaves them empty.
+	Configs []SetupConfigRef `json:"-"`
+}
+
+// SetupConfigRef names one config file of a setup, by path under BepInEx/config, and the blob
+// holding its bytes.
+type SetupConfigRef struct {
+	File      string `json:"file"`
+	SHA256    string `json:"sha256"`
+	SizeBytes int64  `json:"size_bytes"`
 }
 
 // SetupArtifactRef ties an installed package to a verified content-addressed payload.
@@ -69,11 +84,19 @@ func TxSaveSetup(ctx context.Context, tx *sql.Tx, setup *SavedSetup, artifacts [
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO saved_setups (
 			id, instance_id, name, created_by, game_build_id, world_name,
-			snapshot_json, backup_id, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			snapshot_json, backup_id, created_at, automatic, configs_truncated
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		setup.ID, setup.InstanceID, setup.Name, createdBy, setup.GameBuildID,
-		setup.WorldName, setup.SnapshotJSON, backupID, FormatTime(setup.CreatedAt)); err != nil {
+		setup.WorldName, setup.SnapshotJSON, backupID, FormatTime(setup.CreatedAt),
+		setup.Automatic, setup.ConfigsTruncated); err != nil {
 		return fmt.Errorf("insert saved setup %s: %w", setup.ID, err)
+	}
+	for _, c := range setup.Configs {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO saved_setup_configs (setup_id, file, sha256, size_bytes) VALUES (?, ?, ?, ?)`,
+			setup.ID, c.File, c.SHA256, c.SizeBytes); err != nil {
+			return fmt.Errorf("insert setup config %s: %w", c.File, err)
+		}
 	}
 	for _, a := range artifacts {
 		if _, err := tx.ExecContext(ctx, `
@@ -98,6 +121,17 @@ func validateSavedSetup(setup *SavedSetup, artifacts []SetupArtifactRef) error {
 			return fmt.Errorf("invalid setup artifact for %q", a.FullName)
 		}
 	}
+	return validateSetupConfigs(setup.Configs)
+}
+
+// validateSetupConfigs checks each config file reference of a setup has a path, a size and a
+// digest.
+func validateSetupConfigs(configs []SetupConfigRef) error {
+	for _, c := range configs {
+		if c.File == "" || c.SizeBytes < 0 || !validDigest(c.SHA256) {
+			return fmt.Errorf("invalid setup config %q", c.File)
+		}
+	}
 	return nil
 }
 
@@ -119,14 +153,15 @@ func checkSetupBackup(ctx context.Context, tx *sql.Tx, setup *SavedSetup) error 
 }
 
 const savedSetupColumns = `id, instance_id, name, created_by, game_build_id,
-	world_name, snapshot_json, backup_id, created_at`
+	world_name, snapshot_json, backup_id, created_at, automatic, configs_truncated`
 
 func scanSavedSetup(row scanner) (SavedSetup, error) {
 	var s SavedSetup
 	var createdBy, backupID sql.NullString
 	var createdAt string
 	if err := row.Scan(&s.ID, &s.InstanceID, &s.Name, &createdBy,
-		&s.GameBuildID, &s.WorldName, &s.SnapshotJSON, &backupID, &createdAt); err != nil {
+		&s.GameBuildID, &s.WorldName, &s.SnapshotJSON, &backupID, &createdAt,
+		&s.Automatic, &s.ConfigsTruncated); err != nil {
 		return SavedSetup{}, fmt.Errorf("scan saved setup: %w", err)
 	}
 	s.CreatedBy = createdBy.String
@@ -161,7 +196,7 @@ func (db *DB) ListSetups(ctx context.Context, instanceID string) ([]SavedSetup, 
 	return setups, nil
 }
 
-// SetupByID returns a setup and its package payload references. A missing or foreign
+// SetupByID returns a setup, with its config files, and its package payload references. A missing or foreign
 // instance setup returns nil without exposing whether that ID exists elsewhere.
 func (db *DB) SetupByID(ctx context.Context, instanceID, id string) (*SavedSetup, []SetupArtifactRef, error) {
 	row := db.Reader.QueryRowContext(ctx, `SELECT `+savedSetupColumns+`
@@ -191,7 +226,47 @@ func (db *DB) SetupByID(ctx context.Context, instanceID, id string) (*SavedSetup
 	if err := rows.Err(); err != nil {
 		return nil, nil, fmt.Errorf("read saved setup artifacts %s: %w", id, err)
 	}
+	s.Configs, err = db.setupConfigs(ctx, id)
+	if err != nil {
+		return nil, nil, err
+	}
 	return &s, artifacts, nil
+}
+
+// setupConfigs returns the config files of setup id, by path.
+func (db *DB) setupConfigs(ctx context.Context, id string) ([]SetupConfigRef, error) {
+	rows, err := db.Reader.QueryContext(ctx, `
+		SELECT file, sha256, size_bytes FROM saved_setup_configs WHERE setup_id = ? ORDER BY file`, id)
+	if err != nil {
+		return nil, fmt.Errorf("read saved setup configs %s: %w", id, err)
+	}
+	defer func() { _ = rows.Close() }()
+	configs := []SetupConfigRef{}
+	for rows.Next() {
+		var c SetupConfigRef
+		if err := rows.Scan(&c.File, &c.SHA256, &c.SizeBytes); err != nil {
+			return nil, fmt.Errorf("scan saved setup config: %w", err)
+		}
+		configs = append(configs, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read saved setup configs %s: %w", id, err)
+	}
+	return configs, nil
+}
+
+// TxPruneAutomaticSetups deletes the automatic setups of an instance beyond its newest keep,
+// sparing the setup with ID spare. Their blobs stay until the blob store's GC finds them
+// unreferenced.
+func TxPruneAutomaticSetups(ctx context.Context, tx *sql.Tx, instanceID string, keep int, spare string) error {
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM saved_setups WHERE instance_id = ? AND automatic AND id <> ? AND id NOT IN (
+			SELECT id FROM saved_setups WHERE instance_id = ? AND automatic
+			ORDER BY created_at DESC, id DESC LIMIT ?)`,
+		instanceID, spare, instanceID, keep); err != nil {
+		return fmt.Errorf("prune automatic setups of %s: %w", instanceID, err)
+	}
+	return nil
 }
 
 // DeleteSetup releases a setup's artifact and backup references. It does not remove blobs;
@@ -255,11 +330,13 @@ func (db *DB) BackupPinned(ctx context.Context, instanceID, backupID string) (bo
 	return pinned, nil
 }
 
-// ReferencedSetupArtifacts returns every digest still held by at least one setup.
+// ReferencedSetupArtifacts returns every package and config digest still held by at least one
+// setup.
 // Run blob GC only while setup save jobs are idle, so a staged but unpublished blob is
 // not mistaken for an orphan.
 func (db *DB) ReferencedSetupArtifacts(ctx context.Context) (map[string]bool, error) {
-	rows, err := db.Reader.QueryContext(ctx, `SELECT DISTINCT sha256 FROM saved_setup_artifacts`)
+	rows, err := db.Reader.QueryContext(ctx, `
+		SELECT sha256 FROM saved_setup_artifacts UNION SELECT sha256 FROM saved_setup_configs`)
 	if err != nil {
 		return nil, fmt.Errorf("list referenced setup artifacts: %w", err)
 	}

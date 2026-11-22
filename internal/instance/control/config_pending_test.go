@@ -35,11 +35,11 @@ func TestAWrittenConfigSurvivesAStalePendingCopy(t *testing.T) {
 		{"setup restore", func(t *testing.T, inst *store.Instance) {
 			t.Helper()
 			staging := t.TempDir()
-			configs := []ManifestConfig{{File: name, Content: restored}}
-			if err := writeSetupTargetConfigs(staging, configs); err != nil {
+			snap := &SetupSnapshot{Configs: []ManifestConfig{{File: name, Content: restored}}}
+			if err := stageSetupConfigs(t.TempDir(), staging, snap); err != nil {
 				t.Fatal(err)
 			}
-			target, err := SetupPaths(nil, configs)
+			target, err := SetupPaths(nil, snap.ConfigPaths())
 			if err != nil {
 				t.Fatal(err)
 			}

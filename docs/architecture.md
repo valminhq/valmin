@@ -238,7 +238,7 @@ reset ends every session of the account.
 | `internal/alerts/scan`                           | The alert scan job: gather, evaluate, reconcile, dispatch.                                                                       |
 | `internal/mods/*`                                | Registry clients and caches, archive extraction, the dependency resolver, file placement, shared file helpers and the `.cfg` parser. |
 | `internal/mods/manager`                          | Mod install, update, toggle and uninstall jobs with rollback and recovery, and the registry sync.                                |
-| `internal/setupblob`                             | Retained package archives for saved setups.                                                                                      |
+| `internal/setupblob`                             | Retained package archives and config files for saved setups.                                                                     |
 | `internal/sharecode`                             | Template code format: encode and decode.                                                                                         |
 | `internal/scheduler`                             | The schedule clock, the submitter that turns a due schedule into a job or a skip, and the planned power cut clock.               |
 | `internal/notify`                                | Notification events, rendering and the outbound sender.                                                                          |

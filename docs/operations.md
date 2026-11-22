@@ -158,16 +158,29 @@ overview shows **This server needs a check** until you choose **Check this serve
 
 On **Saved setups**, stop the server and save a named setup before changing its mods
 or settings. Valmin stores the installed package files along with mod versions,
-registries, locks, enabled states, client tags, launch and backup settings, and
-the `.cfg` files directly in `BepInEx/config`. Config files in subfolders and YAML,
-JSON and text files are not saved and a restore leaves them as they are; the save card
-lists them. Each config file the restore replaces or removes is kept in its history first.
-Restoring a setup with an older version of a mod leaves the YAML or JSON files a later update
-of that mod wrote; load the older version from the file's history if the mod needs it. A setup
-saved before mods recorded the config files they ship lets the next update of those mods keep
-such files as they are; later updates follow the mod again. The saved package files
-support recovery when a registry or download cache is unavailable. If a required
-package cannot be captured, the save job fails without publishing the setup.
+registries, locks, enabled states, client tags, launch and backup settings, and every
+file the config editor lists in `BepInEx/config` and its subfolders, YAML, JSON and text
+files included, apart from the RCON plugin's file, which holds the console password. A
+file the editor leaves out for its limits is not saved, a restore leaves it as it is, and
+the setup says so. Each config file is stored once however many setups hold the same
+bytes. The saved package files support recovery when a registry or download cache is
+unavailable. If a required package cannot be captured, the save job fails without
+publishing the setup.
+
+A restore makes the config files match the setup: it writes the saved ones and removes
+those the setup does not hold. Each file it replaces or removes is kept in that file's
+history first. A setup saved before setups held every config file is marked
+**Top-level .cfg only**; restoring it changes only the `.cfg` files directly in
+`BepInEx/config` and leaves the rest alone, so load an older version of a YAML or JSON file
+from its history if an older mod needs it. A setup saved before mods recorded the config
+files they ship lets the next update of those mods keep such files as they are; later
+updates follow the mod again.
+
+Before it changes anything, a restore saves the server's current setup as an
+**Automatic** one named **Before restoring** and the setup's name. Restore that setup to
+undo the restore. Each server keeps its newest three automatic setups; delete one like any
+other setup. If the current setup cannot be saved, for example because an installed mod's
+files are missing, the restore goes ahead and its job log says so.
 
 You can link a consistent backup from the same server. Linked backups do not count
 toward retention and cannot be deleted until all setups that link to them are
@@ -459,7 +472,7 @@ mods. With the default configuration, the data root contains:
 | `cache/steam/896660/`    | Downloaded game builds, one directory per build of any branch.   |
 | `cache/<registry>/`      | Downloaded mod packages, one directory per registry.             |
 | `cache/catalogue.db`     | The registries' mod catalogue. A cache; it needs no backup.      |
-| `setups/blobs/`          | Package files retained for saved setups.                         |
+| `setups/blobs/`          | Package and config files retained for saved setups.              |
 | `exports/`               | The latest [installation export](#move-to-a-new-host).           |
 
 To move to another host, an [installation export](#move-to-a-new-host) is smaller and

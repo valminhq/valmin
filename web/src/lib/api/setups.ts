@@ -1,6 +1,6 @@
 import { api, request } from './client';
 import type { Job } from './types';
-import type { ManifestConfig, ManifestLaunch } from './manifest';
+import type { ManifestLaunch } from './manifest';
 import type { InstalledMod } from './mods';
 
 export interface LinkedWorldBackup {
@@ -18,6 +18,22 @@ export interface SavedSetup {
 	game_build_id: string;
 	world_name: string;
 	world_backup?: LinkedWorldBackup | null;
+	/** False for a setup saved before setups held the whole config tree: it restores only
+	 * the `.cfg` files directly in `BepInEx/config`. */
+	config_tree: boolean;
+	/** The config tree held files past the listing limits, which the setup left out. */
+	configs_truncated: boolean;
+	/** Saved by the panel before a restore. */
+	automatic: boolean;
+}
+
+/** One config file of a setup or of the current server, by path under `BepInEx/config`.
+ * `content` is sent for a top-level `.cfg` file only. */
+export interface SetupConfig {
+	file: string;
+	content?: string;
+	sha256: string;
+	size_bytes: number;
 }
 
 export type SetupMod = Pick<
@@ -28,7 +44,7 @@ export type SetupMod = Pick<
 export interface SetupDetail extends SavedSetup {
 	instance: ManifestLaunch;
 	mods: SetupMod[];
-	configs: ManifestConfig[];
+	configs: SetupConfig[];
 }
 
 export interface SetupPreview {
@@ -39,7 +55,7 @@ export interface SetupPreview {
 		build: string;
 		launch: ManifestLaunch;
 		mods: SetupMod[];
-		configs: ManifestConfig[];
+		configs: SetupConfig[];
 	};
 	setup: SetupDetail;
 }
@@ -55,6 +71,11 @@ export const setups = {
 			...(worldBackupId ? { world_backup_id: worldBackupId } : {})
 		}),
 	get: (instanceId: string, setupId: string) => api.get<SetupDetail>(path(instanceId, setupId)),
+	/** The saved text of one config file of a setup. */
+	config: (instanceId: string, setupId: string, file: string) =>
+		api
+			.getText(`${path(instanceId, setupId)}/configs/${encodeURIComponent(file)}`)
+			.then((res) => res.text),
 	preview: (instanceId: string, setupId: string) =>
 		api.get<SetupPreview>(`${path(instanceId, setupId)}/preview`),
 	restore: (instanceId: string, setupId: string, etag: string) => {
