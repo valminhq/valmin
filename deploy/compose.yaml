@@ -69,7 +69,7 @@ services:
         ipv4_address: ${VALMIN_SUBNET_PREFIX:-10.89}.14.2
 
   caddy:
-    image: ${VALMIN_CADDY_IMAGE:-caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f}
+    image: ${VALMIN_CADDY_IMAGE:-caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0}
     restart: unless-stopped
     ports:
       - "${VALMIN_HTTP_PORT:-80}:80"
