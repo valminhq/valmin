@@ -59,4 +59,7 @@ type SetupSnapshot struct {
 	ConfigFiles []store.SetupConfigRef `json:"-"`
 	// ConfigsTruncated reports that the tree held files past the listing limits.
 	ConfigsTruncated bool `json:"-"`
+	// Light marks a setup that keeps only the packages its registry archives cannot reproduce
+	// and downloads the rest on restore.
+	Light bool `json:"light,omitempty"`
 }

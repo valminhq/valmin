@@ -1145,8 +1145,11 @@ registries, versions, locks, enabled states, and client labels, plus every confi
 file the config editor lists in `BepInEx/config` and its subfolders, YAML, JSON and text
 files included, except the RCON plugin's file. Server-root files are not saved. A file the
 editor leaves out for its limits is not saved either, and the setup says **Some config files
-are not included**. Valmin keeps the required package files, so a restore does not need the
-registry or its download cache. Saving fails if a required package cannot be captured. Game
+are not included**. With **Keep package files (restore works offline)** on, the default,
+Valmin keeps the required package files, so a restore does not need the registry or its
+download cache. Turned off, the setup is marked **Light**: it keeps only mods that cannot be
+downloaded again and fetches the rest on restore, which fails for a version the registry has
+removed. Saving fails if a required package cannot be captured. Game
 build and world name appear in the comparison but do not change on restore. The server
 password and world files are excluded.
 

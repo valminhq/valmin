@@ -908,7 +908,9 @@ to the preview and import routes. Each problem has `source`, `path` and `detail`
 
 Saved setup routes require an administrator. Send `{"name":"Working before update"}`
 to `POST /instances/{id}/setups` while the server is stopped. Add
-`"world_backup_id":"BACKUP_ID"` to link a consistent backup from the same server.
+`"world_backup_id":"BACKUP_ID"` to link a consistent backup from the same server, and
+`"light":true` to keep only the packages whose installed files differ from their cached
+registry archive or whose registry is disabled.
 The save job publishes the setup only after it captures every required package.
 Names can repeat; use the setup ID to identify one.
 
@@ -919,13 +921,16 @@ Config bytes are stored once per content and shared between setups. It retains p
 payloads for offline restore. Game build and world name are comparison-only. The server
 password, selected world, and world files are not restored.
 
-Each setup has `config_tree`, `configs_truncated` and `automatic`. `config_tree` is `false`
-for a setup saved before setups held the whole config tree: it holds only the `.cfg` files
-directly in `BepInEx/config`, and restoring it changes only those. `configs_truncated` is
-`true` when the listing limits left files out of the setup; a restore leaves such files
-alone. `automatic` marks a setup the restore job saved from the server just before it
-changed anything, named `Before restoring <name>`. Each server keeps its newest three
-automatic setups. If that capture fails, the restore goes ahead and its job log says so.
+Each setup has `config_tree`, `configs_truncated`, `automatic` and `light`. `config_tree` is
+`false` for a setup saved before setups held the whole config tree: it holds only the `.cfg`
+files directly in `BepInEx/config`, and restoring it changes only those. `configs_truncated` is
+`true` when the listing limits left files out of the setup; a restore leaves such files alone.
+`automatic` marks a setup the restore job saved from the server just before it changed
+anything, named `Before restoring <name>`. Each server keeps its newest three automatic
+setups. If that capture fails, the restore goes ahead and its job log says so. A `light`
+setup restores the packages it does not keep from the download cache or their registry; its
+preview lists, in `problems`, each such package that is not cached and that no enabled
+registry lists.
 
 Each entry of `configs`, in a setup and in a preview's `current`, has `file` (the path under
 `BepInEx/config`), `sha256` and `size_bytes`; `content` is included for a `.cfg` directly in

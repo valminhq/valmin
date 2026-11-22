@@ -104,6 +104,16 @@ func (c *Cache) path(ident string) (string, error) {
 	return filepath.Join(c.root, ident+".zip"), nil
 }
 
+// Has reports whether ident's zip is cached.
+func (c *Cache) Has(ident string) bool {
+	path, err := c.path(ident)
+	if err != nil {
+		return false
+	}
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
 // Get returns the local path to ident's zip, downloading from downloadURL if not already
 // cached. declaredSize is mod_versions.file_size, a cross-check against the completed download
 // rather than the size limit; pass 0 if unknown.

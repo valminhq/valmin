@@ -95,3 +95,53 @@ func TestPutBytesReplacesADamagedCopy(t *testing.T) {
 		t.Errorf("Verify(empty) = %v", err)
 	}
 }
+
+// TestPutLinkSharesTheFile asserts PutLink stores a file under its digest as a hard link to it,
+// and returns the same digest without a second link for bytes already held.
+func TestPutLinkSharesTheFile(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+	src := filepath.Join(dir, "cache.zip")
+	if err := os.WriteFile(src, []byte("package archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := s.PutLink(t.Context(), src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := s.Verify(digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, errA := os.Stat(src)
+	b, errB := os.Stat(path)
+	if errA != nil || errB != nil || !os.SameFile(a, b) {
+		t.Errorf("blob is not a link to the source file: %v %v", errA, errB)
+	}
+	again, err := s.PutLink(t.Context(), src)
+	if err != nil || again != digest {
+		t.Errorf("second PutLink = %q, %v, want %q", again, err, digest)
+	}
+}
+
+// TestGCRemovesInterruptedWrites asserts GC removes the temporary files an interrupted write
+// left, and keeps a referenced blob.
+func TestGCRemovesInterruptedWrites(t *testing.T) {
+	s := New(t.TempDir())
+	digest, err := s.PutBytes(t.Context(), []byte("kept"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{".part-123", ".link-" + digest} {
+		if err := os.WriteFile(filepath.Join(s.root, name), []byte("left"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.GC(map[string]bool{digest: true}); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(s.root)
+	if err != nil || len(entries) != 1 || entries[0].Name() != digest {
+		t.Errorf("blobs after GC = %v, %v, want only %s", entries, err, digest)
+	}
+}

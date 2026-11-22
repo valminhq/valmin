@@ -15,6 +15,7 @@
 	import * as Card from '#lib/components/ui/card/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
+	import { Switch } from '#lib/components/ui/switch/index.js';
 	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import Problem from '#lib/components/problem.svelte';
@@ -35,6 +36,7 @@
 	let loadingBackups = $state(false);
 	let name = $state('Working before update');
 	let worldBackupId = $state('');
+	let keepPackages = $state(true);
 	let selectedId = $state('');
 	let preview = $state<SetupPreview | null>(null);
 	let previewLoading = $state(false);
@@ -148,7 +150,9 @@
 	function save() {
 		const value = name.trim();
 		if (!value || !stopped || jobRunning) return;
-		void run('save', '', () => setups.save(id, value, worldBackupId || undefined));
+		void run('save', '', () =>
+			setups.save(id, value, { worldBackupId: worldBackupId || undefined, light: !keepPackages })
+		);
 	}
 
 	function restore() {
@@ -230,6 +234,17 @@
 							>
 						{/if}
 					</div>
+					<div class="grid max-w-lg gap-2">
+						<div class="flex items-center gap-2">
+							<Switch id="setup-keep-packages" bind:checked={keepPackages} />
+							<Label for="setup-keep-packages">Keep package files (restore works offline)</Label>
+						</div>
+						<p class="text-xs text-muted-foreground">
+							{keepPackages
+								? 'The setup keeps a copy of every mod package, so a restore needs neither the registry nor the download cache.'
+								: 'Light: the setup keeps only mods that cannot be downloaded again, and a restore fetches the rest from the download cache or the registry. It fails for a version the registry has removed.'}
+						</p>
+					</div>
 					<div class="grid justify-items-start gap-2">
 						<Button disabled={!stopped || jobRunning || !name.trim()} onclick={save}
 							>Save setup</Button
@@ -258,9 +273,10 @@
 									<div class="grid min-w-0 gap-1">
 										<strong class="break-words">{setup.name}</strong>
 										<span class="text-sm text-muted-foreground">{when(setup.created_at)}</span>
-										{#if setup.automatic || !setup.config_tree}
+										{#if setup.automatic || setup.light || !setup.config_tree}
 											<span class="flex flex-wrap gap-1">
 												{#if setup.automatic}<Badge variant="outline">Automatic</Badge>{/if}
+												{#if setup.light}<Badge variant="outline">Light</Badge>{/if}
 												{#if !setup.config_tree}
 													<Badge variant="outline">Top-level .cfg only</Badge>
 												{/if}

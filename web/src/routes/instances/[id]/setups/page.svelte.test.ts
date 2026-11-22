@@ -57,7 +57,8 @@ const saved: SetupDetail = {
 	configs: [{ file: 'plugin.cfg', content: 'enabled = false\n', sha256: 'saved', size_bytes: 16 }],
 	config_tree: true,
 	configs_truncated: false,
-	automatic: false
+	automatic: false,
+	light: false
 };
 
 function preview(overrides: Partial<SetupPreview> = {}): SetupPreview {
@@ -154,18 +155,36 @@ describe('Saved setups', () => {
 		});
 	});
 
+	it('saves a light setup when package files are not kept', async () => {
+		serve();
+		daemon.on('POST', '/instances/inst-a/setups', () => Response.json(job()));
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
+		await open();
+		await fireEvent.click(screen.getByRole('switch', { name: /Keep package files/ }));
+		expect(screen.getByText(/It fails for a version the registry has removed/)).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Save setup' }));
+		await vi.waitFor(() =>
+			expect(daemon.requests('POST', '/instances/inst-a/setups')).toHaveLength(1)
+		);
+		expect(daemon.requests('POST', '/instances/inst-a/setups')[0].body).toEqual({
+			name: 'Working before update',
+			light: true
+		});
+	});
+
 	it('marks automatic setups, setups saved before full capture, and left-out files', async () => {
 		serve();
 		daemon.on('GET', '/instances/inst-a/setups', () =>
 			Response.json({
 				items: [
-					{ ...saved, id: 'auto', name: 'Before restoring x', automatic: true },
+					{ ...saved, id: 'auto', name: 'Before restoring x', automatic: true, light: true },
 					{ ...saved, id: 'old', name: 'Old', config_tree: false, configs_truncated: true }
 				]
 			})
 		);
 		await open();
 		expect(screen.getByText('Automatic')).toBeTruthy();
+		expect(screen.getByText('Light')).toBeTruthy();
 		expect(screen.getByText('Top-level .cfg only')).toBeTruthy();
 		expect(screen.getByText(/Some config files are not included/)).toBeTruthy();
 	});

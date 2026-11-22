@@ -74,6 +74,9 @@ type setupDetailView struct {
 	ConfigsTruncated bool `json:"configs_truncated"`
 	// Automatic marks a setup the panel saved before a restore.
 	Automatic bool `json:"automatic"`
+	// Light marks a setup that keeps only the packages their registry archives cannot
+	// reproduce, and downloads the rest on restore.
+	Light bool `json:"light"`
 }
 
 type setupPreviewView struct {
@@ -268,6 +271,7 @@ func (h *Instances) setupDetail(
 		Instance: snap.Instance, Mods: setupModsView(snap.Mods),
 		Configs:    savedConfigViews(setupblob.New(h.Cfg.Data.Root), snap),
 		ConfigTree: snap.ConfigTree, ConfigsTruncated: snap.ConfigsTruncated, Automatic: row.Automatic,
+		Light: snap.Light,
 	}
 	if row.BackupID == "" {
 		return view, nil
@@ -395,8 +399,16 @@ func (h *Instances) setupPreview(
 			p.Problems = append(p.Problems, fmt.Sprintf("Restore target conflicts with current files: %v", err))
 		}
 	}
-	if err := control.ValidateSetupRefs(snap.Mods, refs); err != nil {
+	if err := control.ValidateSetupRefs(&snap, refs); err != nil {
 		p.Problems = append(p.Problems, "A saved package payload is missing or invalid.")
+	}
+	missing, err := h.ctl.SetupJobs.UnavailableArchives(ctx, &snap, refs)
+	if err != nil {
+		return p, err
+	}
+	for _, name := range missing {
+		p.Problems = append(p.Problems, fmt.Sprintf("%s is not in the download cache and no enabled "+
+			"registry lists it, so this light setup cannot restore it.", name))
 	}
 	p.Problems = append(p.Problems, unavailableSetupBlobs(setupblob.New(h.Cfg.Data.Root), refs, &snap)...)
 	p.Ready = len(p.Problems) == 0
