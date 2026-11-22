@@ -5,6 +5,7 @@ package setupblob
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -68,7 +69,7 @@ func (s *Store) PutFileContext(ctx context.Context, path string) (string, error)
 // PutLink retains a regular file as a blob by hard-linking it, so the blob costs no space while
 // the file exists. Bytes the store already holds intact are not linked again. Where a link
 // cannot be made, such as across file systems, the file is copied. The file must never change
-// in place afterwards, since the blob shares its bytes.
+// in place afterwards, since the blob shares its bytes. Safe for concurrent use.
 func (s *Store) PutLink(ctx context.Context, path string) (string, error) {
 	if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
 		return s.PutFileContext(ctx, path)
@@ -83,13 +84,15 @@ func (s *Store) PutLink(ctx context.Context, path string) (string, error) {
 	if err := os.MkdirAll(s.root, 0o750); err != nil {
 		return "", fmt.Errorf("create setup blob directory: %w", err)
 	}
-	tmp := filepath.Join(s.root, ".link-"+digest)
-	_ = os.Remove(tmp)
+	// Each call links under its own name, so jobs retaining the same bytes at once don't collide.
+	tmp := filepath.Join(s.root, ".link-"+digest+"-"+rand.Text())
 	if err := os.Link(path, tmp); err != nil {
 		return s.PutFileContext(ctx, path)
 	}
-	if err := os.Rename(tmp, filepath.Join(s.root, digest)); err != nil {
-		_ = os.Remove(tmp)
+	err = os.Rename(tmp, filepath.Join(s.root, digest))
+	// A rename onto another link of the same file succeeds without moving it, leaving tmp.
+	_ = os.Remove(tmp)
+	if err != nil {
 		return "", fmt.Errorf("publish setup blob: %w", err)
 	}
 	if err := fsutil.SyncDir(s.root); err != nil {
