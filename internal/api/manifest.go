@@ -410,10 +410,10 @@ func validateManifest(m *instanceManifest) []manifestProblem {
 			})
 		}
 		seen[cfg.File] = true
-		if len(cfg.Content) > control.MaxConfigSize {
+		if len(cfg.Content) > instance.MaxConfigSize {
 			problems = append(problems, manifestProblem{
 				Field:  "configs",
-				Detail: fmt.Sprintf("%s is larger than %d bytes.", cfg.File, control.MaxConfigSize),
+				Detail: fmt.Sprintf("%s is larger than %d bytes.", cfg.File, instance.MaxConfigSize),
 			})
 		}
 	}
