@@ -167,6 +167,15 @@ bytes. The saved package files support recovery when a registry or download cach
 unavailable. If a required package cannot be captured, the save job fails without
 publishing the setup.
 
+A package kept from the download cache shares the cached file's disk space rather than
+copying it, while both are on the same file system, and every setup holding the same
+package version shares one copy. Turn off **Keep package files** to save a **Light** setup
+instead: it keeps only mods whose installed files differ from their registry download, or
+whose registry is turned off, and fetches the rest on restore, from the download cache or else from the registry. A light
+setup takes almost no space, but restoring it fails once the cache has lost a version and
+the registry no longer lists it; the restore preview reports such a mod. Keep package
+files for a setup you must be able to restore offline.
+
 A restore makes the config files match the setup: it writes the saved ones and removes
 those the setup does not hold. Each file it replaces or removes is kept in that file's
 history first. A setup saved before setups held every config file is marked

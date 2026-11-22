@@ -24,6 +24,8 @@ const (
 type setupSaveRequest struct {
 	Name          string `json:"name"`
 	WorldBackupID string `json:"world_backup_id,omitempty"`
+	// Light keeps only the packages their registry archives cannot reproduce.
+	Light bool `json:"light,omitempty"`
 }
 
 func (h *Instances) setupStopped(w http.ResponseWriter, r *http.Request, inst *store.Instance) bool {
@@ -81,7 +83,7 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Name = strings.TrimSpace(req.Name)
-	if req.Name == "" || len(req.Name) > 120 {
+	if req.Name == "" || len(req.Name) > control.MaxSetupNameBytes {
 		apierr.Write(w, r, apierr.New(errcode.ValidationFailed).With("field", setupNameField))
 		return
 	}
@@ -105,6 +107,7 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 	}()
 	payload := control.SetupJobPayload{
 		SetupID: store.NewID(), StagingDir: staging, Name: req.Name, BackupID: req.WorldBackupID,
+		Light: req.Light,
 	}
 	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
 		Kind: jobs.KindSetupSave, LockKey: jobs.InstanceLockKey(id),
@@ -120,6 +123,7 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 				"setup_id":        payload.SetupID,
 				setupNameField:    req.Name,
 				"world_backup_id": req.WorldBackupID,
+				"light":           req.Light,
 			},
 		),
 		OnClaim: control.SetupStoppedClaim(id),

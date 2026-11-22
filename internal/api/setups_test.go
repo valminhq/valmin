@@ -647,3 +647,63 @@ func TestSetupSavesShareUnchangedConfigBlobs(t *testing.T) {
 		t.Errorf("blobs after a second save = %d, want %d", got, first+1)
 	}
 }
+
+// TestLightSetupRestoresPackagesFromTheCache asserts a light setup keeps no payload for a
+// package its cached registry archive reproduces, restores that package from the cache, and
+// reports it once neither the cache nor the registry has it.
+func TestLightSetupRestoresPackagesFromTheCache(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	setupTestMod(t, db, dataDir, "Ns-One", source.Thunderstore,
+		"1.0.0", "one", false, true, false, "unknown")
+	cacheDir := filepath.Join(rt.instances.Cfg.Data.Root, "cache", "thunderstore")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(cacheDir, "Ns-One-1.0.0.zip")
+	if err := os.WriteFile(archive, modZip(t, map[string]string{"plugins/Ns-One.dll": "one"}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL,
+		jsonBody(t, map[string]any{"name": "light", "light": true})))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("save = %d %s, want 202", rec.Code, rec.Body.String())
+	}
+	var accepted jobView
+	decodeInto(t, rec, &accepted)
+	if job := waitJob(t, rt, admin, accepted.JobID); job.Status != "succeeded" {
+		t.Fatalf("save job = %+v, want succeeded", job)
+	}
+	rows, err := db.ListSetups(t.Context(), "inst-a")
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("setups = %+v, %v", rows, err)
+	}
+	saved := rows[0]
+	if _, refs, err := db.SetupByID(t.Context(), "inst-a", saved.ID); err != nil || len(refs) != 0 {
+		t.Fatalf("light setup payloads = %+v, %v, want none", refs, err)
+	}
+
+	seed(t, db, `DELETE FROM instance_mods WHERE instance_id = 'inst-a'`)
+	if err := os.Remove(serverPath(dataDir, "BepInEx/plugins/Ns-One.dll")); err != nil {
+		t.Fatal(err)
+	}
+	setupTestMod(t, db, dataDir, "Ns-Two", source.Hexium,
+		"2.0.0", "two", false, true, false, "unknown")
+	preview := setupTestPreview(t, rt, admin, saved.ID)
+	if !preview.Ready || !preview.Setup.Light {
+		t.Fatalf("preview = %+v, want a ready light setup", preview)
+	}
+	if job := setupTestRestore(t, rt, admin, saved.ID, preview.ETag); job.Status != "succeeded" {
+		t.Fatalf("restore job = %+v, want succeeded", job)
+	}
+	setupTestFile(t, serverPath(dataDir, "BepInEx/plugins/Ns-One.dll"), "one")
+
+	if err := os.Remove(archive); err != nil {
+		t.Fatal(err)
+	}
+	preview = setupTestPreview(t, rt, admin, saved.ID)
+	if preview.Ready ||
+		!strings.Contains(strings.Join(preview.Problems, " "), "Ns-One 1.0.0 is not in the download cache") {
+		t.Errorf("preview without the archive = %+v, want it reported", preview)
+	}
+}

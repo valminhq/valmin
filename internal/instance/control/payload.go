@@ -47,6 +47,7 @@ type (
 		ETag       string `json:"etag,omitempty"`
 		Name       string `json:"name,omitempty"`
 		BackupID   string `json:"world_backup_id,omitempty"`
+		Light      bool   `json:"light,omitempty"`
 	}
 	ConfigApplyPayload struct {
 		Files int `json:"files"`

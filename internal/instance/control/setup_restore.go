@@ -317,8 +317,13 @@ func (s *SetupJobs) prepareSetupRestore(
 	if err != nil {
 		return setupRestorePlan{}, err
 	}
-	jh.Progress(ctx, 20, "verifying saved package files")
-	if err := (&setupArtifacts{DataRoot: s.DataRoot}).stage(ctx, &snap, refs, payload.StagingDir); err != nil {
+	if snap.Light {
+		jh.Progress(ctx, 20, "verifying saved package files and fetching the rest from their registries")
+	} else {
+		jh.Progress(ctx, 20, "verifying saved package files")
+	}
+	artifacts := &setupArtifacts{DataRoot: s.DataRoot, Archives: s.Archives}
+	if err := artifacts.stage(ctx, &snap, refs, payload.StagingDir); err != nil {
 		return setupRestorePlan{}, err
 	}
 	if err := stageSetupConfigs(s.DataRoot, payload.StagingDir, &snap); err != nil {

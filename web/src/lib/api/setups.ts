@@ -25,6 +25,15 @@ export interface SavedSetup {
 	configs_truncated: boolean;
 	/** Saved by the panel before a restore. */
 	automatic: boolean;
+	/** Keeps only the packages their registry archives cannot reproduce; the rest are
+	 * downloaded on restore. */
+	light: boolean;
+}
+
+/** How a setup is saved: which world backup to link, and whether to keep every package. */
+export interface SetupSaveOptions {
+	worldBackupId?: string;
+	light?: boolean;
 }
 
 /** One config file of a setup or of the current server, by path under `BepInEx/config`.
@@ -65,10 +74,11 @@ const path = (instanceId: string, setupId?: string) =>
 
 export const setups = {
 	list: (instanceId: string) => api.get<{ items: SavedSetup[] }>(path(instanceId)),
-	save: (instanceId: string, name: string, worldBackupId?: string) =>
+	save: (instanceId: string, name: string, options: SetupSaveOptions = {}) =>
 		api.post<Job>(path(instanceId), {
 			name,
-			...(worldBackupId ? { world_backup_id: worldBackupId } : {})
+			...(options.worldBackupId ? { world_backup_id: options.worldBackupId } : {}),
+			...(options.light ? { light: true } : {})
 		}),
 	get: (instanceId: string, setupId: string) => api.get<SetupDetail>(path(instanceId, setupId)),
 	/** The saved text of one config file of a setup. */

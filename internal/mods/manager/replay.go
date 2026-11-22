@@ -9,6 +9,7 @@ import (
 
 	"github.com/valminhq/valmin/internal/mods/extract"
 	"github.com/valminhq/valmin/internal/mods/installer"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -49,6 +50,31 @@ func (i *Installer) StageReplay(ctx context.Context, inst *store.Instance, dest 
 		}
 	}
 	return nil
+}
+
+// Archive returns the path of one package version's archive from its registry: the cached copy,
+// or a fresh download while the registry lists that version.
+func (i *Installer) Archive(ctx context.Context, fullName, version string, src source.Source) (string, error) {
+	return i.replayArchive(ctx, &store.InstanceMod{FullName: fullName, Version: version, Source: src})
+}
+
+// ArchiveAvailable reports whether Archive can return one package version's archive: its
+// registry is enabled, and the archive is cached or the registry lists that version.
+func (i *Installer) ArchiveAvailable(
+	ctx context.Context, fullName, version string, src source.Source,
+) (bool, error) {
+	zips, ok := i.Caches[src]
+	if !ok {
+		return false, nil
+	}
+	if zips.Has(fullName + "-" + version) {
+		return true, nil
+	}
+	_, _, listed, err := i.DB.ModVersionDownload(ctx, fullName, version, src)
+	if err != nil {
+		return false, fmt.Errorf("look up %s-%s: %w", fullName, version, err)
+	}
+	return listed, nil
 }
 
 // replayArchive returns the path of the archive row's files came from: the cached copy, or a

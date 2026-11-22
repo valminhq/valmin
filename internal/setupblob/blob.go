@@ -65,6 +65,64 @@ func (s *Store) PutFileContext(ctx context.Context, path string) (string, error)
 	return s.Put(ctx, f)
 }
 
+// PutLink retains a regular file as a blob by hard-linking it, so the blob costs no space while
+// the file exists. Bytes the store already holds intact are not linked again. Where a link
+// cannot be made, such as across file systems, the file is copied. The file must never change
+// in place afterwards, since the blob shares its bytes.
+func (s *Store) PutLink(ctx context.Context, path string) (string, error) {
+	if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
+		return s.PutFileContext(ctx, path)
+	}
+	digest, err := s.hashFile(ctx, path)
+	if err != nil {
+		return "", err
+	}
+	if _, err := s.Verify(digest); err == nil {
+		return digest, nil
+	}
+	if err := os.MkdirAll(s.root, 0o750); err != nil {
+		return "", fmt.Errorf("create setup blob directory: %w", err)
+	}
+	tmp := filepath.Join(s.root, ".link-"+digest)
+	_ = os.Remove(tmp)
+	if err := os.Link(path, tmp); err != nil {
+		return s.PutFileContext(ctx, path)
+	}
+	if err := os.Rename(tmp, filepath.Join(s.root, digest)); err != nil {
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("publish setup blob: %w", err)
+	}
+	if err := fsutil.SyncDir(s.root); err != nil {
+		return "", fmt.Errorf("sync setup blob directory: %w", err)
+	}
+	return digest, nil
+}
+
+// hashFile is the SHA-256 of the regular file at path, refusing one larger than a blob may be.
+func (s *Store) hashFile(ctx context.Context, path string) (string, error) {
+	// #nosec G304 -- The caller selects a server-owned package archive.
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open setup payload: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return "", fmt.Errorf("stat setup payload: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", errors.New("setup payload is not a regular file")
+	}
+	if info.Size() > s.maxBytes {
+		return "", ErrTooLarge
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, contextReader{ctx: ctx, reader: f}); err != nil {
+		return "", fmt.Errorf("hash setup payload: %w", err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
 // PutBytes retains a small in-memory payload, such as a config file or a generated fallback
 // archive. Bytes the store already holds intact are not written again; a damaged copy is
 // replaced.
@@ -148,8 +206,9 @@ func (s *Store) Verify(digest string) (string, error) {
 	return path, nil
 }
 
-// GC removes unreferenced blobs. Call only while setup save jobs are idle, since a blob
-// written by an unfinished save has not yet acquired its database reference.
+// GC removes unreferenced blobs and the temporary files of interrupted writes. Call only while
+// setup save jobs are idle, since a blob written by an unfinished save has not yet acquired its
+// database reference.
 func (s *Store) GC(referenced map[string]bool) error {
 	entries, err := os.ReadDir(s.root)
 	if errors.Is(err, os.ErrNotExist) {
@@ -160,7 +219,8 @@ func (s *Store) GC(referenced map[string]bool) error {
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if !validDigest(name) || referenced[name] {
+		temporary := strings.HasPrefix(name, ".part-") || strings.HasPrefix(name, ".link-")
+		if !temporary && (!validDigest(name) || referenced[name]) {
 			continue
 		}
 		if err := os.Remove(filepath.Join(s.root, name)); err != nil {

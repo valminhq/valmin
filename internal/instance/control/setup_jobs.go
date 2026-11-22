@@ -15,6 +15,7 @@ import (
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/setupblob"
 	"github.com/valminhq/valmin/internal/store"
@@ -34,6 +35,9 @@ type SetupJobs struct {
 	DataRoot string
 	Keeper   *crypto.Keeper
 	Worlds   *Worlds
+	// Archives fetches the packages a light setup does not keep; nil leaves light setups unable
+	// to restore them.
+	Archives PackageArchives
 	// Apply replaces ApplySetupPaths, so a test can fail a restore after it placed files.
 	Apply func(inst *store.Instance, staging string, current, target SetupFiles) error
 }
@@ -126,7 +130,7 @@ func (s *SetupJobs) stoppedInstance(ctx context.Context, id string) (*store.Inst
 // RunSave captures the setup and its package bytes, checking the state again before commit.
 func (s *SetupJobs) RunSave(inst *store.Instance, payload *SetupJobPayload, requestedBy string) jobs.Runner {
 	state := &SetupState{DB: s.DB}
-	artifacts := &setupArtifacts{DataRoot: s.DataRoot}
+	artifacts := &setupArtifacts{DataRoot: s.DataRoot, Archives: s.Archives}
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		defer func() { _ = os.RemoveAll(payload.StagingDir) }()
 		fresh, err := s.stoppedInstance(ctx, inst.ID)
@@ -139,6 +143,7 @@ func (s *SetupJobs) RunSave(inst *store.Instance, payload *SetupJobPayload, requ
 		if err != nil {
 			return jobs.Failed(errcode.Internal, err)
 		}
+		snap.Light = payload.Light
 		jh.Progress(ctx, 30, "retaining package and config files")
 		refs, err := s.retainSetup(ctx, inst, &snap, payload.StagingDir)
 		if err != nil {
@@ -175,12 +180,48 @@ func (s *SetupJobs) RunSave(inst *store.Instance, payload *SetupJobPayload, requ
 	}
 }
 
+// UnavailableArchives names each package of a light setup that it does not keep, has files to
+// restore, and can no longer be fetched: its registry is disabled, or it is neither cached nor
+// listed.
+func (s *SetupJobs) UnavailableArchives(
+	ctx context.Context, snap *SetupSnapshot, refs []store.SetupArtifactRef,
+) ([]string, error) {
+	if !snap.Light {
+		return nil, nil
+	}
+	kept := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		kept[ref.FullName] = true
+	}
+	var missing []string
+	for _, mod := range snap.Mods {
+		entries, err := setupManifest(&mod)
+		if err != nil {
+			return nil, err
+		}
+		if kept[mod.FullName] || len(setupPayloadEntries(entries)) == 0 {
+			continue
+		}
+		available := false
+		if src, ok := source.ByName(mod.Source); ok && s.Archives != nil {
+			var err error
+			if available, err = s.Archives.ArchiveAvailable(ctx, mod.FullName, mod.Version, src); err != nil {
+				return nil, err
+			}
+		}
+		if !available {
+			missing = append(missing, mod.FullName+" "+mod.Version)
+		}
+	}
+	return missing, nil
+}
+
 // retainSetup stores the package and config file bytes snap names, returning the package
 // references. It records each package's freshly hashed files in snap.
 func (s *SetupJobs) retainSetup(
 	ctx context.Context, inst *store.Instance, snap *SetupSnapshot, staging string,
 ) ([]store.SetupArtifactRef, error) {
-	refs, err := (&setupArtifacts{DataRoot: s.DataRoot}).Save(ctx, inst, snap, staging)
+	refs, err := (&setupArtifacts{DataRoot: s.DataRoot, Archives: s.Archives}).Save(ctx, inst, snap, staging)
 	if err != nil {
 		return nil, err
 	}
