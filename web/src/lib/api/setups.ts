@@ -34,6 +34,10 @@ export interface SavedSetup {
 	/** Waiting to be linked to the world backup the next mod change takes, if its mods are
 	 * still the server's then. */
 	world_pending: boolean;
+	/** The setup's mods, listed with it so versions can be compared without loading each one. */
+	mods: SetupMod[];
+	/** A hash over the setup's config files, equal for two setups holding the same files. */
+	configs_digest: string;
 }
 
 /** How a setup is saved: which world backup to link, to take one now, or to wait for the one

@@ -60,7 +60,8 @@ const saved: SetupDetail = {
 	configs_truncated: false,
 	automatic: false,
 	light: false,
-	world_pending: false
+	world_pending: false,
+	configs_digest: 'digest-1'
 };
 
 function preview(overrides: Partial<SetupPreview> = {}): SetupPreview {
@@ -208,6 +209,58 @@ describe('Saved setups', () => {
 		expect(daemon.requests('POST', '/instances/inst-a/setups/setup-1/rollback')[0].body).toEqual({
 			mods_only: true
 		});
+	});
+
+	it('says what changed after each setup', async () => {
+		serve();
+		const older = {
+			...saved,
+			id: 'setup-0',
+			name: 'Older',
+			mods: [{ ...saved.mods[0], version: '0.9.0' }],
+			configs_digest: 'digest-0'
+		};
+		daemon.on('GET', '/instances/inst-a/setups', () => Response.json({ items: [saved, older] }));
+		daemon.on('GET', '/instances/inst-a/mods', () =>
+			Response.json({ mods: [{ ...saved.mods[0], version: '2.0.0' }], plugin_load: null })
+		);
+		await open();
+		const lines = await screen.findAllByTestId('setup-then');
+		expect(lines.map((line) => line.textContent?.trim())).toEqual([
+			'Then: Author-Plugin 1.0.0 → 2.0.0',
+			'Then: Author-Plugin 0.9.0 → 1.0.0, config files changed'
+		]);
+	});
+
+	it('compares the selected setup with another one', async () => {
+		serve();
+		const older: SetupDetail = {
+			...saved,
+			id: 'setup-0',
+			name: 'Older',
+			mods: [{ ...saved.mods[0], version: '0.9.0' }]
+		};
+		daemon.on('GET', '/instances/inst-a/setups', () => Response.json({ items: [saved, older] }));
+		daemon.on('GET', '/instances/inst-a/setups/setup-0', () => Response.json(older));
+		await open();
+		await fireEvent.click(screen.getAllByRole('button', { name: 'Compare and preview' })[0]);
+		await screen.findByRole('heading', { name: 'Rollback preview' });
+		await fireEvent.change(screen.getByLabelText('Compare with'), { target: { value: 'setup-0' } });
+		await screen.findByRole('columnheader', { name: /^Older/ });
+		expect(screen.getByRole('columnheader', { name: 'Saved setup' })).toBeTruthy();
+		expect(screen.getByText('0.9.0')).toBeTruthy();
+	});
+
+	it('opens the setup a link names', async () => {
+		app.page.url = new URL('http://localhost/instances/inst-a/setups?setup=setup-1');
+		try {
+			serve();
+			await open();
+			await screen.findByRole('heading', { name: 'Rollback preview' });
+			expect(daemon.requests('GET', '/instances/inst-a/setups/setup-1/preview')).toHaveLength(1);
+		} finally {
+			app.page.url = new URL('http://localhost/instances/inst-a/setups');
+		}
 	});
 
 	it('saves a named setup with only a consistent selected world backup', async () => {

@@ -6,9 +6,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -69,7 +71,10 @@ type setupDetailView struct {
 	Instance    control.ManifestLaunch `json:"instance"`
 	Mods        []setupModView         `json:"mods"`
 	Configs     []setupConfigView      `json:"configs"`
-	WorldBackup *setupBackupView       `json:"world_backup,omitempty"`
+	// ConfigsDigest is a hash over every config file's path and bytes, so two setups can be
+	// told apart by their config files without listing them.
+	ConfigsDigest string           `json:"configs_digest"`
+	WorldBackup   *setupBackupView `json:"world_backup,omitempty"`
 	// ConfigTree is false for a setup saved before setups held the whole config tree, which
 	// restores only top-level .cfg files.
 	ConfigTree bool `json:"config_tree"`
@@ -161,19 +166,27 @@ func (h *Instances) listSetups(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
+	configs, err := h.DB.SetupConfigsOf(r.Context(), inst.ID)
+	if err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
 	items := make([]setupDetailView, 0, len(rows))
 	for i := range rows {
+		rows[i].Configs = configs[rows[i].ID]
 		snap, err := control.DecodeSetupSnapshot(&rows[i])
 		if err != nil {
 			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
+		digest := configsDigest(&snap)
+		snap.Configs, snap.ConfigFiles = nil, nil
 		item, err := h.setupDetail(r.Context(), &rows[i], &snap)
 		if err != nil {
 			apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 			return
 		}
-		item.Configs = nil
+		item.Configs, item.ConfigsDigest = nil, digest
 		items = append(items, item)
 	}
 	JSON(w, r, http.StatusOK, map[string]any{"items": items})
@@ -298,8 +311,9 @@ func (h *Instances) setupDetail(
 		ID: row.ID, Name: row.Name, CreatedAt: row.CreatedAt, CreatedBy: optional(row.CreatedByName),
 		GameBuildID: row.GameBuildID, WorldName: row.WorldName,
 		Instance: snap.Instance, Mods: setupModsView(snap.Mods),
-		Configs:    savedConfigViews(setupblob.New(h.Cfg.Data.Root), snap),
-		ConfigTree: snap.ConfigTree, ConfigsTruncated: snap.ConfigsTruncated, Automatic: row.Automatic,
+		Configs:       savedConfigViews(setupblob.New(h.Cfg.Data.Root), snap),
+		ConfigsDigest: configsDigest(snap),
+		ConfigTree:    snap.ConfigTree, ConfigsTruncated: snap.ConfigsTruncated, Automatic: row.Automatic,
 		WorldPending: row.WorldPending,
 		Light:        snap.Light,
 	}
@@ -489,6 +503,24 @@ func (h *Instances) currentSetupState(
 		Build: deref(inst.GameBuildID), Launch: snap.Instance,
 		Mods: setupModsView(snap.Mods), Configs: configs,
 	}, snap, etag, nil
+}
+
+// configsDigest hashes the path and bytes of every config file snap holds, in path order.
+func configsDigest(snap *control.SetupSnapshot) string {
+	files := make([]string, 0, len(snap.Configs)+len(snap.ConfigFiles))
+	for _, c := range snap.Configs {
+		sum := sha256.Sum256([]byte(c.Content))
+		files = append(files, c.File+"\x00"+hex.EncodeToString(sum[:]))
+	}
+	for _, c := range snap.ConfigFiles {
+		files = append(files, c.File+"\x00"+c.SHA256)
+	}
+	slices.Sort(files)
+	h := sha256.New()
+	for _, f := range files {
+		_, _ = io.WriteString(h, f+"\x00")
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // savedConfigViews lists the config files of a saved setup, with the content of each top-level

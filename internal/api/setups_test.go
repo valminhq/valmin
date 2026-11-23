@@ -778,6 +778,17 @@ func TestSetupSavesShareUnchangedConfigBlobs(t *testing.T) {
 	if got := blobs(); got != first+1 {
 		t.Errorf("blobs after a second save = %d, want %d", got, first+1)
 	}
+	setupTestSave(t, rt, db, admin, "third")
+	rec = as(rt, admin, httptest.NewRequest(http.MethodGet, setupsURL, http.NoBody))
+	decodeInto(t, rec, &list)
+	if len(list.Items) != 3 {
+		t.Fatalf("listed setups = %d, want 3", len(list.Items))
+	}
+	third, second, firstSetup := list.Items[0], list.Items[1], list.Items[2]
+	if third.ConfigsDigest != second.ConfigsDigest || second.ConfigsDigest == firstSetup.ConfigsDigest {
+		t.Errorf("configs digests = %q, %q, %q, want the last two equal and the first different",
+			firstSetup.ConfigsDigest, second.ConfigsDigest, third.ConfigsDigest)
+	}
 }
 
 // TestLightSetupRestoresPackagesFromTheCache asserts a light setup keeps no payload for a

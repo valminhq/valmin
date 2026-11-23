@@ -331,6 +331,32 @@ func (db *DB) NewestSetup(ctx context.Context, instanceID string) (*SavedSetup, 
 	return db.SetupByID(ctx, instanceID, id)
 }
 
+// SetupConfigsOf returns the config files of every setup of the instance, by setup ID and then
+// path.
+func (db *DB) SetupConfigsOf(ctx context.Context, instanceID string) (map[string][]SetupConfigRef, error) {
+	rows, err := db.Reader.QueryContext(ctx, `
+		SELECT c.setup_id, c.file, c.sha256, c.size_bytes FROM saved_setup_configs c
+		JOIN saved_setups s ON s.id = c.setup_id
+		WHERE s.instance_id = ? ORDER BY c.setup_id, c.file`, instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("read the setup configs of %s: %w", instanceID, err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string][]SetupConfigRef{}
+	for rows.Next() {
+		var id string
+		var c SetupConfigRef
+		if err := rows.Scan(&id, &c.File, &c.SHA256, &c.SizeBytes); err != nil {
+			return nil, fmt.Errorf("scan a setup config: %w", err)
+		}
+		out[id] = append(out[id], c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read the setup configs of %s: %w", instanceID, err)
+	}
+	return out, nil
+}
+
 // setupConfigs returns the config files of setup id, by path.
 func (db *DB) setupConfigs(ctx context.Context, id string) ([]SetupConfigRef, error) {
 	rows, err := db.Reader.QueryContext(ctx, `
