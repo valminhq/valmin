@@ -87,11 +87,14 @@ type setupDetailView struct {
 }
 
 type setupPreviewView struct {
-	ETag     string          `json:"etag"`
-	Ready    bool            `json:"ready"`
-	Problems []string        `json:"problems"`
-	Current  setupStateView  `json:"current"`
-	Setup    setupDetailView `json:"setup"`
+	ETag  string `json:"etag"`
+	Ready bool   `json:"ready"`
+	// StopRequired reports that the server is not stopped: a restore refuses it, and a rollback
+	// stops a running one first.
+	StopRequired bool            `json:"stop_required"`
+	Problems     []string        `json:"problems"`
+	Current      setupStateView  `json:"current"`
+	Setup        setupDetailView `json:"setup"`
 }
 
 func setupModsView(mods []control.SetupMod) []setupModView {
@@ -112,6 +115,7 @@ func (h *Instances) setupRoutes(rt *routeTable) {
 	rt.Handle("GET /api/v1/instances/{id}/setups/{sid}/configs/{file}", http.HandlerFunc(h.readSetupConfig))
 	rt.Handle("GET /api/v1/instances/{id}/setups/{sid}/preview", http.HandlerFunc(h.previewSetup))
 	rt.Handle("POST /api/v1/instances/{id}/setups/{sid}/restore", http.HandlerFunc(h.restoreSetup))
+	rt.Handle("POST /api/v1/instances/{id}/setups/{sid}/rollback", http.HandlerFunc(h.rollbackSetup))
 	rt.Handle("DELETE /api/v1/instances/{id}/setups/{sid}", http.HandlerFunc(h.deleteSetup))
 }
 
@@ -382,13 +386,11 @@ func (h *Instances) setupPreview(
 		ETag: etag, Problems: []string{},
 		Current: current, Setup: detail,
 	}
-	if inst.State != string(instance.StateStopped) {
-		p.Problems = append(p.Problems, "Stop the server before restoring this setup.")
-	}
-	if err := h.assertStopped(ctx, inst); err != nil {
-		if errors.Is(err, instance.ErrServerRunning) {
+	p.StopRequired = inst.State != string(instance.StateStopped)
+	if !p.StopRequired {
+		if err := h.assertStopped(ctx, inst); errors.Is(err, instance.ErrServerRunning) {
 			p.Problems = append(p.Problems, "The game container is running. Stop it before restoring.")
-		} else {
+		} else if err != nil {
 			return p, err
 		}
 	}

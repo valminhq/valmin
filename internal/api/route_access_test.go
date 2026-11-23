@@ -111,6 +111,7 @@ var instanceRouteAccess = map[string]string{
 	"GET /api/v1/instances/{id}/setups/{sid}/configs/{file}":      accessAdmin,
 	"GET /api/v1/instances/{id}/setups/{sid}/preview":             accessAdmin,
 	"POST /api/v1/instances/{id}/setups/{sid}/restore":            accessAdmin,
+	"POST /api/v1/instances/{id}/setups/{sid}/rollback":           accessAdmin,
 	"POST /api/v1/instances/{id}/start":                           "instance.start",
 	"GET /api/v1/instances/{id}/stats":                            accessView,
 	"POST /api/v1/instances/{id}/stop":                            "instance.stop",

@@ -208,6 +208,7 @@ var cancelActions = map[jobs.Kind]authz.Action{
 	jobs.KindSetupSave:        authz.SetupsManage,
 	jobs.KindSetupRestore:     authz.SetupsManage,
 	jobs.KindSetupDelete:      authz.SetupsManage,
+	jobs.KindSetupRollback:    authz.SetupsManage,
 	jobs.KindWorldTool:        authz.WorldTools,
 	jobs.KindChain:            authz.InstanceStop,
 	jobs.KindUpdateTest:       authz.InstanceUpdate,

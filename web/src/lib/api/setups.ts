@@ -68,6 +68,8 @@ export interface SetupDetail extends SavedSetup {
 export interface SetupPreview {
 	etag: string;
 	ready: boolean;
+	/** The server is not stopped: a restore refuses it, and a rollback stops a running one. */
+	stop_required: boolean;
 	problems: string[];
 	current: {
 		build: string;
@@ -99,13 +101,22 @@ export const setups = {
 			.then((res) => res.text),
 	preview: (instanceId: string, setupId: string) =>
 		api.get<SetupPreview>(`${path(instanceId, setupId)}/preview`),
-	restore: (instanceId: string, setupId: string, etag: string) => {
-		if (!etag) throw new Error('Restoring a setup needs its preview fingerprint.');
-		return request<Job>(`${path(instanceId, setupId)}/restore`, {
+	/** Puts the server back on the setup in one job: stops it if it runs, restores the setup and
+	 * optionally its linked world, and optionally starts it again. The fingerprint is sent only for
+	 * a stopped server. */
+	rollback: (
+		instanceId: string,
+		setupId: string,
+		options: { world?: boolean; start?: boolean; etag?: string } = {}
+	) =>
+		request<Job>(`${path(instanceId, setupId)}/rollback`, {
 			method: 'POST',
-			headers: { 'If-Match': etag }
-		});
-	},
+			headers: options.etag ? { 'If-Match': options.etag } : {},
+			body: {
+				...(options.world ? { world: true } : {}),
+				...(options.start ? { start: true } : {})
+			}
+		}),
 	remove: (instanceId: string, setupId: string) =>
 		request<Job>(path(instanceId, setupId), { method: 'DELETE' })
 };

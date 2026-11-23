@@ -20,6 +20,19 @@ import (
 // SetupStagingRoot is where setup save and restore jobs stage their files.
 func SetupStagingRoot(dataRoot string) string { return filepath.Join(dataRoot, "staging", "setups") }
 
+// NewSetupStaging creates a staging directory of its own for one setup job under dataRoot.
+func NewSetupStaging(dataRoot string) (string, error) {
+	root := SetupStagingRoot(dataRoot)
+	if err := os.MkdirAll(root, 0o750); err != nil {
+		return "", fmt.Errorf("create setup staging root: %w", err)
+	}
+	staging, err := os.MkdirTemp(root, "job-")
+	if err != nil {
+		return "", fmt.Errorf("create setup staging directory: %w", err)
+	}
+	return staging, nil
+}
+
 type SetupRootPaths struct {
 	Root  string   `json:"root"`
 	Paths []string `json:"paths"`

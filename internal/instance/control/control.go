@@ -73,6 +73,7 @@ type Components struct {
 	Chainer       *Chainer
 	UpdateChecker *UpdateChecker
 	SetupJobs     *SetupJobs
+	SetupRollback *SetupRollback
 	SetupState    *SetupState
 	Worlds        *Worlds
 	Operations    *Operations
@@ -135,7 +136,7 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		HostRoot: hostRoot, Image: cfg.Game.Image, Network: cfg.Game.Network, Sandbox: sandbox,
 		StopTimeout: stopTimeout, ReadMods: d.ReadMods,
 	}
-	c.Restorer = &Restorer{Worlds: d.Worlds}
+	c.Restorer = &Restorer{Worlds: d.Worlds, Engine: d.Engine}
 	c.GameUpdater = &GameUpdater{
 		DB: d.DB, Keeper: d.Keeper, Engine: d.Engine, Runtime: d.Runtime, Builds: builds, Config: cfg,
 		Worlds: d.Worlds, Installer: d.Installer,
@@ -161,6 +162,7 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Config: cfg, Notifier: d.Notifier,
 	}
 	c.SetupJobs = newSetupJobs(d, dataRoot, c.Backupper)
+	c.SetupRollback = &SetupRollback{Engine: d.Engine, Chainer: c.Chainer, Setups: c.SetupJobs, Restorer: c.Restorer}
 	c.SetupState = &SetupState{DB: d.DB}
 	c.Supervisor = &Supervisor{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Keeper: d.Keeper, Streams: d.Streams, Logs: logs,
@@ -187,6 +189,7 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 func newSetupJobs(d *Deps, dataRoot string, backups *Backupper) *SetupJobs {
 	s := &SetupJobs{
 		DB: d.DB, Runtime: d.Runtime, DataRoot: dataRoot, Keeper: d.Keeper, Worlds: d.Worlds, Backups: backups,
+		Engine: d.Engine,
 	}
 	if d.Installer != nil {
 		s.Archives = d.Installer

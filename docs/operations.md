@@ -229,15 +229,22 @@ says so. Linked backups do not count toward retention and cannot be
 deleted until all setups that link to them are deleted, so each one adds to disk use; the setup
 shows its size. A linked backup is a reference to a world archive, not a second copy of it.
 
-Before restoring, compare the setup with the current server and review the preview.
-Stop the server, then start the restore. The preview expires when the server state
-changes; reload it before retrying. Valmin verifies the saved packages before
-changing files and rolls back the setup if installation fails. The server remains
-stopped. Check the job result before starting it.
+Before rolling back, compare the setup with the current server and review the preview. A
+rollback is one job, `setup_rollback`, that runs each of these as its own job: stop the server
+if it runs, restore the setup, restore the setup's linked world if asked, and start the server
+if asked. Each step runs only after the one before succeeded, and a stop that was done stays
+done, so a failed setup restore leaves the server stopped with its files as they were. A failed
+world restore leaves the setup restored and the server in `error`, showing **This server needs a
+check**. A step that finds another job holding a lock it needs, such as a setup being saved on
+another server, waits for it. A rollback on a stopped server checks the preview's fingerprint, which expires when the
+server state changes; reload it before retrying. Valmin verifies the saved packages before
+changing files and rolls back the setup if installation fails.
 
-The restore does not change the game build, selected world, server password, or
-world files. To recover a world, restore the linked archive separately on **Backups**.
-World restoration follows the [world restore procedure](#back-up-or-restore-a-world).
+A setup restore does not change the game build, selected world, or server password. The world
+changes only if the rollback restores the linked archive, following the
+[world restore procedure](#back-up-or-restore-a-world). That archives the current world once
+more as its own pre-restore snapshot, in addition to the snapshot taken before the mods change,
+so a rollback with its world can add two archives.
 
 ## Schedule maintenance
 

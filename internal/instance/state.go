@@ -231,6 +231,8 @@ var requires = map[jobs.Kind][]State{
 	// update_test and update_apply steer the server through their steps like a chain does.
 	jobs.KindUpdateTest:  {StateStopped, StateRunning},
 	jobs.KindUpdateApply: {StateStopped, StateRunning},
+	// setup_rollback stops a running server before it restores anything.
+	jobs.KindSetupRollback: {StateStopped, StateRunning},
 }
 
 // AllowedFrom returns, sorted, the states kind may be claimed from — the `allowed_states`

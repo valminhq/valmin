@@ -140,6 +140,7 @@ const nextActions: Record<string, NextAction> = {
 	restore: failedBackups,
 	setup_save: failedSetups,
 	setup_restore: failedSetups,
+	setup_rollback: failedSetups,
 	setup_delete: failedSetups,
 	game_update: failedUpdate
 };
