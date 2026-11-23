@@ -233,6 +233,21 @@ func (db *DB) SetupByID(ctx context.Context, instanceID, id string) (*SavedSetup
 	return &s, artifacts, nil
 }
 
+// NewestSetup returns the instance's most recently saved setup as SetupByID does, nil when it
+// has none.
+func (db *DB) NewestSetup(ctx context.Context, instanceID string) (*SavedSetup, []SetupArtifactRef, error) {
+	var id string
+	err := db.Reader.QueryRowContext(ctx, `SELECT id FROM saved_setups WHERE instance_id = ?
+		ORDER BY created_at DESC, id DESC LIMIT 1`, instanceID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("find the newest setup of %s: %w", instanceID, err)
+	}
+	return db.SetupByID(ctx, instanceID, id)
+}
+
 // setupConfigs returns the config files of setup id, by path.
 func (db *DB) setupConfigs(ctx context.Context, id string) ([]SetupConfigRef, error) {
 	rows, err := db.Reader.QueryContext(ctx, `
