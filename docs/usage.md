@@ -869,8 +869,11 @@ the installs that create a server from a template or code. A game update on its 
 mods, so it saves no setup either. The dialog before the change
 says what is saved.
 
-To undo a change, open **Saved setups**, select the automatic setup and choose **Roll back to
-this setup**. The mods, their configuration files and settings go back as they were (see
+To undo a change, choose **Undo** on the line above the installed mods, which names the newest
+automatic setup, when and by whom it was saved, and what changed in the mods since. It opens
+**Saved setups** on that setup; choose **Roll back to this setup**. The line is shown to those
+who may manage mods, and only while the mods differ from that setup. You can also open **Saved
+setups** and select any automatic setup. The mods, their configuration files and settings go back as they were (see
 [Save and restore a setup](#save-and-restore-a-setup)). If the update also changed the
 world, switch on **Also restore the linked world backup** to put the world back in the same
 step.
@@ -1211,7 +1214,10 @@ build and world name appear in the comparison but do not change on restore. The 
 password and world files are excluded.
 
 The list shows when each setup was saved and by whom; an automatic setup names who made the
-change it comes before. Select a setup to compare it with the current server. Under **Configuration files**, the
+change it comes before. Under each one, **Then** says what changed in the mods after it: up to
+the next newer setup, and whether config files changed too, or for the newest up to the
+installed mods. Select a setup to compare it with the current server, or choose another setup
+under **Compare with** to see what differs between the two. Under **Configuration files**, the
 comparison lists the files the restore removes and adds, and each changed file opens to a
 line-by-line comparison. Review the preview, then choose **Roll back to this setup**, on a
 running or a stopped server. Valmin stops a running server, saves the current setup as an

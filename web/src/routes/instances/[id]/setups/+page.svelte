@@ -8,7 +8,10 @@
 	import { actions, instances, type Instance } from '#lib/api/instances.js';
 	import { backups, type Backup } from '#lib/api/backups.js';
 	import { ApiError } from '#lib/api/errors.js';
-	import { setups, type SavedSetup, type SetupPreview } from '#lib/api/setups.js';
+	import { setups, type SavedSetup, type SetupDetail, type SetupPreview } from '#lib/api/setups.js';
+	import { configs } from '#lib/api/configs.js';
+	import { changeSummary } from '#lib/compare.js';
+	import { mods, type InstalledMod } from '#lib/api/mods.js';
 	import type { Job } from '#lib/api/types.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { Badge } from '#lib/components/ui/badge/index.js';
@@ -20,7 +23,7 @@
 	import DestructiveConfirm from '#lib/components/destructive-confirm.svelte';
 	import JobProgress from '#lib/components/job-progress.svelte';
 	import Problem from '#lib/components/problem.svelte';
-	import SetupComparison from '#lib/components/setup-comparison.svelte';
+	import SetupComparison, { type ComparisonSide } from '#lib/components/setup-comparison.svelte';
 	import SetupBeforeUpdateCard from '#lib/components/setup-before-update-card.svelte';
 
 	const id = $derived(page.params.id ?? '');
@@ -61,6 +64,14 @@
 	let keepPackages = $state(true);
 	let selectedId = $state('');
 	let preview = $state<SetupPreview | null>(null);
+	/** The other side of the comparison: '' for the current server, or a setup's ID. */
+	let compareWith = $state('');
+	let other = $state<SetupDetail | null>(null);
+	/** The server's installed mods, for what changed after the newest setup; null when unread. */
+	let currentMods = $state<InstalledMod[] | null>(null);
+	let otherFailure = $state<unknown>(null);
+	/** Whether the setup the page address names has been opened, which happens once. */
+	let linkedOpened = false;
 	let previewLoading = $state(false);
 	let previewFailure = $state<unknown>(null);
 	let restoreOpen = $state(false);
@@ -115,13 +126,20 @@
 		loading = true;
 		failure = null;
 		try {
-			const [server, saved] = await Promise.all([
+			const [server, saved, installed] = await Promise.all([
 				instances.get(instanceId),
-				setups.list(instanceId)
+				setups.list(instanceId),
+				mods.installed(instanceId).catch(() => null)
 			]);
 			if (request !== loadRequest) return;
 			instance = server;
 			list = saved.items;
+			currentMods = installed?.mods ?? null;
+			const linked = saved.items.find((setup) => setup.id === page.url.searchParams.get('setup'));
+			if (linked && !linkedOpened) {
+				linkedOpened = true;
+				compare(linked);
+			}
 			if (selectedId && !saved.items.some((setup) => setup.id === selectedId)) {
 				selectedId = '';
 				preview = null;
@@ -167,10 +185,74 @@
 	}
 
 	function compare(setup: SavedSetup) {
-		if (setup.id !== selectedId) restoreWorld = false;
+		if (setup.id !== selectedId) {
+			restoreWorld = false;
+			compareWith = '';
+			other = null;
+			otherFailure = null;
+		}
 		selectedId = setup.id;
 		void loadPreview(setup.id);
 	}
+
+	/** Loads the setup the selected one is compared with, or clears it for the current server. */
+	async function loadOther(setupId: string) {
+		other = null;
+		otherFailure = null;
+		if (!setupId) return;
+		try {
+			const detail = await setups.get(id, setupId);
+			if (compareWith === setupId) other = detail;
+		} catch (err) {
+			if (compareWith === setupId) otherFailure = err;
+		}
+	}
+
+	/** A saved setup as one side of the comparison. */
+	function setupSide(setup: SetupDetail, label: string): ComparisonSide {
+		return {
+			label,
+			build: setup.game_build_id,
+			launch: setup.instance,
+			mods: setup.mods,
+			configs: setup.configs,
+			read: (file) => setups.config(id, setup.id, file)
+		};
+	}
+
+	/** The pair of sides shown: the current server or another setup, then the selected setup. */
+	const sides = $derived.by((): [ComparisonSide, ComparisonSide] | null => {
+		if (!preview) return null;
+		const chosen = setupSide(preview.setup, 'Saved setup');
+		if (compareWith && other)
+			return [setupSide(other, `${other.name} (${when(other.created_at)})`), chosen];
+		return [
+			{
+				label: 'Current server',
+				build: preview.current.build,
+				launch: preview.current.launch,
+				mods: preview.current.mods,
+				configs: preview.current.configs,
+				read: (file) => configs.readRaw(id, file).then((res) => res.text)
+			},
+			chosen
+		];
+	});
+
+	/** What changed after each setup: up to the next newer one, or up to the current server for
+	 * the newest, whose config files are not compared. */
+	const summaries = $derived.by(() => {
+		const out: Record<string, string> = {};
+		list.forEach((setup, i) => {
+			const newer = list[i - 1];
+			out[setup.id] = newer
+				? changeSummary(setup.mods, newer.mods, setup.configs_digest !== newer.configs_digest)
+				: currentMods
+					? changeSummary(setup.mods, currentMods)
+					: '';
+		});
+		return out;
+	});
 
 	async function run(
 		action: 'save' | 'rollback' | 'delete',
@@ -356,6 +438,11 @@
 												? ` · by ${setup.created_by}`
 												: ''}</span
 										>
+										{#if summaries[setup.id]}
+											<span class="text-sm break-words" data-testid="setup-then"
+												>Then: {summaries[setup.id]}</span
+											>
+										{/if}
 										{#if setup.automatic || setup.light || !setup.config_tree}
 											<span class="flex flex-wrap gap-1">
 												{#if setup.automatic}<Badge variant="outline">Automatic</Badge>{/if}
@@ -419,10 +506,26 @@
 						<p class="text-sm text-muted-foreground">Checking setup and current server…</p>
 					{/if}
 					<Problem error={previewFailure} />
-					{#if preview}
+					{#if preview && sides}
+						<div class="grid max-w-lg gap-2">
+							<Label for="setup-compare-with">Compare with</Label>
+							<NativeSelect
+								id="setup-compare-with"
+								bind:value={compareWith}
+								onchange={() => loadOther(compareWith)}
+							>
+								<option value="">Current server</option>
+								{#each list.filter((setup) => setup.id !== preview?.setup.id) as setup (setup.id)}
+									<option value={setup.id}>{setup.name} · {when(setup.created_at)}</option>
+								{/each}
+							</NativeSelect>
+							<Problem error={otherFailure} />
+						</div>
 						<SetupComparison
-							{preview}
-							instanceId={id}
+							a={sides[0]}
+							b={sides[1]}
+							restore={!(compareWith && other)}
+							configTree={preview.setup.config_tree && (other?.config_tree ?? true)}
 							settingsRestored={canManage && restoreSettings}
 							readable={canReadConfigs}
 						/>

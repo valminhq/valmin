@@ -2,6 +2,7 @@
 	import EmptyState from '#lib/components/empty-state.svelte';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { formatInstant } from '#lib/api/schedules.js';
+	import LastModChange from '#lib/components/last-mod-change.svelte';
 	import { Tabs } from 'bits-ui';
 	import { modOffer, catalogueStatus, installedUpdateTarget } from '#lib/mod-catalogue.js';
 	import { goto } from '$app/navigation';
@@ -851,6 +852,9 @@
 						{/if}
 					</div>
 				</div>
+				{#if canManage && !loading && !failure && instance?.id === id}
+					<LastModChange instanceId={id} {installed} />
+				{/if}
 				{#if canManage && installed.length > 0}
 					<p class="text-sm text-muted-foreground">
 						Disable a mod to rule it out while you look for the one causing a problem. Its files

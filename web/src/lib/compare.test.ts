@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ManifestLaunch } from '#lib/api/manifest.js';
 import {
+	changeSummary,
 	compareConfigs,
 	compareMods,
 	compareSettings,
@@ -326,5 +327,32 @@ describe('compareSetupConfigs', () => {
 			'old.json': 'only-b',
 			'same.cfg': 'same'
 		});
+	});
+});
+
+describe('changeSummary', () => {
+	it('names version moves, added, removed, disabled and enabled packages', () => {
+		expect(
+			changeSummary(
+				[mod('A-One', '1.0.0'), mod('B-Two'), mod('C-Off', '1.0.0', true)],
+				[mod('A-One', '1.1.0'), mod('C-Off', '1.0.0', false)]
+			)
+		).toBe('A-One 1.0.0 → 1.1.0, removed B-Two, disabled C-Off');
+		expect(changeSummary([], [mod('D-New')])).toBe('added D-New');
+		expect(changeSummary([mod('E')], [mod('E', '1.0.0', true, 'hexium')])).toBe(
+			'E from another registry'
+		);
+	});
+
+	it('counts the packages past the first three and adds changed config files', () => {
+		const before = [mod('A'), mod('B'), mod('C'), mod('D')];
+		const after = before.map((m) => ({ ...m, version: '2.0.0' }));
+		expect(changeSummary(before, after, true)).toBe(
+			'A 1.0.0 → 2.0.0, B 1.0.0 → 2.0.0, C 1.0.0 → 2.0.0, 1 more, config files changed'
+		);
+	});
+
+	it('is empty when nothing changed', () => {
+		expect(changeSummary([mod('A')], [mod('A')])).toBe('');
 	});
 });

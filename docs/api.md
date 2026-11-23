@@ -962,8 +962,10 @@ Config bytes are stored once per content and shared between setups. It retains p
 payloads for offline restore. Game build and world name are comparison-only. The server
 password, selected world, and world files are not restored.
 
-Each setup has `created_by`, `config_tree`, `configs_truncated`, `automatic`, `light` and
-`world_pending`.
+Each setup has `created_by`, `config_tree`, `configs_truncated`, `automatic`, `light`,
+`world_pending` and `configs_digest`. `configs_digest` is a hash over the setup's config file
+paths and bytes: two setups holding the same files have the same digest. The list carries each
+setup's `mods` and `configs_digest`, but not its `configs`.
 `created_by` is the username of whoever saved the setup or made the change an automatic one
 comes before, `null` for the panel's own change or a deleted account. `config_tree` is
 `false` for a setup saved before setups held the whole config tree: it holds only the `.cfg`

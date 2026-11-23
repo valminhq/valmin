@@ -1,6 +1,20 @@
+<script lang="ts" module>
+	import type { ManifestLaunch } from '#lib/api/manifest.js';
+	import type { SetupConfig, SetupMod } from '#lib/api/setups.js';
+
+	/** One side of a comparison: the live server or a saved setup. */
+	export interface ComparisonSide {
+		label: string;
+		build: string;
+		launch: ManifestLaunch;
+		mods: SetupMod[];
+		configs: SetupConfig[];
+		/** Reads the text of one config file of this side. */
+		read: (file: string) => Promise<string>;
+	}
+</script>
+
 <script lang="ts">
-	import { setups, type SetupConfig, type SetupPreview } from '#lib/api/setups.js';
-	import { configs } from '#lib/api/configs.js';
 	import { modSides, sourceLabel } from '#lib/api/mods.js';
 	import {
 		compareMods,
@@ -17,13 +31,20 @@
 	import Problem from '#lib/components/problem.svelte';
 
 	let {
-		preview,
-		instanceId,
+		a,
+		b,
+		restore = true,
+		configTree = true,
 		settingsRestored = true,
 		readable = true
 	}: {
-		preview: SetupPreview;
-		instanceId: string;
+		a: ComparisonSide;
+		b: ComparisonSide;
+		/** Whether b is what a restore puts in place of a, so differences are worded as its
+		 * changes. */
+		restore?: boolean;
+		/** False when b was saved before setups held every config file. */
+		configTree?: boolean;
 		/** Whether the rollback restores the launch and backup settings shown. */
 		settingsRestored?: boolean;
 		/** Whether the viewer may read config file contents; otherwise only names are shown. */
@@ -33,35 +54,57 @@
 	/** Both texts of each changed file opened so far, or why they could not be read. */
 	let texts = $state<Record<string, { a: string; b: string } | { failure: unknown }>>({});
 
+	/** Which pair of sides the opened files and loaded texts belong to. */
+	let pair = 0;
+
+	// Forgets the opened files and their texts whenever either side is replaced.
+	$effect(() => {
+		void a;
+		void b;
+		pair++;
+		opened = {};
+		texts = {};
+	});
+
 	const settings = $derived(
-		compareSettings(preview.current, {
-			build: preview.setup.game_build_id,
-			launch: preview.setup.instance
-		})
+		compareSettings({ build: a.build, launch: a.launch }, { build: b.build, launch: b.launch })
 	);
 	const settingDiffs = $derived(settings.filter((row) => row.change !== 'same'));
-	const modRows = $derived(compareMods(preview.current.mods, preview.setup.mods));
+	const modRows = $derived(compareMods(a.mods, b.mods));
 	const modDiffs = $derived(modRows.filter((row) => row.change !== 'same'));
-	const configRows = $derived(compareSetupConfigs(preview.current.configs, preview.setup.configs));
+	const configRows = $derived(compareSetupConfigs(a.configs, b.configs));
 	const configDiffs = $derived(configRows.filter((row) => row.change !== 'same'));
 	const removed = $derived(configDiffs.filter((row) => row.change === 'only-a'));
 	const added = $derived(configDiffs.filter((row) => row.change === 'only-b'));
 	const changed = $derived(configDiffs.filter((row) => row.change === 'changed'));
+	const headings = $derived(
+		restore
+			? {
+					removed: 'Removed by the restore',
+					added: 'Added by the restore',
+					changed: 'Changed by the restore'
+				}
+			: {
+					removed: `Only in ${a.label}`,
+					added: `Only in ${b.label}`,
+					changed: 'Different'
+				}
+	);
 
-	/** Loads both texts of a changed file the first time it is opened. A top-level `.cfg`
-	 * arrives with the preview; any other file is read from the server and the saved setup. */
+	/** Loads both texts of a changed file the first time it is opened. */
 	async function loadTexts(row: Row<SetupConfig>) {
 		if (texts[row.key] || !row.a || !row.b) return;
-		const { a, b } = row;
+		const { a: left, b: right } = row;
+		const mine = pair;
 		try {
-			const [current, saved] = await Promise.all([
-				a.content ?? configs.readRaw(instanceId, row.key).then((res) => res.text),
-				b.content ?? setups.config(instanceId, preview.setup.id, row.key)
+			const [first, second] = await Promise.all([
+				left.content ?? a.read(row.key),
+				right.content ?? b.read(row.key)
 			]);
 			const lf = (text: string) => text.replaceAll('\r\n', '\n');
-			texts[row.key] = { a: lf(current), b: lf(saved) };
+			if (mine === pair) texts[row.key] = { a: lf(first), b: lf(second) };
 		} catch (err) {
-			texts[row.key] = { failure: err };
+			if (mine === pair) texts[row.key] = { failure: err };
 		}
 	}
 	const changes = $derived(settingDiffs.length + modDiffs.length + configDiffs.length);
@@ -70,7 +113,7 @@
 <div class="grid gap-4">
 	<p class="text-sm font-medium">
 		{changes === 0
-			? 'The saved setup matches the current server.'
+			? `${b.label} matches ${restore ? 'the current server' : a.label}.`
 			: `Differences: ${settingDiffs.length} in game and settings, ${modDiffs.length} in mods, ${configDiffs.length} in configuration files.`}
 	</p>
 
@@ -78,9 +121,11 @@
 		<Card.Header>
 			<Card.Title>Game and settings</Card.Title>
 			<Card.Description>
-				{settingsRestored
-					? 'Game build and world name are for comparison only. Rolling back changes the other settings shown here.'
-					: 'For comparison only: this rollback keeps the current settings.'}
+				{!restore
+					? 'The settings each one holds.'
+					: settingsRestored
+						? 'Game build and world name are for comparison only. Rolling back changes the other settings shown here.'
+						: 'For comparison only: this rollback keeps the current settings.'}
 			</Card.Description>
 		</Card.Header>
 		<Card.Content>
@@ -92,8 +137,8 @@
 						<thead class="text-xs text-muted-foreground">
 							<tr>
 								<th scope="col" class="py-2 pr-4 font-medium">Setting</th>
-								<th scope="col" class="py-2 pr-4 font-medium">Current server</th>
-								<th scope="col" class="py-2 font-medium">Saved setup</th>
+								<th scope="col" class="py-2 pr-4 font-medium">{a.label}</th>
+								<th scope="col" class="py-2 font-medium">{b.label}</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -101,7 +146,7 @@
 								<tr class="border-t align-top">
 									<th scope="row" class="py-2 pr-4 font-medium">
 										{row.label}
-										{#if row.key === 'game_build' || row.key === 'world_name'}
+										{#if restore && (row.key === 'game_build' || row.key === 'world_name')}
 											<Badge variant="outline">Compare only</Badge>
 										{/if}
 									</th>
@@ -133,8 +178,8 @@
 						<thead class="text-xs text-muted-foreground">
 							<tr>
 								<th scope="col" class="py-2 pr-4 font-medium">Mod</th>
-								<th scope="col" class="py-2 pr-4 font-medium">Current server</th>
-								<th scope="col" class="py-2 pr-4 font-medium">Saved setup</th>
+								<th scope="col" class="py-2 pr-4 font-medium">{a.label}</th>
+								<th scope="col" class="py-2 pr-4 font-medium">{b.label}</th>
 								<th scope="col" class="py-2 font-medium">Difference</th>
 							</tr>
 						</thead>
@@ -146,7 +191,7 @@
 									<td class="py-2 pr-4">{@render modState(row.b)}</td>
 									<td class="py-2">
 										<div class="flex flex-wrap gap-1">
-											{#each modChanges(row, 'current server', 'saved setup') as change (change)}
+											{#each modChanges(row, a.label, b.label) as change (change)}
 												<Badge variant="outline">{change}</Badge>
 											{/each}
 										</div>
@@ -165,7 +210,7 @@
 			<Card.Title>Configuration files</Card.Title>
 			<Card.Description>
 				{configRows.length - configDiffs.length} matching configuration files.
-				{preview.setup.config_tree
+				{configTree
 					? 'The console password file is not compared.'
 					: 'This setup was saved before setups held every config file, so only its top-level .cfg files are compared and restored.'}
 			</Card.Description>
@@ -174,14 +219,14 @@
 			{#if configDiffs.length === 0}
 				<p class="text-sm text-muted-foreground">All configuration files match.</p>
 			{:else}
-				{@render fileList('Removed by the restore', removed)}
-				{@render fileList('Added by the restore', added)}
+				{@render fileList(headings.removed, removed)}
+				{@render fileList(headings.added, added)}
 				{#if changed.length > 0 && !readable}
-					{@render fileList('Changed by the restore', changed)}
+					{@render fileList(headings.changed, changed)}
 				{:else if changed.length > 0}
-					<h4 class="text-sm font-medium">Changed by the restore ({changed.length})</h4>
+					<h4 class="text-sm font-medium">{headings.changed} ({changed.length})</h4>
 					<p class="text-sm text-muted-foreground">
-						Lines marked − are from the current server; lines marked + are from the saved setup.
+						Lines marked − are from {a.label}; lines marked + are from {b.label}.
 					</p>
 					{#each changed as row (row.key)}
 						<details
