@@ -218,7 +218,7 @@ func TestSavedSetupConfigsAndAutomaticRetention(t *testing.T) {
 		t.Fatalf("ReferencedSetupArtifacts = %v, %v, want the config digest", referenced, err)
 	}
 	if err := db.inTx(t.Context(), "prune", func(tx *sql.Tx) error {
-		return TxPruneAutomaticSetups(t.Context(), tx, "server-a", 1, "auto-1")
+		return TxPruneAutomaticSetups(t.Context(), tx, "server-a", SetupRetention{Versions: 1, Worlds: 1}, "auto-1")
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -232,5 +232,61 @@ func TestSavedSetupConfigsAndAutomaticRetention(t *testing.T) {
 	}
 	if want := []string{"manual", "auto-3", "auto-1"}; !reflect.DeepEqual(ids, want) {
 		t.Errorf("setups after pruning = %v, want %v", ids, want)
+	}
+}
+
+// TestPruneReleasesWorldBackupsPastTheWorldsKept asserts pruning keeps the world backup links of
+// only the newest linked automatic setups, leaves manual and spared setups linked, and with no
+// worlds kept releases every other link.
+func TestPruneReleasesWorldBackupsPastTheWorldsKept(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		worlds int
+		want   map[string]bool
+	}{
+		{worlds: 2, want: map[string]bool{"auto-1": true, "auto-3": true, "auto-4": true, "manual": true}},
+		{worlds: 0, want: map[string]bool{"auto-1": true, "manual": true}},
+	} {
+		db := open(t)
+		seedInstance(t, db, "server-a", 28000)
+		ids := []string{"auto-1", "auto-2", "unlinked", "auto-3", "auto-4", "manual"}
+		for i, id := range ids {
+			s := &SavedSetup{
+				ID: id, InstanceID: "server-a", Name: id, SnapshotJSON: "{}", Automatic: id != "manual",
+				CreatedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
+			}
+			if id != "unlinked" {
+				if err := db.CreateBackup(t.Context(), &Backup{
+					ID: "world-" + id, InstanceID: "server-a", Path: "/tmp/" + id, SHA256: "hash",
+					WorldName: "Worldserver-a", Trigger: TriggerPreUpdate, Consistent: true,
+				}); err != nil {
+					t.Fatal(err)
+				}
+				s.BackupID = "world-" + id
+			}
+			if err := db.SaveSetup(t.Context(), s, nil); err != nil {
+				t.Fatalf("SaveSetup(%s): %v", id, err)
+			}
+		}
+		if err := db.inTx(t.Context(), "prune", func(tx *sql.Tx) error {
+			return TxPruneAutomaticSetups(t.Context(), tx, "server-a",
+				SetupRetention{Versions: 10, Worlds: tc.worlds}, "auto-1")
+		}); err != nil {
+			t.Fatal(err)
+		}
+		list, err := db.ListSetups(t.Context(), "server-a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]bool{}
+		for _, s := range list {
+			if s.BackupID != "" {
+				got[s.ID] = true
+			}
+		}
+		if len(list) != len(ids) || !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("worlds %d: %d setups, linked %v, want %d setups, linked %v",
+				tc.worlds, len(list), got, len(ids), tc.want)
+		}
 	}
 }

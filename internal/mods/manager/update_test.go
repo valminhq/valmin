@@ -7,7 +7,8 @@ import (
 )
 
 // TestCheckpointName asserts the setup saved before a change names the packages moving to
-// another version, at most two of them, and falls back to a general name otherwise.
+// another version, else the packages being added with requested ones first, at most two of
+// them, and falls back to a general name otherwise.
 func TestCheckpointName(t *testing.T) {
 	t.Parallel()
 	installed := &store.InstanceMod{}
@@ -17,7 +18,16 @@ func TestCheckpointName(t *testing.T) {
 		pkgs []*stagedPackage
 		want string
 	}{
-		{"new packages only", []*stagedPackage{{fullName: "Ns-New"}}, "Before changing mods"},
+		{"new package", []*stagedPackage{{fullName: "Ns-New"}}, "Before installing Ns-New"},
+		{
+			"new package with dependencies",
+			[]*stagedPackage{
+				{fullName: "Ns-Dep", transitive: true},
+				{fullName: "Ns-New"},
+				{fullName: "Ns-Lib", transitive: true},
+			},
+			"Before installing Ns-New, Ns-Dep and 1 more",
+		},
 		{"removal only", []*stagedPackage{{fullName: "Ns-Old", prev: installed, remove: true}}, "Before changing mods"},
 		{"one update", []*stagedPackage{update("Ns-A"), {fullName: "Ns-New"}}, "Before updating Ns-A"},
 		{"two updates", []*stagedPackage{update("Ns-A"), update("Ns-B")}, "Before updating Ns-A and Ns-B"},

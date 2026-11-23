@@ -1750,6 +1750,11 @@
 					</span>
 				</Label>
 			</div>
+			{#if instance && instance.setup_before_update !== 'off'}
+				<p class="text-sm text-muted-foreground">
+					{preUpdateNotice({ backup: false, setup: true }, 'removal')}
+				</p>
+			{/if}
 			<Dialog.Footer>
 				<Button variant="outline" onclick={() => (removeOpen = false)}>Cancel</Button>
 				<Button variant="destructive" onclick={removeConfirmed}>Remove mod</Button>

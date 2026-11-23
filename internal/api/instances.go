@@ -286,6 +286,11 @@ type patchInstanceRequest struct {
 	// SetupBeforeUpdate is "full", "light" or "off": what a mod update saves of the setup before
 	// it changes anything. It takes effect immediately.
 	SetupBeforeUpdate *string `json:"setup_before_update"`
+	// SetupVersionsKept is 1 to maxSetupKept: how many automatic setups the server keeps.
+	// SetupWorldsKept is 0 to maxSetupKept: how many of those, newest first, keep their world
+	// backup. Lowering either applies at once.
+	SetupVersionsKept *int `json:"setup_versions_kept"`
+	SetupWorldsKept   *int `json:"setup_worlds_kept"`
 	// GameBranch and GameBranchPassword choose the Steam branch the next game update installs.
 	// They are applied together: a password branch needs its password each time it is chosen,
 	// and a branch set without one clears the stored password.
@@ -322,6 +327,11 @@ func (b *patchInstanceRequest) launch() bool {
 		b.ExtraArgs != nil || b.GameBackups != nil
 }
 
+// setupRetention reports whether the body touches how many automatic setups are kept.
+func (b *patchInstanceRequest) setupRetention() bool {
+	return b.SetupVersionsKept != nil || b.SetupWorldsKept != nil
+}
+
 // backupPolicy reports whether the body touches retention at all.
 func (b *patchInstanceRequest) backupPolicy() bool {
 	return b.BackupKeepCold != nil || b.BackupKeepHot != nil || b.BackupOnRestart != nil
@@ -349,8 +359,9 @@ func (b *patchInstanceRequest) actions() []authz.Action {
 	if b.retention() {
 		need = append(need, authz.BackupsRestore)
 	}
-	// It decides which saved setups the panel makes, so it belongs to whoever manages them.
-	if b.SetupBeforeUpdate != nil {
+	// It decides which saved setups the panel makes and keeps, so it belongs to whoever manages
+	// them.
+	if b.SetupBeforeUpdate != nil || b.setupRetention() {
 		need = append(need, authz.SetupsManage)
 	}
 	// Auto-stop stops the server, so it also needs the right to stop it.
@@ -494,6 +505,37 @@ func addSetupBeforeUpdateViolations(val *apierr.Validation, body *patchInstanceR
 	}
 }
 
+// setupRetentionUpdate merges the body's automatic setup counts over current's, returning nil
+// when they change nothing.
+func setupRetentionUpdate(current *store.Instance, body *patchInstanceRequest) (*store.SetupRetention, []change) {
+	keep := store.SetupRetention{Versions: current.SetupVersionsKept, Worlds: current.SetupWorldsKept}
+	if v := body.SetupVersionsKept; v != nil {
+		keep.Versions = *v
+	}
+	if v := body.SetupWorldsKept; v != nil {
+		keep.Worlds = *v
+	}
+	if keep.Versions == current.SetupVersionsKept && keep.Worlds == current.SetupWorldsKept {
+		return nil, nil
+	}
+	changes := fieldChange(nil, "setup_versions_kept", current.SetupVersionsKept, keep.Versions)
+	return &keep, fieldChange(changes, "setup_worlds_kept", current.SetupWorldsKept, keep.Worlds)
+}
+
+// maxSetupKept bounds both automatic setup counts.
+const maxSetupKept = 100
+
+// addSetupRetentionViolations rejects a setup_versions_kept outside 1..maxSetupKept and a
+// setup_worlds_kept outside 0..maxSetupKept.
+func addSetupRetentionViolations(val *apierr.Validation, body *patchInstanceRequest) {
+	if v := body.SetupVersionsKept; v != nil && (*v < 1 || *v > maxSetupKept) {
+		val.Add("setup_versions_kept", apierr.FieldOutOfRange, fmt.Sprintf("Use 1 to %d.", maxSetupKept))
+	}
+	if v := body.SetupWorldsKept; v != nil && (*v < 0 || *v > maxSetupKept) {
+		val.Add("setup_worlds_kept", apierr.FieldOutOfRange, fmt.Sprintf("Use 0 to %d.", maxSetupKept))
+	}
+}
+
 // addGameBackupsViolations rejects a rolling backup count outside minGameBackups..maxGameBackups.
 func addGameBackupsViolations(val *apierr.Validation, body *patchInstanceRequest) {
 	if v := body.GameBackups; v != nil && (*v < minGameBackups || *v > maxGameBackups) {
@@ -550,6 +592,7 @@ func (h *Instances) mergePatch(
 	addAutoStopViolations(&val, body)
 	addWatchdogViolations(&val, body)
 	addSetupBeforeUpdateViolations(&val, body)
+	addSetupRetentionViolations(&val, body)
 	addJoinHostViolations(&val, body)
 	addGameBackupsViolations(&val, body)
 
@@ -763,6 +806,7 @@ func (h *Instances) settingsUpdate(
 		addAutoStopViolations(&val, body)
 		addWatchdogViolations(&val, body)
 		addSetupBeforeUpdateViolations(&val, body)
+		addSetupRetentionViolations(&val, body)
 		addJoinHostViolations(&val, body)
 		if err := val.Err(); err != nil {
 			apierr.Write(w, r, err)
@@ -788,6 +832,9 @@ func (h *Instances) settingsUpdate(
 		update.SetupBeforeUpdate = v
 		changes = fieldChange(changes, "setup_before_update", current.SetupBeforeUpdate, *v)
 	}
+	var retentionChanges []change
+	update.SetupRetention, retentionChanges = setupRetentionUpdate(current, body)
+	changes = append(changes, retentionChanges...)
 	if v := body.JoinHost; v != nil {
 		if host := strings.TrimSpace(*v); host != current.JoinHost {
 			update.JoinHost = &host

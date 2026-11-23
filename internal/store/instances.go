@@ -79,6 +79,10 @@ type Instance struct {
 	// SetupBeforeUpdate is what a mod update saves of the setup before it changes anything:
 	// "full", "light" or "off". The values are control.SetupBeforeUpdate's.
 	SetupBeforeUpdate string `json:"setup_before_update"`
+	// SetupVersionsKept is how many automatic setups the server keeps.
+	SetupVersionsKept int `json:"setup_versions_kept"`
+	// SetupWorldsKept is how many of those, newest first, keep their link to a world backup.
+	SetupWorldsKept int `json:"setup_worlds_kept"`
 	// TestOf is the server this instance is an update-test copy of, nil for an ordinary server.
 	TestOf *string `json:"test_of,omitempty"`
 	// TestPassed is whether the test that made this update-test copy ran to the end.
@@ -97,7 +101,8 @@ const instanceColumns = `id, name, state, container_id, data_dir, base_port, ser
 	mem_limit_mb, cpu_limit, game_build_id, game_branch, game_backups,
 	backup_keep_cold, backup_keep_hot, backup_on_restart, remote_backup_enabled,
  remote_keep_cold, remote_keep_hot, remote_keep_snapshots, status_published,
-	status_notice, status_connect_info, status_show_join, status_show_modpack, join_host, auto_stop_minutes, watchdog, setup_before_update, test_of,
+	status_notice, status_connect_info, status_show_join, status_show_modpack, join_host, auto_stop_minutes, watchdog, setup_before_update,
+	setup_versions_kept, setup_worlds_kept, test_of,
 	(test_passed_at IS NOT NULL), container_started_at, created_at, updated_at`
 
 func scanInstance(s scanner) (Instance, error) {
@@ -143,6 +148,8 @@ func scanInstance(s scanner) (Instance, error) {
 		&inst.AutoStopMinutes,
 		&inst.Watchdog,
 		&inst.SetupBeforeUpdate,
+		&inst.SetupVersionsKept,
+		&inst.SetupWorldsKept,
 		&testOf,
 		&inst.TestPassed,
 		&containerStartedAt,
@@ -544,6 +551,31 @@ func updateInstanceSetupBeforeUpdate(ctx context.Context, ex execer, id, mode st
 		return ErrInstanceNotFound
 	}
 	return nil
+}
+
+// SetupRetention is how many automatic setups a server keeps, and how many of those, newest
+// first, keep their link to a world backup.
+type SetupRetention struct {
+	Versions int
+	Worlds   int
+}
+
+// updateInstanceSetupRetention stores r and applies it to the setups the server already has.
+func updateInstanceSetupRetention(ctx context.Context, ex execer, id string, r SetupRetention) error {
+	res, err := ex.ExecContext(ctx,
+		`UPDATE instances SET setup_versions_kept = ?, setup_worlds_kept = ?, updated_at = ? WHERE id = ?`,
+		r.Versions, r.Worlds, Now(), id)
+	if err != nil {
+		return fmt.Errorf("update setup retention for instance %s: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update setup retention for instance %s: %w", id, err)
+	}
+	if n == 0 {
+		return ErrInstanceNotFound
+	}
+	return TxPruneAutomaticSetups(ctx, ex, id, r, "")
 }
 
 func updateInstanceWatchdog(ctx context.Context, ex execer, id, mode string) error {
@@ -954,7 +986,8 @@ func TxCreateCloneInstance(
 			public, crossplay, crossplay_instance_id, preset, modifiers, extra_args,
 			modded, bepinex_version, restart_required, mem_limit_mb, cpu_limit, game_build_id,
 			game_branch, game_branch_password, game_backups, auto_stop_minutes, watchdog, join_host,
-			backup_keep_cold, backup_keep_hot, backup_on_restart, setup_before_update, test_of,
+			backup_keep_cold, backup_keep_hot, backup_on_restart, setup_before_update,
+			setup_versions_kept, setup_worlds_kept, test_of,
 			created_at, updated_at
 		)
 		SELECT ?, ?, 'provisioning', ?, ?, server_name, world_name, ?,
@@ -965,6 +998,7 @@ func TxCreateCloneInstance(
 			CASE WHEN ? THEN 'off' ELSE watchdog END, join_host,
 			backup_keep_cold, backup_keep_hot, CASE WHEN ? THEN FALSE ELSE backup_on_restart END,
 			CASE WHEN ? THEN 'off' ELSE setup_before_update END,
+			setup_versions_kept, setup_worlds_kept,
 			CASE WHEN ? THEN id END, ?, ?
 		FROM instances WHERE id = ? AND (state = 'stopped' OR (? AND state = 'running'))`,
 		n.ID, n.Name, n.DataDir, n.BasePort, n.Password,
@@ -1189,6 +1223,7 @@ type InstanceUpdate struct {
 	Watchdog        *string
 	// SetupBeforeUpdate is "full", "light" or "off".
 	SetupBeforeUpdate *string
+	SetupRetention    *SetupRetention
 	JoinHost          *string
 	Branch            *InstanceBranch
 	Remote            *RemotePolicy
@@ -1236,6 +1271,9 @@ func (u *InstanceUpdate) writes(ctx context.Context, ex execer, id string) []fun
 		out = append(out, func() error {
 			return updateInstanceSetupBeforeUpdate(ctx, ex, id, *u.SetupBeforeUpdate)
 		})
+	}
+	if r := u.SetupRetention; r != nil {
+		out = append(out, func() error { return updateInstanceSetupRetention(ctx, ex, id, *r) })
 	}
 	if u.JoinHost != nil {
 		out = append(out, func() error { return updateInstanceJoinHost(ctx, ex, id, *u.JoinHost) })

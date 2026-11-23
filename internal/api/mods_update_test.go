@@ -106,11 +106,11 @@ func TestASingleModInstallBacksUpOnlyAnUpdate(t *testing.T) {
 			seen := make(chan string, 1)
 			checkpoint := rt.mods.install.Checkpoint
 			rt.mods.install.Checkpoint = func(
-				ctx context.Context, h *jobs.Handle, inst *store.Instance, name, scratch string,
+				ctx context.Context, h *jobs.Handle, inst *store.Instance, name, requestedBy, scratch string,
 			) (func(context.Context, *sql.Tx) error, error) {
 				body, _ := os.ReadFile(serverPath(dataDir, "BepInEx/plugins/Only.dll"))
 				seen <- string(body)
-				return checkpoint(ctx, h, inst, name, scratch)
+				return checkpoint(ctx, h, inst, name, requestedBy, scratch)
 			}
 			installOK(t, rt, admin, "Ns-Only", tc.install)
 

@@ -205,6 +205,7 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	}
 	// The installer exists before the setup jobs, which fetch light setups' packages through it.
 	mods.install.Checkpoint = ctl.SetupJobs.Checkpoint
+	mods.install.Version = ctl.SetupJobs.SaveVersion
 	instances := &Instances{
 		ctl:    ctl,
 		alerts: w.alertScanner(ctl.Starter, streams, mods, notifier),

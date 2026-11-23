@@ -18,7 +18,7 @@ export function preUpdateNotice(saves: PreUpdateSaves, change: string): string |
 		return `The world is backed up first. The backup is kept even if the ${change} fails.`;
 	}
 	if (saves.setup) {
-		return 'This server has no world yet, so only the current setup is saved first.';
+		return `The current setup is saved first, so the ${change} can be undone from Saved setups.`;
 	}
 	return null;
 }

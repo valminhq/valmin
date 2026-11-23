@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
@@ -61,8 +62,8 @@ type resolveResponse struct {
 	// Backup reports whether the install archives the world first: it replaces or removes an
 	// installed version on a server that has a world.
 	Backup bool `json:"backup"`
-	// Setup reports whether the install first saves the current setup as an automatic one: it
-	// replaces or removes an installed version and the server saves setups before updates.
+	// Setup reports whether the install first saves the current setup as an automatic one, which
+	// it does for any change unless the server turns that off.
 	Setup bool `json:"setup"`
 }
 
@@ -114,7 +115,8 @@ func (m *Mods) resolve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := planResponse(&plan, idx)
-	resp.Setup = resp.Backup && savesSetup(inst)
+	resp.Setup = savesSetup(inst) && (len(resp.Removals) > 0 ||
+		slices.ContainsFunc(resp.Nodes, func(n resolvedNode) bool { return !n.NoOp }))
 	resp.Backup = resp.Backup && hasWorlds(inst)
 	JSON(w, r, http.StatusOK, resp)
 }

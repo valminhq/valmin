@@ -37,48 +37,72 @@ func ParseSetupBeforeUpdate(s string) (SetupBeforeUpdate, bool) {
 
 // Checkpoint is what a mod update saves before it moves any file: a pre-update archive of
 // inst's world and, unless inst turns it off, its current setup as an automatic setup named
-// name and linked to that archive. It returns the finish step that records both, nil when there
-// is nothing to record. The archive is required; a setup that cannot be captured is logged on
-// jh and left out. scratch is a directory the capture may use and the caller removes.
+// name, linked to that archive and recorded as caused by requestedBy. It returns the finish step
+// that records both, nil when there is nothing to record. The archive is required; a setup that
+// cannot be captured is logged on jh and left out. scratch is a directory the capture may use
+// and the caller removes.
 func (s *SetupJobs) Checkpoint(
-	ctx context.Context, jh *jobs.Handle, inst *store.Instance, name, scratch string,
+	ctx context.Context, jh *jobs.Handle, inst *store.Instance, name, requestedBy, scratch string,
 ) (func(context.Context, *sql.Tx) error, error) {
 	world, err := s.Worlds.snapshotRow(ctx, inst, store.TriggerPreUpdate)
 	if err != nil {
 		return nil, err
 	}
 	var record func(context.Context, *sql.Tx) error
-	var worldID string
+	setup := automaticSetup{name: name, createdBy: requestedBy, staging: scratch, before: "update"}
 	if world == nil {
 		jh.Log("no world archive was taken: this server has no world yet")
 	} else {
-		record, worldID = recordSnapshot(world), world.ID
+		record, setup.worldID = recordSnapshot(world), world.ID
 	}
+	if inst.SetupBeforeUpdate != string(SetupBeforeUpdateOff) {
+		jh.Progress(ctx, 66, "saving the current setup")
+	}
+	return joinFinish(record, s.saveVersion(ctx, jh, inst, &setup)), nil
+}
+
+// SaveVersion saves inst's current setup as an automatic setup named name, recorded as caused by
+// requestedBy, before a mod change that archives no world, unless inst turns it off. It returns
+// the finish step that records it, nil when nothing was saved; a setup that cannot be captured
+// is logged on jh. scratch is a directory the capture may use and the caller removes.
+func (s *SetupJobs) SaveVersion(
+	ctx context.Context, jh *jobs.Handle, inst *store.Instance, name, requestedBy, scratch string,
+) func(context.Context, *sql.Tx) error {
+	setup := automaticSetup{name: name, createdBy: requestedBy, staging: scratch, before: "change"}
+	return s.saveVersion(ctx, jh, inst, &setup)
+}
+
+// saveVersion captures inst's current setup as the automatic setup a describes, light or full as
+// inst asks, and returns the finish step that saves it; nil when inst turns it off or the capture
+// fails, which is logged on jh.
+func (s *SetupJobs) saveVersion(
+	ctx context.Context, jh *jobs.Handle, inst *store.Instance, a *automaticSetup,
+) func(context.Context, *sql.Tx) error {
 	mode, _ := ParseSetupBeforeUpdate(inst.SetupBeforeUpdate)
 	if mode == SetupBeforeUpdateOff {
-		return record, nil
+		return nil
 	}
-	jh.Progress(ctx, 66, "saving the current setup")
-	setup := automaticSetup{name: name, worldID: worldID, staging: scratch, before: "update"}
 	snap, err := (&SetupState{DB: s.DB}).Capture(ctx, inst)
 	if err != nil {
-		setup.warn(ctx, jh, inst, err)
-		return record, nil
+		a.warn(ctx, jh, inst, err)
+		return nil
 	}
 	snap.Light = mode == SetupBeforeUpdateLight
-	return joinFinish(record, s.saveAutomatic(ctx, jh, inst, &snap, &setup)), nil
+	return s.saveAutomatic(ctx, jh, inst, &snap, a)
 }
 
 // automaticSetup is a setup the panel saves on its own before it changes a server.
 type automaticSetup struct {
 	name string
+	// createdBy is the user whose action the setup comes before, "" for the panel's own.
+	createdBy string
 	// worldID is the world backup the setup links, "" for none.
 	worldID string
 	// spare is an automatic setup pruning keeps whatever its age: the one being restored.
 	spare string
 	// staging is a scratch directory for the capture.
 	staging string
-	// before names what is about to happen, for the job log: "restore" or "update".
+	// before names what is about to happen, for the job log: "restore", "update" or "change".
 	before string
 }
 
@@ -90,7 +114,7 @@ func (a *automaticSetup) warn(ctx context.Context, jh *jobs.Handle, inst *store.
 }
 
 // saveAutomatic retains current's package and config files as the automatic setup a describes,
-// and returns the finish step that publishes it and prunes older automatic setups other than
+// and returns the finish step that publishes it and applies inst's setup retention, sparing
 // a.spare. A capture that fails is logged on jh and returns nil.
 func (s *SetupJobs) saveAutomatic(
 	ctx context.Context, jh *jobs.Handle, inst *store.Instance, current *SetupSnapshot, a *automaticSetup,
@@ -104,7 +128,8 @@ func (s *SetupJobs) saveAutomatic(
 		if err := store.TxSaveSetup(ctx, tx, row, refs); err != nil {
 			return err
 		}
-		return store.TxPruneAutomaticSetups(ctx, tx, inst.ID, keepAutomaticSetups, a.spare)
+		keep := store.SetupRetention{Versions: inst.SetupVersionsKept, Worlds: inst.SetupWorldsKept}
+		return store.TxPruneAutomaticSetups(ctx, tx, inst.ID, keep, a.spare)
 	}
 }
 
@@ -127,7 +152,7 @@ func (s *SetupJobs) captureAutomatic(
 		return nil, nil, fmt.Errorf("encode the automatic setup: %w", err)
 	}
 	return &store.SavedSetup{
-		ID: store.NewID(), InstanceID: inst.ID, Name: setupName(a.name),
+		ID: store.NewID(), InstanceID: inst.ID, Name: setupName(a.name), CreatedBy: a.createdBy,
 		GameBuildID: deref(inst.GameBuildID), WorldName: inst.WorldName, SnapshotJSON: string(raw),
 		BackupID: a.worldID, Automatic: true, Configs: snap.ConfigFiles,
 		ConfigsTruncated: snap.ConfigsTruncated,

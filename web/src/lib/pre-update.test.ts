@@ -9,8 +9,8 @@ describe('preUpdateNotice', () => {
 		expect(preUpdateNotice({ backup: true, setup: false }, 'install')).toBe(
 			'The world is backed up first. The backup is kept even if the install fails.'
 		);
-		expect(preUpdateNotice({ backup: false, setup: true }, 'update')).toBe(
-			'This server has no world yet, so only the current setup is saved first.'
+		expect(preUpdateNotice({ backup: false, setup: true }, 'install')).toBe(
+			'The current setup is saved first, so the install can be undone from Saved setups.'
 		);
 		expect(preUpdateNotice({ backup: false, setup: false }, 'update')).toBeNull();
 	});

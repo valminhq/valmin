@@ -233,7 +233,7 @@ func (h *Instances) restoreSetup(w http.ResponseWriter, r *http.Request) {
 		Audit: jobAudit(r.Context(), u.ID, id, "instances.setups.restore",
 			map[string]any{"setup_id": row.ID, setupNameField: row.Name}),
 		OnClaim: control.SetupStoppedClaim(id),
-	}, h.ctl.SetupJobs.RunRestore(inst, row, refs, &payload))
+	}, h.ctl.SetupJobs.RunRestore(inst, row, refs, &payload, u.ID))
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return

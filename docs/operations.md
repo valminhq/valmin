@@ -193,19 +193,23 @@ Before it changes anything, a restore saves the server's current setup as an
 snapshot the restore takes of the world when it changes mods. Restore that setup to undo the
 restore.
 
-Every mod update saves one the same way: before any mod file moves, the job takes its
-pre-update snapshot of the world and saves the current setup as an automatic one linked to
-that snapshot, named after the mods it updates (see
-[Undo a mod update](usage.md#undo-a-mod-update)). Both are recorded even when the update
-fails. **Before mod updates** on **Saved setups** turns this off, or saves light setups; the
+Every mod change saves one the same way, named after the change and the person who made it.
+An install or a removal saves the setup alone. An update first takes its pre-update snapshot of
+the world and links the setup to it (see [Undo a mod update](usage.md#undo-a-mod-update)). An
+update keeps both even when it fails. Disabling or enabling a mod saves nothing, and neither do
+the installs that create a server.
+**Before mod changes** on **Saved setups** turns this off, or saves light setups; the
 `setup_before_update` instance field holds the choice (`full`, `light` or `off`). Copies made
-to test an update never save one.
+to test an update never save one. A capture reuses the package copy of the newest setup for
+every mod whose files are unchanged since, as long as that copy still verifies.
 
-Each server keeps its newest three automatic setups, from restores and updates together;
-delete one like any other setup. A pruned or deleted automatic setup releases its snapshot to
-normal retention. If the current
-setup cannot be saved, for example because an installed mod's files are missing, the restore
-or update goes ahead and its job log says so.
+Each server keeps its newest ten automatic setups, from restores and changes together, and the
+newest three of those that link a world snapshot keep it. Both numbers are set under **Before
+mod changes** (`setup_versions_kept`, 1 to 100, and `setup_worlds_kept`, 0 to 100). Lowering one
+applies when saved. Delete an automatic setup like any other setup. A pruned automatic setup, or
+one past the world count, releases its snapshot to normal retention. If the current setup cannot
+be saved, for example because an installed mod's files are missing, the restore or change goes
+ahead and its job log says so.
 
 You can link a consistent backup from the same server, or choose **Back up the world now** to
 take one while the setup is saved and link it. That backup is consistent, since the server is

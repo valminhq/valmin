@@ -195,8 +195,9 @@
 <div class="grid gap-6">
 	<PageHeader title="Saved setups" level={2}>
 		Save exact mod versions and every configuration file, then compare and restore them later.
-		Restoring, and each mod update unless turned off below, saves the current setup first, so the
-		change can be undone. World backups are linked for reference and restored separately.
+		Restoring, and each mod install, removal and update unless turned off below, saves the current
+		setup first, so the change can be undone. World backups are linked for reference and restored
+		separately.
 	</PageHeader>
 
 	{#if !canManage}
@@ -287,7 +288,11 @@
 								<li class="flex flex-wrap items-start justify-between gap-3 rounded-lg border p-4">
 									<div class="grid min-w-0 gap-1">
 										<strong class="break-words">{setup.name}</strong>
-										<span class="text-sm text-muted-foreground">{when(setup.created_at)}</span>
+										<span class="text-sm text-muted-foreground"
+											>{when(setup.created_at)}{setup.created_by
+												? ` · by ${setup.created_by}`
+												: ''}</span
+										>
 										{#if setup.automatic || setup.light || !setup.config_tree}
 											<span class="flex flex-wrap gap-1">
 												{#if setup.automatic}<Badge variant="outline">Automatic</Badge>{/if}

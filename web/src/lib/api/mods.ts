@@ -255,8 +255,8 @@ export interface ResolveResult {
 	/** Whether the world is archived first: the install replaces an installed version on a
 	 * server with a world. */
 	backup: boolean;
-	/** Whether the current setup is saved first as an automatic one: the install replaces an
-	 * installed version on a server that saves setups before updates. */
+	/** Whether the current setup is saved first as an automatic one, which it is unless the
+	 * server turns that off. */
 	setup: boolean;
 }
 
