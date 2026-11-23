@@ -141,7 +141,13 @@ func TestSavedSetupRestoreStateIsExact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := TxApplySetupState(t.Context(), tx, "server", mods, &launch, backup); err != nil {
+	if err := TxApplySetupState(
+		t.Context(),
+		tx,
+		"server",
+		mods,
+		&SetupSettings{Launch: launch, Backup: backup},
+	); err != nil {
 		t.Fatalf("TxApplySetupState: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -182,7 +188,7 @@ func TestSavedSetupRestoreStateIsExact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = TxApplySetupState(t.Context(), tx, "server", nil, &launch, backup)
+	err = TxApplySetupState(t.Context(), tx, "server", nil, &SetupSettings{Launch: launch, Backup: backup})
 	_ = tx.Rollback()
 	if !errors.Is(err, ErrInstanceNotStopped) {
 		t.Errorf("running restore = %v, want ErrInstanceNotStopped", err)
@@ -330,5 +336,41 @@ func TestAModChangeEndsTheWaitForAWorldBackup(t *testing.T) {
 				t.Errorf("after a %s change, waiting = %v, want %v", tc.name, row.WorldPending, !tc.ends)
 			}
 		})
+	}
+}
+
+// TestARestoreWithoutSettingsKeepsThem asserts a setup restore given no settings replaces the mod
+// rows and marks the restart while every launch and backup setting stays as it was.
+func TestARestoreWithoutSettingsKeepsThem(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	seedInstance(t, db, "server", 28000)
+	exec(t, db.Writer, `UPDATE instances SET server_name = 'Kept', mem_limit_mb = 6144, extra_args = '-x',
+		backup_keep_cold = 9 WHERE id = 'server'`)
+	mods := []InstanceMod{{
+		InstanceID: "server", FullName: "Ns-One", Source: source.Thunderstore, Version: "1.0.0",
+		InstalledAs: InstalledExplicit, Side: SideUnknown, Enabled: true, FileManifest: "[]",
+	}}
+	tx, err := db.Writer.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := TxApplySetupState(t.Context(), tx, "server", mods, nil); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("TxApplySetupState: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := db.InstanceByID(t.Context(), "server")
+	if err != nil || inst == nil {
+		t.Fatalf("InstanceByID = %+v, %v", inst, err)
+	}
+	if inst.ServerName != "Kept" || inst.MemLimitMB != 6144 || inst.ExtraArgs == nil || *inst.ExtraArgs != "-x" ||
+		inst.BackupKeepCold != 9 || !inst.PendingRestart {
+		t.Errorf("instance after a restore without settings = %+v", inst)
+	}
+	if got, err := db.InstanceMods(t.Context(), "server"); err != nil || len(got) != 1 {
+		t.Errorf("InstanceMods = %+v, %v, want the restored one", got, err)
 	}
 }

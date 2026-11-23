@@ -240,7 +240,9 @@ another server, waits for it. A rollback on a stopped server checks the preview'
 server state changes; reload it before retrying. Valmin verifies the saved packages before
 changing files and rolls back the setup if installation fails.
 
-A setup restore does not change the game build, selected world, or server password. The world
+A member who may manage mods can roll back too, restoring mods and config files only, and an
+administrator can do the same by turning off **Also restore launch and backup settings**. A
+setup restore does not change the game build, selected world, or server password. The world
 changes only if the rollback restores the linked archive, following the
 [world restore procedure](#back-up-or-restore-a-world). That archives the current world once
 more as its own pre-restore snapshot, in addition to the snapshot taken before the mods change,

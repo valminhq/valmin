@@ -931,7 +931,10 @@ to the preview and import routes. Each problem has `source`, `path` and `detail`
 
 ### Saved setups
 
-Saved setup routes require an administrator. Send `{"name":"Working before update"}`
+Saving, deleting and the `restore` route need `setups.manage`, which only administrators hold.
+Listing, reading and previewing setups and `rollback` also accept a member with `mods.manage`.
+Reading a setup's config text needs `config.raw`, as a config file's history does, and the
+`content` of `.cfg` files in a setup or preview is left out without it. Send `{"name":"Working before update"}`
 to `POST /instances/{id}/setups` while the server is stopped or running; any other state is
 `409 invalid_state` with `allowed_states`. Add
 `"world_backup_id":"BACKUP_ID"` to link a consistent backup from the same server, and
@@ -1000,7 +1003,12 @@ starts the server.
 `POST /instances/{id}/setups/{sid}/rollback` does the whole undo as one job (`setup_rollback`,
 not cancellable): it stops the server if it runs, restores the setup, restores the world
 backup the setup links with `{"world":true}`, and starts the server again with
-`{"start":true}`. It needs `setups.manage`, plus `instance.stop` for a running server,
+`{"start":true}`. `{"mods_only":true}` restores mods and config files and keeps the current
+launch and backup settings, which it then leaves as they are; a caller without
+`setups.manage` always gets it. `GET …/preview?mods_only=true` checks such a rollback, leaving
+the saved settings out of `problems`, as a preview for a caller without `setups.manage` always
+does. It needs `setups.manage` or `mods.manage`, plus
+`instance.stop` for a running server,
 `instance.start` for `start` and `backups.restore` for `world`. A server that is neither stopped
 nor running returns `409 invalid_state`; `world` without an available linked backup is `422`
 naming `world`. On a stopped server an optional `If-Match` is checked against the preview's

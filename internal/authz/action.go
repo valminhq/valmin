@@ -161,7 +161,8 @@ func GrantRoleOptions() []GrantRoleOption {
 // GrantExtraOptions returns the complete additive vocabulary with operator-facing risk copy.
 func GrantExtraOptions() []GrantExtraOption {
 	return []GrantExtraOption{
-		{ModsManage, "Can install, update, and extract arbitrary third-party archives."},
+		{ModsManage, "Can install, update, and extract arbitrary third-party archives, and roll mods and " +
+			"config files back to a saved setup."},
 		{ConfigEdit, "Can change mod settings through validated forms."},
 		{ConfigRaw, "Can write arbitrary bytes to mod configuration files, and change mod settings " +
 			"through the forms as well."},

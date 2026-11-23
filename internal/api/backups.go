@@ -173,13 +173,13 @@ func (h *Instances) backupList(
 }
 
 // markSetupLinks marks each archive in views that a saved setup links, naming the setups only
-// for a caller who may manage them, since setup names are not otherwise visible to the rest.
+// for a caller who may see them.
 func (h *Instances) markSetupLinks(ctx context.Context, u *store.User, instanceID string, views []backupView) error {
 	links, err := h.DB.BackupSetupLinks(ctx, instanceID)
 	if err != nil {
 		return err
 	}
-	names := h.Authz.Can(ctx, u, authz.SetupsManage, instanceID)
+	names := h.canSeeSetups(ctx, u, instanceID)
 	for i := range views {
 		setups := links[views[i].ID]
 		views[i].KeptForSetup = len(setups) > 0

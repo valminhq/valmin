@@ -53,6 +53,9 @@ type (
 		BackUpWorld bool `json:"back_up_world,omitempty"`
 		// LinkNextWorld saves the setup waiting for the world backup the next mod change takes.
 		LinkNextWorld bool `json:"link_next_world_backup,omitempty"`
+		// ModsOnly restores a setup's mods and config files and keeps the current launch and
+		// backup settings.
+		ModsOnly bool `json:"mods_only,omitempty"`
 		ArchivePlan
 	}
 	ConfigApplyPayload struct {

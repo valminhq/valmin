@@ -1220,6 +1220,13 @@ takes when mods change, then applies the saved mod set, configuration, and setti
 Roll back to that automatic setup to undo the rollback. If installation fails, Valmin rolls
 back the changes and does nothing after it. The job is not cancellable.
 
+A member with `mods.manage` sees **Saved setups** and rolls back mods and configuration files
+only; the launch and backup settings stay as they are. Rolling back a running server also needs
+the right to stop it, starting it again the right to start it, and restoring the world
+`backups.restore`. Without `config.raw` the comparison names the changed config files but does
+not show their text. An administrator can turn off **Also restore launch and backup settings**
+for the same mods-only rollback.
+
 Two options come with a rollback:
 
 - **Also restore the linked world backup**, shown when the setup links an available backup and
@@ -1339,7 +1346,7 @@ On each server, a member's grant has a base access and optional extra capabiliti
 
 | Extra capability       | Allows                                                                                            |
 | ---------------------- | ------------------------------------------------------------------------------------------------- |
-| `mods.manage`          | Install, update and remove mods, which means running third-party code.                            |
+| `mods.manage`          | Install, update and remove mods (third-party code), and roll mods and configs back to a setup.    |
 | `config.edit`          | Change mod settings through the settings form.                                                    |
 | `config.raw`           | Write mod configuration files as raw text, and everything `config.edit` allows.                   |
 | `backups.restore`      | Replace the live world from a backup, delete backups, and set how many are kept.                  |
@@ -1348,9 +1355,9 @@ On each server, a member's grant has a base access and optional extra capabiliti
 | `notifications.manage` | Add this server's own channels and choose what the panel posts about it, also to shared channels. |
 
 Some actions are for administrators only and cannot be granted: creating, cloning,
-recovering and deleting servers, resource limits, game updates, saved setups, world tools,
-schedules that cover the whole panel, users, invites, access, panel settings and the
-audit log.
+recovering and deleting servers, resource limits, game updates, saving, deleting and fully
+restoring setups, world tools, schedules that cover the whole panel, users, invites, access,
+panel settings and the audit log.
 
 ### Create a user
 

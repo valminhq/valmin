@@ -124,7 +124,7 @@ async function open() {
 beforeEach(() => {
 	daemon = new FakeDaemon();
 	daemon.install();
-	session.permissions = permissions('inst-a', [actions.setupsManage]);
+	session.permissions = permissions('inst-a', [actions.setupsManage, actions.configRaw]);
 });
 
 afterEach(() => {
@@ -134,11 +134,80 @@ afterEach(() => {
 });
 
 describe('Saved setups', () => {
-	it('does not load setup data without the administrator action', async () => {
+	it('does not load setup data without the right to manage setups or mods', async () => {
 		session.permissions = permissions('inst-a', [actions.view]);
 		render(Page);
-		expect(screen.getByText("You don't have permission to manage saved setups.")).toBeTruthy();
+		expect(screen.getByText("You don't have permission to see saved setups.")).toBeTruthy();
 		expect(daemon.requests('GET', '/instances/inst-a/setups')).toHaveLength(0);
+	});
+
+	it('lets an administrator keep the settings, checking the preview for that', async () => {
+		serve({
+			result: preview({ ready: false, problems: ['Saved resource limits are no longer valid'] })
+		});
+		daemon.on('POST', '/instances/inst-a/setups/setup-1/rollback', () => Response.json(job()));
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
+		await open();
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
+		await screen.findByText('Saved resource limits are no longer valid');
+		daemon.on('GET', '/instances/inst-a/setups/setup-1/preview', () => Response.json(preview()));
+		await fireEvent.click(
+			screen.getByRole('switch', { name: /Also restore launch and backup settings/ })
+		);
+		await vi.waitFor(() =>
+			expect(
+				daemon
+					.requests('GET', '/instances/inst-a/setups/setup-1/preview')
+					.at(-1)
+					?.query.get('mods_only')
+			).toBe('true')
+		);
+		await vi.waitFor(() =>
+			expect(
+				screen.getByRole('button', { name: 'Roll back to this setup' }).hasAttribute('disabled')
+			).toBe(false)
+		);
+		await fireEvent.click(screen.getByRole('button', { name: 'Roll back to this setup' }));
+		await fireEvent.click(
+			within(screen.getByRole('dialog')).getByRole('button', { name: 'Roll back' })
+		);
+		await vi.waitFor(() =>
+			expect(daemon.requests('POST', '/instances/inst-a/setups/setup-1/rollback')).toHaveLength(1)
+		);
+		expect(daemon.requests('POST', '/instances/inst-a/setups/setup-1/rollback')[0].body).toEqual({
+			mods_only: true
+		});
+	});
+
+	it('lets a member who manages mods roll back mods and config files only', async () => {
+		session.permissions = permissions('inst-a', [actions.modsManage]);
+		serve();
+		daemon.on('POST', '/instances/inst-a/setups/setup-1/rollback', () => Response.json(job()));
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
+		await open();
+		expect(screen.queryByRole('heading', { name: 'Save current setup' })).toBeNull();
+		expect(screen.queryByText('Before mod changes')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
+		await screen.findByRole('heading', { name: 'Rollback preview' });
+		expect(screen.queryByRole('button', { name: 'Delete setup' })).toBeNull();
+		expect(
+			screen.queryByRole('switch', { name: /Also restore launch and backup settings/ })
+		).toBeNull();
+		expect(screen.getByText(/launch and backup settings stay as they are/)).toBeTruthy();
+		expect(
+			screen.getByText('For comparison only: this rollback keeps the current settings.')
+		).toBeTruthy();
+		expect(document.querySelector('details')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Roll back to this setup' }));
+		await fireEvent.click(
+			within(screen.getByRole('dialog')).getByRole('button', { name: 'Roll back' })
+		);
+		await vi.waitFor(() =>
+			expect(daemon.requests('POST', '/instances/inst-a/setups/setup-1/rollback')).toHaveLength(1)
+		);
+		expect(daemon.requests('POST', '/instances/inst-a/setups/setup-1/rollback')[0].body).toEqual({
+			mods_only: true
+		});
 	});
 
 	it('saves a named setup with only a consistent selected world backup', async () => {

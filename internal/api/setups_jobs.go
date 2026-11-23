@@ -214,7 +214,7 @@ func (h *Instances) restoreSetup(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
-	preview, err := h.setupPreview(r.Context(), inst, row, refs)
+	preview, err := h.setupPreview(r.Context(), inst, row, refs, false)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
@@ -282,6 +282,9 @@ type setupRollbackRequest struct {
 	World bool `json:"world,omitempty"`
 	// Start starts the server once everything is restored.
 	Start bool `json:"start,omitempty"`
+	// ModsOnly restores mods and config files and keeps the current launch and backup settings,
+	// which is all a caller who may not manage setups gets.
+	ModsOnly bool `json:"mods_only,omitempty"`
 }
 
 // rollbackSetup handles POST /instances/{id}/setups/{sid}/rollback: one job that stops the
@@ -297,7 +300,7 @@ func (h *Instances) rollbackSetup(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
-	if !h.Authz.Can(r.Context(), u, authz.SetupsManage, id) {
+	if !h.canSeeSetups(r.Context(), u, id) {
 		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
@@ -310,6 +313,7 @@ func (h *Instances) rollbackSetup(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, err)
 		return
 	}
+	req.ModsOnly = req.ModsOnly || !h.Authz.Can(r.Context(), u, authz.SetupsManage, id)
 	row, payload, err := h.checkRollback(r, u, inst, &req)
 	if err != nil {
 		apierr.Write(w, r, err)
@@ -319,6 +323,7 @@ func (h *Instances) rollbackSetup(w http.ResponseWriter, r *http.Request) {
 		Instance: inst, Payload: *payload, RequestedBy: u.ID,
 		Audit: jobAudit(r.Context(), u.ID, id, "instances.setups.rollback", map[string]any{
 			"setup_id": row.ID, setupNameField: row.Name, rollbackWorldField: req.World, "start": req.Start,
+			"mods_only": req.ModsOnly,
 		}),
 	})
 	if err != nil {
@@ -347,7 +352,7 @@ func (h *Instances) checkRollback(
 	if row == nil {
 		return nil, nil, apierr.New(errcode.NotFound)
 	}
-	preview, err := h.setupPreview(ctx, inst, row, refs)
+	preview, err := h.setupPreview(ctx, inst, row, refs, req.ModsOnly)
 	if err != nil {
 		return nil, nil, apierr.New(errcode.Internal).Wrap(err)
 	}
@@ -357,7 +362,7 @@ func (h *Instances) checkRollback(
 	if !preview.Ready {
 		return nil, nil, apierr.New(errcode.InvalidState).With("problems", preview.Problems)
 	}
-	payload := &control.RollbackPayload{SetupID: row.ID, World: req.World, Start: req.Start}
+	payload := &control.RollbackPayload{SetupID: row.ID, World: req.World, Start: req.Start, ModsOnly: req.ModsOnly}
 	if match := r.Header.Get("If-Match"); match != "" && !running {
 		if match != preview.ETag {
 			return nil, nil, apierr.New(errcode.StaleWrite)

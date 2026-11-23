@@ -24,7 +24,11 @@
 	import SetupBeforeUpdateCard from '#lib/components/setup-before-update-card.svelte';
 
 	const id = $derived(page.params.id ?? '');
+	/** May save and delete setups, choose what mod changes save, and roll back settings too. */
 	const canManage = $derived(session.allowed(id).includes(actions.setupsManage));
+	/** May see the setups and roll back mods and config files. */
+	const canSee = $derived(canManage || session.allowed(id).includes(actions.modsManage));
+	const canReadConfigs = $derived(session.allowed(id).includes(actions.configRaw));
 	const canBackUp = $derived(session.allowed(id).includes(actions.backupsCreate));
 	const canRestoreWorld = $derived(session.allowed(id).includes(actions.backupsRestore));
 	const canStart = $derived(session.allowed(id).includes(actions.start));
@@ -66,6 +70,7 @@
 	let jobAction = $state<'save' | 'rollback' | 'delete' | null>(null);
 	let restoreWorld = $state(false);
 	let startAfter = $state(true);
+	let restoreSettings = $state(true);
 	let jobTarget = $state('');
 	let loadRequest = 0;
 	let previewRequest = 0;
@@ -82,7 +87,9 @@
 	/** Whether the rollback restores the linked world backup too. */
 	const withWorld = $derived(restoreWorld && worldBackup !== null && canRestoreWorld);
 	const rollbackDescription = $derived(
-		"This replaces the server's managed mods, configuration files, and included settings with the saved setup, after saving the current setup as an automatic one, so the rollback can be undone." +
+		"This replaces the server's managed mods and configuration files" +
+			(canManage && restoreSettings ? ', and its launch and backup settings,' : '') +
+			' with the saved setup, after saving the current setup as an automatic one, so the rollback can be undone.' +
 			(withWorld
 				? ' It also replaces the current world with the linked backup, after archiving it. Everything played since that backup is lost.'
 				: ' World files are unchanged.') +
@@ -100,7 +107,7 @@
 	});
 
 	$effect(() => {
-		if (canManage) void load(id);
+		if (canSee) void load(id);
 	});
 
 	async function load(instanceId: string) {
@@ -150,7 +157,7 @@
 		previewFailure = null;
 		previewLoading = true;
 		try {
-			const result = await setups.preview(id, setupId);
+			const result = await setups.preview(id, setupId, !(canManage && restoreSettings));
 			if (request === previewRequest) preview = result;
 		} catch (err) {
 			if (request === previewRequest) previewFailure = err;
@@ -214,6 +221,7 @@
 			setups.rollback(id, current.setup.id, {
 				world: withWorld,
 				start,
+				modsOnly: !(canManage && restoreSettings),
 				etag: stopped ? current.etag : undefined
 			})
 		);
@@ -245,85 +253,87 @@
 <div class="grid gap-6">
 	<PageHeader title="Saved setups" level={2}>
 		Save exact mod versions and every configuration file, then compare and roll back to them later.
-		Rolling back, and each mod install, removal and update unless turned off below, saves the
-		current setup first, so the change can be undone. A rollback can restore the world backup a
-		setup links in the same step.
+		Rolling back, and each mod install, removal and update unless an administrator turned it off,
+		saves the current setup first, so the change can be undone. A rollback can restore the world
+		backup a setup links in the same step.
 	</PageHeader>
 
-	{#if !canManage}
-		<p class="text-sm text-muted-foreground">You don't have permission to manage saved setups.</p>
+	{#if !canSee}
+		<p class="text-sm text-muted-foreground">You don't have permission to see saved setups.</p>
 	{:else}
 		<Problem error={failure} />
 		{#if loading && !instance}
 			<p class="text-sm text-muted-foreground">Loading…</p>
 		{:else if instance}
-			<Card.Root>
-				<Card.Header>
-					<Card.Title>Save current setup</Card.Title>
-					<Card.Description>
-						Captures launch and backup settings, managed mods, and every file in the configuration
-						editor except the console password file. The server may be running or stopped.
-						Credentials and world files are not included.
-					</Card.Description>
-				</Card.Header>
-				<Card.Content class="grid gap-4">
-					<div class="grid max-w-lg gap-2">
-						<Label for="setup-name">Name</Label>
-						<Input id="setup-name" bind:value={name} required />
-					</div>
-					<div class="grid max-w-lg gap-2">
-						<Label for="setup-backup">Associated world backup</Label>
-						<NativeSelect id="setup-backup" bind:value={worldBackupId}>
-							<option value={linkNext}>The backup the next mod update takes</option>
-							{#if canBackUp && stopped}
-								<option value={backUpNow}>Back up the world now</option>
-							{/if}
-							<option value="">None</option>
-							{#each linkedBackups as backup (backup.id)}
-								<option value={backup.id}>{when(backup.created_at)} · {backup.world_name}</option>
-							{/each}
-						</NativeSelect>
-						<p class="text-xs text-muted-foreground">
-							{worldChoice === linkNext
-								? 'The world backup the next mod update takes is linked, if the mods are still the same then. Installing a new mod, removing one or disabling one before then leaves the setup without one.'
-								: 'Only consistent backups from this server can be linked.'}
-							A linked backup is kept until the setup is deleted, outside the backup retention counts,
-							so each one adds to disk use. Linking does not restore the world.
-						</p>
-						<Problem error={backupFailure} />
-						{#if backupCursor}
-							<Button
-								variant="outline"
-								size="sm"
-								class="justify-self-start"
-								disabled={loadingBackups}
-								onclick={() => loadBackups(id, true)}>Load older backups</Button
-							>
-						{/if}
-					</div>
-					<div class="grid max-w-lg gap-2">
-						<div class="flex items-center gap-2">
-							<Switch id="setup-keep-packages" bind:checked={keepPackages} />
-							<Label for="setup-keep-packages">Keep package files (restore works offline)</Label>
+			{#if canManage}
+				<Card.Root>
+					<Card.Header>
+						<Card.Title>Save current setup</Card.Title>
+						<Card.Description>
+							Captures launch and backup settings, managed mods, and every file in the configuration
+							editor except the console password file. The server may be running or stopped.
+							Credentials and world files are not included.
+						</Card.Description>
+					</Card.Header>
+					<Card.Content class="grid gap-4">
+						<div class="grid max-w-lg gap-2">
+							<Label for="setup-name">Name</Label>
+							<Input id="setup-name" bind:value={name} required />
 						</div>
-						<p class="text-xs text-muted-foreground">
-							{keepPackages
-								? 'The setup keeps a copy of every mod package, so a restore needs neither the registry nor the download cache.'
-								: 'Light: the setup keeps only mods that cannot be downloaded again, and a restore fetches the rest from the download cache or the registry. It fails for a version the registry has removed.'}
-						</p>
-					</div>
-					<div class="grid justify-items-start gap-2">
-						<Button disabled={!canSave || jobRunning || !name.trim()} onclick={save}
-							>Save setup</Button
-						>
-						{#if !canSave}
-							<p class="text-sm text-muted-foreground">{unsettled}</p>
-						{/if}
-					</div>
-				</Card.Content>
-			</Card.Root>
+						<div class="grid max-w-lg gap-2">
+							<Label for="setup-backup">Associated world backup</Label>
+							<NativeSelect id="setup-backup" bind:value={worldBackupId}>
+								<option value={linkNext}>The backup the next mod update takes</option>
+								{#if canBackUp && stopped}
+									<option value={backUpNow}>Back up the world now</option>
+								{/if}
+								<option value="">None</option>
+								{#each linkedBackups as backup (backup.id)}
+									<option value={backup.id}>{when(backup.created_at)} · {backup.world_name}</option>
+								{/each}
+							</NativeSelect>
+							<p class="text-xs text-muted-foreground">
+								{worldChoice === linkNext
+									? 'The world backup the next mod update takes is linked, if the mods are still the same then. Installing a new mod, removing one or disabling one before then leaves the setup without one.'
+									: 'Only consistent backups from this server can be linked.'}
+								A linked backup is kept until the setup is deleted, outside the backup retention counts,
+								so each one adds to disk use. Linking does not restore the world.
+							</p>
+							<Problem error={backupFailure} />
+							{#if backupCursor}
+								<Button
+									variant="outline"
+									size="sm"
+									class="justify-self-start"
+									disabled={loadingBackups}
+									onclick={() => loadBackups(id, true)}>Load older backups</Button
+								>
+							{/if}
+						</div>
+						<div class="grid max-w-lg gap-2">
+							<div class="flex items-center gap-2">
+								<Switch id="setup-keep-packages" bind:checked={keepPackages} />
+								<Label for="setup-keep-packages">Keep package files (restore works offline)</Label>
+							</div>
+							<p class="text-xs text-muted-foreground">
+								{keepPackages
+									? 'The setup keeps a copy of every mod package, so a restore needs neither the registry nor the download cache.'
+									: 'Light: the setup keeps only mods that cannot be downloaded again, and a restore fetches the rest from the download cache or the registry. It fails for a version the registry has removed.'}
+							</p>
+						</div>
+						<div class="grid justify-items-start gap-2">
+							<Button disabled={!canSave || jobRunning || !name.trim()} onclick={save}
+								>Save setup</Button
+							>
+							{#if !canSave}
+								<p class="text-sm text-muted-foreground">{unsettled}</p>
+							{/if}
+						</div>
+					</Card.Content>
+				</Card.Root>
 
-			<SetupBeforeUpdateCard {instance} onchange={(row) => (instance = row)} />
+				<SetupBeforeUpdateCard {instance} onchange={(row) => (instance = row)} />
+			{/if}
 
 			<Card.Root>
 				<Card.Header>
@@ -410,15 +420,20 @@
 					{/if}
 					<Problem error={previewFailure} />
 					{#if preview}
-						<SetupComparison {preview} instanceId={id} />
+						<SetupComparison
+							{preview}
+							instanceId={id}
+							settingsRestored={canManage && restoreSettings}
+							readable={canReadConfigs}
+						/>
 						<Card.Root>
 							<Card.Header>
 								<Card.Title>Rollback preview</Card.Title>
 								<Card.Description>
-									Rolling back applies the saved mods, configuration files, and launch and backup
-									settings, after saving the current setup as an automatic one. A running server is
-									stopped first. It does not change the game build, selected world or credentials.
-									World files change only if you restore the linked world backup below.
+									Rolling back applies the saved mods and configuration files, and launch and backup
+									settings if chosen, after saving the current setup as an automatic one. A running
+									server is stopped first. It does not change the game build, selected world or
+									credentials. World files change only if you restore the linked world backup below.
 								</Card.Description>
 							</Card.Header>
 							<Card.Content class="grid gap-4">
@@ -460,6 +475,23 @@
 										</ul>
 									</div>
 								{/if}
+								{#if canManage}
+									<div class="flex items-center gap-2">
+										<Switch
+											id="rollback-settings"
+											bind:checked={restoreSettings}
+											onCheckedChange={() => loadPreview(preview?.setup.id ?? selectedId)}
+										/>
+										<Label for="rollback-settings" class="font-normal">
+											Also restore launch and backup settings
+										</Label>
+									</div>
+								{:else}
+									<p class="text-sm text-muted-foreground">
+										Mods and configuration files are rolled back; launch and backup settings stay as
+										they are.
+									</p>
+								{/if}
 								{#if running && canStart}
 									<div class="flex items-center gap-2">
 										<Switch id="rollback-start" bind:checked={startAfter} />
@@ -477,11 +509,13 @@
 									<Button disabled={restoreBlocked !== null} onclick={() => (restoreOpen = true)}
 										>Roll back to this setup</Button
 									>
-									<Button
-										variant="destructive"
-										disabled={jobRunning}
-										onclick={() => (deleteOpen = true)}>Delete setup</Button
-									>
+									{#if canManage}
+										<Button
+											variant="destructive"
+											disabled={jobRunning}
+											onclick={() => (deleteOpen = true)}>Delete setup</Button
+										>
+									{/if}
 								</div>
 								{#if restoreBlocked}<p class="text-sm text-muted-foreground">
 										{restoreBlocked}

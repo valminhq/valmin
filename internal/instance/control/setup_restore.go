@@ -284,6 +284,24 @@ type setupRestorePlan struct {
 	ModsChanged  bool
 }
 
+// restoreTarget decodes the setup row restores inst to, checking its launch and backup settings
+// unless the restore keeps the current ones.
+func (s *SetupJobs) restoreTarget(
+	ctx context.Context, inst *store.Instance, row *store.SavedSetup, modsOnly bool,
+) (SetupSnapshot, error) {
+	snap, err := DecodeSetupSnapshot(row)
+	if err != nil {
+		return SetupSnapshot{}, err
+	}
+	if modsOnly {
+		return snap, nil
+	}
+	if err := s.ValidateSettings(ctx, inst, &snap.Instance); err != nil {
+		return SetupSnapshot{}, err
+	}
+	return snap, nil
+}
+
 func (s *SetupJobs) prepareSetupRestore(
 	ctx context.Context, jh *jobs.Handle, inst *store.Instance, row *store.SavedSetup,
 	refs []store.SetupArtifactRef, payload *SetupJobPayload,
@@ -300,11 +318,8 @@ func (s *SetupJobs) prepareSetupRestore(
 	if etag != payload.ETag {
 		return setupRestorePlan{}, errors.New("server state changed after the restore preview")
 	}
-	snap, err := DecodeSetupSnapshot(row)
+	snap, err := s.restoreTarget(ctx, inst, row, payload.ModsOnly)
 	if err != nil {
-		return setupRestorePlan{}, err
-	}
-	if err := s.ValidateSettings(ctx, inst, &snap.Instance); err != nil {
 		return setupRestorePlan{}, err
 	}
 	scoped := current.ScopedTo(&snap)
@@ -378,7 +393,8 @@ func (s *SetupJobs) applyStagedSetup(
 // RunRestore applies a saved setup to a stopped instance for requestedBy: it snapshots the world
 // when mods change, saves the current setup as an automatic one linked to that snapshot and the
 // current files for rollback, applies the staged files, and commits the rows in the job's finish.
-// A failed apply rolls the files back.
+// A failed apply rolls the files back. With payload.ModsOnly the launch and backup settings stay
+// as they are.
 //
 //nolint:gocognit // The restore phases share a single rollback boundary.
 func (s *SetupJobs) RunRestore(
@@ -447,7 +463,11 @@ func (s *SetupJobs) RunRestore(
 		out := jobs.Outcome{
 			Status: jobs.StatusSucceeded,
 			OnFinish: joinFinish(func(ctx context.Context, tx *sql.Tx) error {
-				write := func() error { return store.TxApplySetupState(ctx, tx, inst.ID, mods, &launch, backup) }
+				settings := &store.SetupSettings{Launch: launch, Backup: backup}
+				if payload.ModsOnly {
+					settings = nil
+				}
+				write := func() error { return store.TxApplySetupState(ctx, tx, inst.ID, mods, settings) }
 				apply := write
 				if !plan.ModsChanged {
 					apply = func() error { return store.TxKeepingSetupsWaiting(ctx, tx, inst.ID, write) }

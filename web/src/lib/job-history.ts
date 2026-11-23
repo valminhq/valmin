@@ -124,6 +124,8 @@ const failedSetups: NextAction = {
 	section: 'setups',
 	requires: actions.setupsManage
 };
+/** A rollback also runs for members who manage mods, who see saved setups too. */
+const failedRollback: NextAction = { ...failedSetups, requires: actions.modsManage };
 const failedUpdate: NextAction = {
 	label: 'See the update notice',
 	section: 'update',
@@ -140,7 +142,7 @@ const nextActions: Record<string, NextAction> = {
 	restore: failedBackups,
 	setup_save: failedSetups,
 	setup_restore: failedSetups,
-	setup_rollback: failedSetups,
+	setup_rollback: failedRollback,
 	setup_delete: failedSetups,
 	game_update: failedUpdate
 };

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -239,4 +240,97 @@ func TestRollbackWaitsForAJobHoldingTheSetupLock(t *testing.T) {
 		t.Errorf("rollback log = %q, want it to say it waited for the prune job", log)
 	}
 	setupTestFile(t, serverPath(dataDir, "BepInEx/plugins/Ns-One.dll"), "one")
+}
+
+// grantMember gives the seeded member the operator role on inst-a with perms added.
+func grantMember(t *testing.T, db *store.DB, perms ...string) {
+	t.Helper()
+	raw, err := json.Marshal(perms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed(t, db, `UPDATE instance_grants SET role = 'operator', perms = ?
+		WHERE user_id = 'u-member' AND instance_id = 'inst-a'`, string(raw))
+}
+
+// TestAMemberWhoManagesModsRollsBackModsOnly asserts a member who may manage mods sees the
+// setups and rolls back mods and config files while the server's settings stay as they are, even
+// without asking for that, and reads no config text without config.raw, while saving and
+// deleting stay out of reach.
+func TestAMemberWhoManagesModsRollsBackModsOnly(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, member, dataDir := rollbackWorld(t, "stopped")
+	writeServerFile(t, dataDir, "BepInEx/config/one.cfg", "a = 1\n")
+	saved := setupTestSave(t, rt, db, admin, "known good")
+	removeSetupMod(t, db, dataDir)
+	seed(t, db, `UPDATE instances SET server_name = 'Renamed', mem_limit_mb = 6144 WHERE id = 'inst-a'`)
+	grantMember(t, db, "mods.manage")
+
+	rec := as(rt, member, httptest.NewRequest(http.MethodGet, setupsURL, http.NoBody))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("member list = %d %s, want 200", rec.Code, rec.Body)
+	}
+	preview := setupTestPreview(t, rt, member, saved.ID)
+	for _, c := range append(preview.Current.Configs, preview.Setup.Configs...) {
+		if c.Content != nil {
+			t.Errorf("config %s carries its text for a member without config.raw", c.File)
+		}
+	}
+	text := as(rt, member, httptest.NewRequest(http.MethodGet,
+		setupsURL+"/"+saved.ID+"/configs/one.cfg", http.NoBody))
+	if text.Code != http.StatusForbidden {
+		t.Errorf("member config text = %d, want 403", text.Code)
+	}
+	for _, tc := range []struct {
+		name string
+		req  *http.Request
+	}{
+		{"save", httptest.NewRequest(http.MethodPost, setupsURL, jsonBody(t, map[string]string{"name": "x"}))},
+		{"delete", httptest.NewRequest(http.MethodDelete, setupsURL+"/"+saved.ID, http.NoBody)},
+		{"restore", httptest.NewRequest(http.MethodPost, setupsURL+"/"+saved.ID+"/restore", http.NoBody)},
+	} {
+		if rec := as(rt, member, tc.req); rec.Code != http.StatusForbidden {
+			t.Errorf("member %s = %d, want 403", tc.name, rec.Code)
+		}
+	}
+	job := rollbackJob(t, rt, member, saved.ID, map[string]any{})
+
+	if job.Status != "succeeded" {
+		t.Fatalf("member rollback = %+v, want succeeded", job)
+	}
+	setupTestFile(t, serverPath(dataDir, "BepInEx/plugins/Ns-One.dll"), "one")
+	inst, err := db.InstanceByID(t.Context(), "inst-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inst.ServerName != "Renamed" || inst.MemLimitMB != 6144 {
+		t.Errorf("settings after a mods-only rollback = %q, %d MB, want Renamed and 6144 kept",
+			inst.ServerName, inst.MemLimitMB)
+	}
+}
+
+// TestAViewerCannotSeeSetups asserts a member without mods.manage cannot list setups or roll
+// back.
+func TestAViewerCannotSeeSetups(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, member, _ := rollbackWorld(t, "stopped")
+	saved := setupTestSave(t, rt, db, admin, "plain")
+	grantMember(t, db, "config.raw")
+	if rec := as(
+		rt,
+		member,
+		httptest.NewRequest(http.MethodGet, setupsURL, http.NoBody),
+	); rec.Code != http.StatusForbidden {
+		t.Errorf("list = %d, want 403", rec.Code)
+	}
+	if rec := rollback(
+		t,
+		rt,
+		member,
+		saved.ID,
+		"",
+		map[string]any{"mods_only": true},
+	); rec.Code != http.StatusForbidden {
+		t.Errorf("rollback = %d, want 403", rec.Code)
+	}
 }

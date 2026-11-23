@@ -32,6 +32,8 @@ type RollbackPayload struct {
 	World bool `json:"world,omitempty"`
 	// Start starts the server once everything is restored.
 	Start bool `json:"start,omitempty"`
+	// ModsOnly keeps the current launch and backup settings.
+	ModsOnly bool `json:"mods_only,omitempty"`
 }
 
 // RollbackSubmission is one rollback to queue.
@@ -127,7 +129,7 @@ func (r *SetupRollback) restoreSetup(
 	}
 	job, err := submitStep(ctx, jh, func() (*store.Job, error) {
 		return r.Setups.SubmitRestore(ctx, &SetupRestoreSubmission{
-			Instance: inst, Setup: row, Refs: refs, ETag: etag, RequestedBy: requestedBy,
+			Instance: inst, Setup: row, Refs: refs, ETag: etag, ModsOnly: p.ModsOnly, RequestedBy: requestedBy,
 		})
 	})
 	if err != nil {
