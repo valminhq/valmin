@@ -214,7 +214,7 @@ func hasWorlds(inst *store.Instance) bool {
 	return err == nil
 }
 
-// savesSetup reports whether a mod update on inst saves its setup first.
+// savesSetup reports whether a mod change on inst saves its setup first.
 func savesSetup(inst *store.Instance) bool {
 	return inst.SetupBeforeUpdate != string(control.SetupBeforeUpdateOff)
 }

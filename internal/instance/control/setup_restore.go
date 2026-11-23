@@ -375,14 +375,15 @@ func (s *SetupJobs) applyStagedSetup(
 	return nil
 }
 
-// RunRestore applies a saved setup to a stopped instance: it snapshots the world when mods
-// change, saves the current setup as an automatic one linked to that snapshot and the current
-// files for rollback, applies the staged files, and commits the rows in the job's finish. A
-// failed apply rolls the files back.
+// RunRestore applies a saved setup to a stopped instance for requestedBy: it snapshots the world
+// when mods change, saves the current setup as an automatic one linked to that snapshot and the
+// current files for rollback, applies the staged files, and commits the rows in the job's finish.
+// A failed apply rolls the files back.
 //
 //nolint:gocognit // The restore phases share a single rollback boundary.
 func (s *SetupJobs) RunRestore(
 	inst *store.Instance, row *store.SavedSetup, refs []store.SetupArtifactRef, payload *SetupJobPayload,
+	requestedBy string,
 ) jobs.Runner {
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		keepStaging := false
@@ -404,7 +405,7 @@ func (s *SetupJobs) RunRestore(
 		if err := ctx.Err(); err != nil {
 			return fail(err, nil)
 		}
-		archived, saveBefore, err := s.saveBeforeRestore(ctx, jh, &plan, row, payload.StagingDir)
+		archived, saveBefore, err := s.saveBeforeRestore(ctx, jh, &plan, row, payload.StagingDir, requestedBy)
 		if err != nil {
 			return fail(err, nil)
 		}
@@ -459,13 +460,15 @@ func (s *SetupJobs) RunRestore(
 
 // saveBeforeRestore takes what a restore of row saves before it changes anything: a pre-update
 // snapshot of the world when mods change, and the current setup as an automatic one linked to
-// it. It returns the finish steps that record each, nil for what was not taken; a setup that
-// cannot be captured is logged on jh, and only a failed snapshot is an error.
+// it, recorded as caused by requestedBy. It returns the finish steps that record each, nil for
+// what was not taken; a setup that cannot be captured is logged on jh, and only a failed
+// snapshot is an error.
 func (s *SetupJobs) saveBeforeRestore(
-	ctx context.Context, jh *jobs.Handle, plan *setupRestorePlan, row *store.SavedSetup, staging string,
+	ctx context.Context, jh *jobs.Handle, plan *setupRestorePlan, row *store.SavedSetup,
+	staging, requestedBy string,
 ) (archived, saveBefore func(context.Context, *sql.Tx) error, err error) {
 	before := automaticSetup{
-		name: "Before restoring " + row.Name, spare: row.ID,
+		name: "Before restoring " + row.Name, createdBy: requestedBy, spare: row.ID,
 		staging: filepath.Join(staging, "before"), before: "restore",
 	}
 	if plan.ModsChanged {

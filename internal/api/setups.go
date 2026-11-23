@@ -58,9 +58,12 @@ type setupBackupView struct {
 }
 
 type setupDetailView struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	CreatedAt   time.Time              `json:"created_at"`
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+	// CreatedBy is the username of whoever saved the setup or made the change an automatic one
+	// comes before, null for the panel's own or a deleted account.
+	CreatedBy   *string                `json:"created_by"`
 	GameBuildID string                 `json:"game_build_id"`
 	WorldName   string                 `json:"world_name"`
 	Instance    control.ManifestLaunch `json:"instance"`
@@ -267,7 +270,7 @@ func (h *Instances) setupDetail(
 	ctx context.Context, row *store.SavedSetup, snap *control.SetupSnapshot,
 ) (setupDetailView, error) {
 	view := setupDetailView{
-		ID: row.ID, Name: row.Name, CreatedAt: row.CreatedAt,
+		ID: row.ID, Name: row.Name, CreatedAt: row.CreatedAt, CreatedBy: optional(row.CreatedByName),
 		GameBuildID: row.GameBuildID, WorldName: row.WorldName,
 		Instance: snap.Instance, Mods: setupModsView(snap.Mods),
 		Configs:    savedConfigViews(setupblob.New(h.Cfg.Data.Root), snap),

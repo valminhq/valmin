@@ -23,8 +23,6 @@ import (
 const (
 	// MaxSetupNameBytes bounds a saved setup's name.
 	MaxSetupNameBytes = 120
-	// keepAutomaticSetups is how many automatic setups each server keeps.
-	keepAutomaticSetups = 3
 )
 
 // SetupJobs owns saved setup capture and restore work.

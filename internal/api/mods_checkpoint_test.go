@@ -1,9 +1,13 @@
 package api
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/valminhq/valmin/internal/instance/control"
+	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/store"
 )
 
@@ -58,9 +62,9 @@ func TestModUpdateSavesALinkedSetup(t *testing.T) {
 			t.Parallel()
 			rt, db, admin, _, dataDir := installWorld(t, twoVersions()...)
 			alreadyModded(t, db)
+			seed(t, db, `UPDATE instances SET setup_before_update = ? WHERE id = 'inst-a'`, string(mode))
 			installOK(t, rt, admin, "Ns-Only", "1.0.0")
 			giveWorld(t, dataDir)
-			seed(t, db, `UPDATE instances SET setup_before_update = ? WHERE id = 'inst-a'`, string(mode))
 
 			installOK(t, rt, admin, "Ns-Only", "2.0.0")
 
@@ -75,8 +79,8 @@ func TestModUpdateSavesALinkedSetup(t *testing.T) {
 				}
 				return
 			}
-			if len(setups) != 1 {
-				t.Fatalf("automatic setups = %+v, want one", setups)
+			if len(setups) != 2 {
+				t.Fatalf("automatic setups = %+v, want the install's and the update's", setups)
 			}
 			got := setups[0]
 			if got.Name != "Before updating Ns-Only" || got.BackupID != backups[0] {
@@ -104,48 +108,90 @@ func TestModUpdateSavesALinkedSetup(t *testing.T) {
 	}
 }
 
-// TestFreshInstallSavesNoSetup asserts an install that replaces nothing takes no checkpoint.
-func TestFreshInstallSavesNoSetup(t *testing.T) {
+// TestInstallAndRemovalSaveASetupWithoutAWorld asserts an install that replaces nothing and an
+// uninstall each save the setup before them as an automatic one named after the mods, recorded
+// as the requester's and linked to no world backup, while archiving no world.
+func TestInstallAndRemovalSaveASetupWithoutAWorld(t *testing.T) {
 	t.Parallel()
 	rt, db, admin, _, dataDir := installWorld(t, twoVersions()...)
 	alreadyModded(t, db)
 	giveWorld(t, dataDir)
 
 	installOK(t, rt, admin, "Ns-Only", "1.0.0")
+	rec := deleteMod(t, rt, admin, "Ns-Only", "")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("uninstall = %d %s, want 202", rec.Code, rec.Body)
+	}
+	var accepted jobView
+	decodeInto(t, rec, &accepted)
+	if got := waitJob(t, rt, admin, accepted.JobID); got.Status != "succeeded" {
+		t.Fatalf("uninstall job = %+v, want succeeded", got)
+	}
 
-	if setups := automaticSetups(t, db); len(setups) != 0 {
-		t.Errorf("automatic setups = %+v, want none", setups)
+	if backups := preUpdateBackupIDs(t, db); len(backups) != 0 {
+		t.Errorf("pre_update backups = %v, want none", backups)
+	}
+	setups := automaticSetups(t, db)
+	names := make([]string, 0, len(setups))
+	for _, s := range setups {
+		names = append(names, s.Name)
+		if s.BackupID != "" || s.CreatedByName != admin.Username {
+			t.Errorf("setup %q linked to %q by %q, want no world and %q", s.Name, s.BackupID,
+				s.CreatedByName, admin.Username)
+		}
+	}
+	if want := []string{"Before removing Ns-Only", "Before installing Ns-Only"}; !slices.Equal(names, want) {
+		t.Errorf("automatic setups = %q, want %q", names, want)
 	}
 }
 
-// TestModUpdatesKeepThreeAutomaticSetups asserts each server keeps its newest three automatic
-// setups, and a setup pruned away releases its world backup back to retention.
-func TestModUpdatesKeepThreeAutomaticSetups(t *testing.T) {
+// TestModUpdatesKeepTheConfiguredAutomaticSetups asserts a server keeps as many automatic setups
+// as it is set to, and the world backups of only the newest linked ones; a released backup goes
+// back to retention, and lowering the counts applies at once.
+func TestModUpdatesKeepTheConfiguredAutomaticSetups(t *testing.T) {
 	t.Parallel()
 	rt, db, admin, _, dataDir := installWorld(t, twoVersions()...)
 	alreadyModded(t, db)
 	installOK(t, rt, admin, "Ns-Only", "1.0.0")
 	giveWorld(t, dataDir)
+	seed(t, db, `UPDATE instances SET setup_versions_kept = 4, setup_worlds_kept = 2 WHERE id = 'inst-a'`)
 
 	for _, v := range []string{"2.0.0", "1.0.0", "2.0.0", "1.0.0"} {
 		installOK(t, rt, admin, "Ns-Only", v)
 	}
 
-	if setups := automaticSetups(t, db); len(setups) != 3 {
-		t.Fatalf("automatic setups = %d, want 3", len(setups))
+	if setups := automaticSetups(t, db); len(setups) != 4 {
+		t.Fatalf("automatic setups = %d, want 4", len(setups))
 	}
 	backups := preUpdateBackupIDs(t, db)
 	if len(backups) != 4 {
 		t.Fatalf("pre_update backups = %v, want four", backups)
 	}
-	for i, id := range backups {
-		pinned, err := db.BackupPinned(t.Context(), "inst-a", id)
-		if err != nil {
-			t.Fatal(err)
+	pinned := func() []bool {
+		out := make([]bool, 0, len(backups))
+		for _, id := range backups {
+			p, err := db.BackupPinned(t.Context(), "inst-a", id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, p)
 		}
-		if want := i > 0; pinned != want {
-			t.Errorf("backup %d pinned = %v, want %v", i, pinned, want)
-		}
+		return out
+	}
+	if got, want := pinned(), []bool{false, false, true, true}; !slices.Equal(got, want) {
+		t.Errorf("backups pinned = %v, want %v", got, want)
+	}
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPatch, "/api/v1/instances/inst-a",
+		jsonBody(t, map[string]int{"setup_versions_kept": 1, "setup_worlds_kept": 0})))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("patch = %d %s, want 200", rec.Code, rec.Body)
+	}
+	if setups := automaticSetups(t, db); len(setups) != 1 {
+		t.Errorf("automatic setups after lowering = %d, want 1", len(setups))
+	}
+	if got, want := pinned(), []bool{false, false, false, false}; !slices.Equal(got, want) {
+		t.Errorf("backups pinned after lowering = %v, want %v", got, want)
 	}
 }
 
@@ -161,5 +207,28 @@ func TestUpdatePreviewsSaySetupIsSaved(t *testing.T) {
 	seed(t, db, `UPDATE instances SET setup_before_update = 'off' WHERE id = 'inst-a'`)
 	if previewUpdatesOf(t, rt, admin).Setup {
 		t.Error("setup = true with the setting off")
+	}
+}
+
+// TestInstallsThatCreateAServerSaveNoSetup asserts the minimum installs a definition chain
+// submits while it creates a server save no automatic setup.
+func TestInstallsThatCreateAServerSaveNoSetup(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, _ := installWorld(t, twoVersions()...)
+	alreadyModded(t, db)
+	inst, err := db.InstanceByID(t.Context(), "inst-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := rt.mods.install.SubmitInstall(t.Context(), inst,
+		manager.PackageRequest{FullName: "Ns-Only", Version: "1.0.0"}, admin.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := waitJob(t, rt, admin, job.ID); got.Status != "succeeded" {
+		t.Fatalf("install job = %+v, want succeeded", got)
+	}
+	if setups := automaticSetups(t, db); len(setups) != 0 {
+		t.Errorf("automatic setups = %+v, want none", setups)
 	}
 }

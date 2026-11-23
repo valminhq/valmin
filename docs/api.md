@@ -739,9 +739,9 @@ conflicts (`mod_conflict`), so resolve first and fix them. Only conflicts the ch
 causes are reported. The response's `backup` is `true` when the install would move or
 remove an installed package on a server that has a world. The install job then backs up
 the world first, as **Update all** does, and keeps the backup even if the install fails.
-`setup` is `true` when the install would move or remove an installed package and the server's
-`setup_before_update` is not `off`: the job then also saves the current setup first, as an
-automatic setup linked to that backup.
+`setup` is `true` when the install changes anything and the server's `setup_before_update` is
+not `off`: the job then also saves the current setup first, as an automatic setup linked to
+that backup when it takes one.
 
 An install that would overwrite files no installed mod owns, such as files placed by hand,
 writes nothing and fails with `mod_unowned_files`; its `error` names the files. Send the
@@ -951,15 +951,21 @@ Config bytes are stored once per content and shared between setups. It retains p
 payloads for offline restore. Game build and world name are comparison-only. The server
 password, selected world, and world files are not restored.
 
-Each setup has `config_tree`, `configs_truncated`, `automatic` and `light`. `config_tree` is
+Each setup has `created_by`, `config_tree`, `configs_truncated`, `automatic` and `light`.
+`created_by` is the username of whoever saved the setup or made the change an automatic one
+comes before, `null` for the panel's own change or a deleted account. `config_tree` is
 `false` for a setup saved before setups held the whole config tree: it holds only the `.cfg`
 files directly in `BepInEx/config`, and restoring it changes only those. `configs_truncated` is
 `true` when the listing limits left files out of the setup; a restore leaves such files alone.
 `automatic` marks a setup the panel saved from the server just before it changed anything:
-a restore's, named `Before restoring <name>`, or a mod update's, named
-`Before updating <mods>` or `Before changing mods` (see `setup_before_update`). Either links
-the `pre_update` backup the job took first, when it took one. Each server keeps its newest
-three automatic setups. If that capture fails, the job goes ahead and its log says so. A `light`
+a restore's, named `Before restoring <name>`, or a mod change's, named
+`Before installing <mods>`, `Before removing <mods>`, `Before updating <mods>` or
+`Before changing mods` (see `setup_before_update`). It links the `pre_update` backup the job
+took first, when it took one: a restore that changes mods, an update, and an install that backs
+up the world first take one, while a plain install or a removal does not. The installs that
+create a server save none. Each server keeps its newest `setup_versions_kept` automatic setups, and the newest
+`setup_worlds_kept` of those that link a backup keep it. If that capture fails, the job goes
+ahead and its log says so. A `light`
 setup restores the packages it does not keep from the download cache or their registry; its
 preview lists, in `problems`, each such package that is not cached and that no enabled
 registry lists.
@@ -1068,11 +1074,17 @@ and the instance is started again unless Docker still shows the container runnin
 it is held in the `error` state. Any other value returns `422`. It takes effect immediately
 without setting `restart_required`.
 
-`setup_before_update` is `full` (the default), `light` or `off`: what a mod update saves of the
-setup before it moves any file. `full` and `light` save an automatic setup, full or light,
-linked to the update's `pre_update` backup; `off` saves only the backup. It needs
-`setups.manage`, takes effect immediately without setting `restart_required`, and any other
-value returns `422`. A copy made to test an update gets `off`.
+`setup_before_update` is `full` (the default), `light` or `off`: what a mod install, removal or
+update saves of the setup before it moves any file. `full` and `light` save an automatic setup,
+full or light, linked to an update's `pre_update` backup; `off` saves none, and an update still
+takes its backup. It needs `setups.manage`, takes effect immediately without setting
+`restart_required`, and any other value returns `422`. A copy made to test an update gets `off`.
+
+`setup_versions_kept` (1 to 100, default 10) is how many automatic setups the server keeps, and
+`setup_worlds_kept` (0 to 100, default 3) how many of those, newest first, keep the world backup
+they link. Lowering either removes the oldest automatic setups, or releases their backups to
+normal retention, in the same request. Both need `setups.manage`, take effect without setting
+`restart_required`, and a value out of range returns `422`.
 
 `join_host` is the host name or IP address players connect to, without a port: an IP address,
 or a DNS name of letters, digits and hyphens. Anything else, including a port, returns `422`.
@@ -1188,7 +1200,7 @@ is marked as pending a restart.
 | `auto_stop_minutes`                                                                     | `instance.settings` and `instance.stop` |
 | `watchdog` set to `off` or `alert`                                                      | `instance.settings`                     |
 | `watchdog` set to `restart`                                                             | `instance.settings` and `instance.restart` |
-| `setup_before_update`                                                                   | `setups.manage`                         |
+| `setup_before_update`, `setup_versions_kept`, `setup_worlds_kept`                       | `setups.manage`                         |
 | `game_branch`, `game_branch_password`                                                   | `instance.update`                       |
 | `mem_limit_mb`, `cpu_limit`                                                             | `instance.limits`                       |
 | `extra_args`                                                                            | `instance.extra_args`                   |

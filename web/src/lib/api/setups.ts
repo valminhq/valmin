@@ -16,6 +16,8 @@ export interface SavedSetup {
 	id: string;
 	name: string;
 	created_at: string;
+	/** Who saved it, or whose change an automatic one comes before; null for the panel's own. */
+	created_by: string | null;
 	game_build_id: string;
 	world_name: string;
 	world_backup?: LinkedWorldBackup | null;
@@ -24,7 +26,7 @@ export interface SavedSetup {
 	config_tree: boolean;
 	/** The config tree held files past the listing limits, which the setup left out. */
 	configs_truncated: boolean;
-	/** Saved by the panel before a restore. */
+	/** Saved by the panel before a restore or a mod change. */
 	automatic: boolean;
 	/** Keeps only the packages their registry archives cannot reproduce; the rest are
 	 * downloaded on restore. */

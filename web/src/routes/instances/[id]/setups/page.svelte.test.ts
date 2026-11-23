@@ -34,6 +34,7 @@ const saved: SetupDetail = {
 	id: 'setup-1',
 	name: 'Working before update',
 	created_at: '2026-09-28T12:00:00Z',
+	created_by: 'sam',
 	game_build_id: '100',
 	world_name: 'OldWorld',
 	world_backup: {
@@ -201,13 +202,13 @@ describe('Saved setups', () => {
 		});
 	});
 
-	it('saves what mod updates save first from the two switches', async () => {
+	it('saves what mod changes save first from the two switches', async () => {
 		serve();
 		daemon.on('PATCH', '/instances/inst-a', () =>
 			Response.json(instance({ id: 'inst-a', name: 'Live', setup_before_update: 'light' }))
 		);
 		await open();
-		const before = card('Before mod updates');
+		const before = card('Before mod changes');
 		const save = within(before).getByRole('button', { name: 'Save' }) as HTMLButtonElement;
 		expect(save.disabled).toBe(true);
 
@@ -221,7 +222,7 @@ describe('Saved setups', () => {
 		await vi.waitFor(() => expect(save.disabled).toBe(true));
 
 		await fireEvent.click(
-			within(before).getByRole('switch', { name: 'Save the setup before mod updates' })
+			within(before).getByRole('switch', { name: 'Save the setup before mod changes' })
 		);
 		expect(within(before).queryByRole('switch', { name: /Keep package files/ })).toBeNull();
 		await fireEvent.click(save);
@@ -229,6 +230,34 @@ describe('Saved setups', () => {
 		expect(daemon.requests('PATCH', '/instances/inst-a')[1].body).toEqual({
 			setup_before_update: 'off'
 		});
+	});
+
+	it('saves how many automatic setups and world backups are kept', async () => {
+		serve();
+		daemon.on('PATCH', '/instances/inst-a', () =>
+			Response.json(instance({ id: 'inst-a', name: 'Live', setup_versions_kept: 5 }))
+		);
+		await open();
+		const before = card('Before mod changes');
+		const save = within(before).getByRole('button', { name: 'Save' }) as HTMLButtonElement;
+		const versions = within(before).getByLabelText('Automatic setups to keep');
+
+		await fireEvent.input(versions, { target: { value: '0' } });
+		expect(before.textContent).toContain('Enter a whole number from 1 to 100.');
+		expect(save.disabled).toBe(true);
+
+		await fireEvent.input(versions, { target: { value: '5' } });
+		await fireEvent.click(save);
+		await vi.waitFor(() => expect(daemon.requests('PATCH', '/instances/inst-a')).toHaveLength(1));
+		expect(daemon.requests('PATCH', '/instances/inst-a')[0].body).toEqual({
+			setup_versions_kept: 5
+		});
+	});
+
+	it('says who saved each setup', async () => {
+		serve();
+		await open();
+		expect(card('Saved for this server').textContent).toContain('by sam');
 	});
 
 	it('marks automatic setups, setups saved before full capture, and left-out files', async () => {

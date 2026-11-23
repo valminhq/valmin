@@ -50,7 +50,7 @@ func (i *Installer) SubmitUninstall(
 			}
 			return nil
 		},
-	}, runUninstall(i.DB, inst, payload))
+	}, runUninstall(i.DB, i.Version, inst, payload, requestedBy))
 	if err != nil {
 		return nil, err
 	}

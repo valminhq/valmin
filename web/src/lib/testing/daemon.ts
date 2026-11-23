@@ -92,6 +92,8 @@ export function instance(overrides: Partial<Instance> = {}): Instance {
 		auto_stop_minutes: 0,
 		watchdog: 'off',
 		setup_before_update: 'full',
+		setup_versions_kept: 10,
+		setup_worlds_kept: 3,
 		game_branch: 'public',
 		game_backups: 4,
 		status_published: false,

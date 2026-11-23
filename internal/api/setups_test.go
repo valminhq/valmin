@@ -696,6 +696,12 @@ func TestSetupSavesShareUnchangedConfigBlobs(t *testing.T) {
 	}
 	setupTestSave(t, rt, db, admin, "first")
 	first := blobs()
+	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, setupsURL, http.NoBody))
+	var list struct{ Items []setupDetailView }
+	decodeInto(t, rec, &list)
+	if len(list.Items) != 1 || deref(list.Items[0].CreatedBy) != admin.Username {
+		t.Errorf("listed setups = %+v, want one created by %s", list.Items, admin.Username)
+	}
 	writeServerFile(t, dataDir, "BepInEx/config/EWD/b.yaml", "b changed")
 	setupTestSave(t, rt, db, admin, "second")
 	if got := blobs(); got != first+1 {

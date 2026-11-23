@@ -78,3 +78,56 @@ func TestSetupBeforeUpdateNeedsSetupsManage(t *testing.T) {
 		t.Fatalf("patch = %d, want 403 (%s)", rec.Code, rec.Body)
 	}
 }
+
+// TestPatchSetupRetention asserts the automatic setup counts accept 1 to 100 and 0 to 100, refuse
+// anything else with 422 and leave the row unchanged, keep the count a body leaves out, and need
+// setups.manage.
+func TestPatchSetupRetention(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name                 string
+		body                 map[string]any
+		ok                   bool
+		wantVersions, worlds int
+	}{
+		{"both", map[string]any{"setup_versions_kept": 20, "setup_worlds_kept": 0}, true, 20, 0},
+		{"versions only", map[string]any{"setup_versions_kept": 100}, true, 100, 3},
+		{"worlds only", map[string]any{"setup_worlds_kept": 5}, true, 10, 5},
+		{"no versions", map[string]any{"setup_versions_kept": 0}, false, 10, 3},
+		{"too many worlds", map[string]any{"setup_worlds_kept": 101}, false, 10, 3},
+		{"negative worlds", map[string]any{"setup_worlds_kept": -1}, false, 10, 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rt, db, admin, _ := world(t)
+			rec := patchInstance(t, rt, admin, tt.body)
+			want := http.StatusUnprocessableEntity
+			if tt.ok {
+				want = http.StatusOK
+			}
+			if rec.Code != want {
+				t.Fatalf("status = %d, want %d (%s)", rec.Code, want, rec.Body)
+			}
+			inst, err := db.InstanceByID(t.Context(), "inst-a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if inst.SetupVersionsKept != tt.wantVersions || inst.SetupWorldsKept != tt.worlds {
+				t.Errorf("kept = %d versions, %d worlds, want %d and %d",
+					inst.SetupVersionsKept, inst.SetupWorldsKept, tt.wantVersions, tt.worlds)
+			}
+		})
+	}
+
+	rt, db, _, member := world(t)
+	raw, err := json.Marshal([]string{"instance.settings", "mods.manage", "backups.restore"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed(t, db, `UPDATE instance_grants SET role = 'operator', perms = ?
+		WHERE user_id = 'u-member' AND instance_id = 'inst-a'`, string(raw))
+	if rec := patchInstance(t, rt, member, map[string]any{"setup_versions_kept": 1}); rec.Code != http.StatusForbidden {
+		t.Fatalf("member patch = %d, want 403 (%s)", rec.Code, rec.Body)
+	}
+}

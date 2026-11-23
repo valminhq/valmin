@@ -14,15 +14,17 @@ import (
 // SavedSetup records one immutable server setup. SnapshotJSON carries the settings and
 // managed-mod state; package payloads are referenced separately by their SHA-256 digests.
 type SavedSetup struct {
-	ID           string    `json:"id"`
-	InstanceID   string    `json:"instance_id"`
-	Name         string    `json:"name"`
-	CreatedBy    string    `json:"created_by,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	GameBuildID  string    `json:"game_build_id"`
-	WorldName    string    `json:"world_name"`
-	SnapshotJSON string    `json:"-"`
-	BackupID     string    `json:"backup_id,omitempty"`
+	ID         string `json:"id"`
+	InstanceID string `json:"instance_id"`
+	Name       string `json:"name"`
+	CreatedBy  string `json:"created_by,omitempty"`
+	// CreatedByName is the username of CreatedBy, read back and never written.
+	CreatedByName string    `json:"-"`
+	CreatedAt     time.Time `json:"created_at"`
+	GameBuildID   string    `json:"game_build_id"`
+	WorldName     string    `json:"world_name"`
+	SnapshotJSON  string    `json:"-"`
+	BackupID      string    `json:"backup_id,omitempty"`
 	// Automatic marks a setup the panel saved before a restore or a mod update.
 	Automatic bool `json:"automatic"`
 	// ConfigsTruncated reports that the config tree held files past the listing limits.
@@ -85,7 +87,7 @@ func TxSaveSetup(ctx context.Context, tx *sql.Tx, setup *SavedSetup, artifacts [
 		INSERT INTO saved_setups (
 			id, instance_id, name, created_by, game_build_id, world_name,
 			snapshot_json, backup_id, created_at, automatic, configs_truncated
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, (SELECT id FROM users WHERE id = ?), ?, ?, ?, ?, ?, ?, ?)`,
 		setup.ID, setup.InstanceID, setup.Name, createdBy, setup.GameBuildID,
 		setup.WorldName, setup.SnapshotJSON, backupID, FormatTime(setup.CreatedAt),
 		setup.Automatic, setup.ConfigsTruncated); err != nil {
@@ -153,18 +155,19 @@ func checkSetupBackup(ctx context.Context, tx *sql.Tx, setup *SavedSetup) error 
 }
 
 const savedSetupColumns = `id, instance_id, name, created_by, game_build_id,
-	world_name, snapshot_json, backup_id, created_at, automatic, configs_truncated`
+	world_name, snapshot_json, backup_id, created_at, automatic, configs_truncated,
+	(SELECT username FROM users WHERE users.id = saved_setups.created_by)`
 
 func scanSavedSetup(row scanner) (SavedSetup, error) {
 	var s SavedSetup
-	var createdBy, backupID sql.NullString
+	var createdBy, backupID, createdByName sql.NullString
 	var createdAt string
 	if err := row.Scan(&s.ID, &s.InstanceID, &s.Name, &createdBy,
 		&s.GameBuildID, &s.WorldName, &s.SnapshotJSON, &backupID, &createdAt,
-		&s.Automatic, &s.ConfigsTruncated); err != nil {
+		&s.Automatic, &s.ConfigsTruncated, &createdByName); err != nil {
 		return SavedSetup{}, fmt.Errorf("scan saved setup: %w", err)
 	}
-	s.CreatedBy = createdBy.String
+	s.CreatedBy, s.CreatedByName = createdBy.String, createdByName.String
 	s.BackupID = backupID.String
 	var err error
 	s.CreatedAt, err = ParseTime(createdAt)
@@ -270,16 +273,34 @@ func (db *DB) setupConfigs(ctx context.Context, id string) ([]SetupConfigRef, er
 	return configs, nil
 }
 
-// TxPruneAutomaticSetups deletes the automatic setups of an instance beyond its newest keep,
-// sparing the setup with ID spare. Their blobs stay until the blob store's GC finds them
-// unreferenced.
-func TxPruneAutomaticSetups(ctx context.Context, tx *sql.Tx, instanceID string, keep int, spare string) error {
-	if _, err := tx.ExecContext(ctx, `
+// TxPruneAutomaticSetups deletes an instance's automatic setups beyond its newest keep.Versions
+// and releases the world backup of each linked one beyond the newest keep.Worlds, back to normal
+// retention, sparing the setup with ID spare. Their blobs stay until the blob store's GC finds
+// them unreferenced.
+func TxPruneAutomaticSetups(
+	ctx context.Context,
+	ex execer,
+	instanceID string,
+	keep SetupRetention,
+	spare string,
+) error {
+	if keep.Versions < 1 || keep.Worlds < 0 {
+		return fmt.Errorf("prune automatic setups of %s: invalid retention %+v", instanceID, keep)
+	}
+	if _, err := ex.ExecContext(ctx, `
 		DELETE FROM saved_setups WHERE instance_id = ? AND automatic AND id <> ? AND id NOT IN (
 			SELECT id FROM saved_setups WHERE instance_id = ? AND automatic
 			ORDER BY created_at DESC, id DESC LIMIT ?)`,
-		instanceID, spare, instanceID, keep); err != nil {
+		instanceID, spare, instanceID, keep.Versions); err != nil {
 		return fmt.Errorf("prune automatic setups of %s: %w", instanceID, err)
+	}
+	if _, err := ex.ExecContext(ctx, `
+		UPDATE saved_setups SET backup_id = NULL
+		WHERE instance_id = ? AND automatic AND backup_id IS NOT NULL AND id <> ? AND id NOT IN (
+			SELECT id FROM saved_setups WHERE instance_id = ? AND automatic AND backup_id IS NOT NULL
+			ORDER BY created_at DESC, id DESC LIMIT ?)`,
+		instanceID, spare, instanceID, keep.Worlds); err != nil {
+		return fmt.Errorf("release world backups of automatic setups of %s: %w", instanceID, err)
 	}
 	return nil
 }
