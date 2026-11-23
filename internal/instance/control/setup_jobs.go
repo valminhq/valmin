@@ -303,7 +303,12 @@ func (s *SetupJobs) UnavailableArchives(
 func (s *SetupJobs) retainSetup(
 	ctx context.Context, inst *store.Instance, snap *SetupSnapshot, staging string,
 ) ([]store.SetupArtifactRef, error) {
-	refs, err := (&setupArtifacts{DataRoot: s.DataRoot, Archives: s.Archives}).Save(ctx, inst, snap, staging)
+	earlier, err := s.newestPackages(ctx, inst.ID)
+	if err != nil {
+		return nil, err
+	}
+	artifacts := &setupArtifacts{DataRoot: s.DataRoot, Archives: s.Archives, Earlier: earlier}
+	refs, err := artifacts.Save(ctx, inst, snap, staging)
 	if err != nil {
 		return nil, err
 	}
@@ -311,4 +316,28 @@ func (s *SetupJobs) retainSetup(
 		return nil, err
 	}
 	return refs, nil
+}
+
+// newestPackages returns the packages the instance's newest setup kept, by name, nil when it has
+// none or its snapshot no longer decodes.
+func (s *SetupJobs) newestPackages(ctx context.Context, instanceID string) (map[string]keptPackage, error) {
+	row, refs, err := s.DB.NewestSetup(ctx, instanceID)
+	if err != nil || row == nil {
+		return nil, err
+	}
+	snap, err := DecodeSetupSnapshot(row)
+	if err != nil {
+		return nil, nil //nolint:nilerr // a setup that does not decode has nothing to reuse
+	}
+	byName := make(map[string]*store.SetupArtifactRef, len(refs))
+	for i := range refs {
+		byName[refs[i].FullName] = &refs[i]
+	}
+	kept := make(map[string]keptPackage, len(snap.Mods))
+	for _, mod := range snap.Mods {
+		if ref := byName[mod.FullName]; ref != nil {
+			kept[mod.FullName] = keptPackage{mod: mod, ref: ref}
+		}
+	}
+	return kept, nil
 }

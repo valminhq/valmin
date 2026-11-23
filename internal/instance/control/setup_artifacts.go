@@ -35,10 +35,18 @@ type PackageArchives interface {
 }
 
 // setupArtifacts captures and stages the package bytes referenced by saved setups. Archives is
-// nil where registry downloads are unavailable.
+// nil where registry downloads are unavailable. Earlier holds the packages of the server's
+// newest setup by name, which a capture reuses for any package whose files have not changed.
 type setupArtifacts struct {
 	DataRoot string
 	Archives PackageArchives
+	Earlier  map[string]keptPackage
+}
+
+// keptPackage is a package an earlier setup kept: the state it was captured in and its payload.
+type keptPackage struct {
+	mod SetupMod
+	ref *store.SetupArtifactRef
 }
 
 // setupManifest decodes mod's file manifest and checks its name and every path in it.
@@ -146,9 +154,10 @@ func (a *setupArtifacts) Save(
 	return refs, nil
 }
 
-// retainSetupModArtifact stores the bytes of one installed package: its cached registry archive
-// when that replays to exactly the installed files, an archive of the installed files otherwise.
-// For a light setup a package its registry archive reproduces is not stored, and kept is false.
+// retainSetupModArtifact stores the bytes of one installed package: the earlier setup's payload
+// when the files are unchanged since, else its cached registry archive when that replays to
+// exactly the installed files, else an archive of the installed files. For a light setup a
+// package its registry archive reproduces is not stored, and kept is false.
 func (a *setupArtifacts) retainSetupModArtifact(
 	ctx context.Context, blobs *setupblob.Store, inst *store.Instance, mod *SetupMod, staging string, index int,
 	light bool,
@@ -170,6 +179,9 @@ func (a *setupArtifacts) retainSetupModArtifact(
 		return store.SetupArtifactRef{}, false, fmt.Errorf("encode %s file manifest: %w", mod.FullName, err)
 	}
 	mod.FileManifest = string(raw)
+	if ref, ok := a.reusable(mod, light); ok {
+		return ref, true, nil
+	}
 	archive := ""
 	kind := "files"
 	if cacheMatches {
@@ -201,6 +213,20 @@ func (a *setupArtifacts) retainSetupModArtifact(
 		FullName: mod.FullName, Source: mod.Source, Version: mod.Version,
 		Kind: kind, SHA256: digest,
 	}, true, nil
+}
+
+// reusable returns the payload the earlier setup kept of mod when mod's freshly hashed files
+// match those it captured and that payload still verifies. A light capture never reuses one.
+func (a *setupArtifacts) reusable(mod *SetupMod, light bool) (store.SetupArtifactRef, bool) {
+	prev, found := a.Earlier[mod.FullName]
+	if light || !found || prev.ref == nil || prev.mod.Source != mod.Source ||
+		prev.mod.Version != mod.Version || prev.mod.FileManifest != mod.FileManifest {
+		return store.SetupArtifactRef{}, false
+	}
+	if _, err := setupblob.New(a.DataRoot).Verify(prev.ref.SHA256); err != nil {
+		return store.SetupArtifactRef{}, false
+	}
+	return *prev.ref, true
 }
 
 func captureSetupModEntries(inst *store.Instance, mod *SetupMod, entries []installer.ManifestEntry) (bool, error) {

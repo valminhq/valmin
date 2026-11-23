@@ -456,6 +456,61 @@ func TestSetupSavePinsAReproducibleCachedArchive(t *testing.T) {
 	}
 }
 
+// TestSetupSaveReusesTheNewestSetupsPackages asserts a save keeps the newest setup's payload for
+// a package whose files are unchanged, without the cached archive, and captures afresh once the
+// files change or that payload no longer verifies.
+func TestSetupSaveReusesTheNewestSetupsPackages(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	setupTestMod(t, db, dataDir, "Ns-One", source.Thunderstore,
+		"1.0.0", "one", false, true, false, "unknown")
+	archive := filepath.Join(rt.instances.Cfg.Data.Root, "cache", "thunderstore", "Ns-One-1.0.0.zip")
+	if err := os.MkdirAll(filepath.Dir(archive), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archive, modZip(t, map[string]string{"plugins/Ns-One.dll": "one"}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ref := func(name string) store.SetupArtifactRef {
+		t.Helper()
+		saved := setupTestSave(t, rt, db, admin, name)
+		_, refs, err := db.SetupByID(t.Context(), "inst-a", saved.ID)
+		if err != nil || len(refs) != 1 {
+			t.Fatalf("refs of %s = %+v: %v", name, refs, err)
+		}
+		return refs[0]
+	}
+
+	first := ref("first")
+	if first.Kind != "zip" {
+		t.Fatalf("first payload kind = %q, want zip", first.Kind)
+	}
+	if err := os.Remove(archive); err != nil {
+		t.Fatal(err)
+	}
+	if second := ref("unchanged"); second != first {
+		t.Errorf("payload of an unchanged package = %+v, want the newest setup's %+v", second, first)
+	}
+
+	blob := filepath.Join(setupblob.Dir(rt.instances.Cfg.Data.Root), first.SHA256)
+	if err := os.Chmod(blob, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(blob, []byte("damaged"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if third := ref("damaged"); third.SHA256 == first.SHA256 || third.Kind != "files" {
+		t.Errorf("payload after the kept one was damaged = %+v, want a fresh files payload", third)
+	}
+
+	writeServerFile(t, dataDir, "BepInEx/plugins/Ns-One.dll", "one edited")
+	before := ref("before edit")
+	writeServerFile(t, dataDir, "BepInEx/plugins/Ns-One.dll", "one edited again")
+	if edited := ref("edited"); edited.SHA256 == before.SHA256 {
+		t.Errorf("payload after the files changed = %+v, want a fresh capture", edited)
+	}
+}
+
 func TestSetupRestoreRollsBackAfterFileWriteFailure(t *testing.T) {
 	t.Parallel()
 	rt, db, admin, _, dataDir := setupTestWorld(t)
