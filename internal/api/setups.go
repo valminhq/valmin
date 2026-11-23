@@ -76,8 +76,11 @@ type setupDetailView struct {
 	// ConfigsTruncated reports that the config tree held files past the listing limits, which
 	// the setup left out.
 	ConfigsTruncated bool `json:"configs_truncated"`
-	// Automatic marks a setup the panel saved before a restore or a mod update.
+	// Automatic marks a setup the panel saved before a restore or a mod change.
 	Automatic bool `json:"automatic"`
+	// WorldPending marks a setup waiting to be linked to the world backup the next mod change
+	// takes, if its mods are still the server's then.
+	WorldPending bool `json:"world_pending"`
 	// Light marks a setup that keeps only the packages their registry archives cannot
 	// reproduce, and downloads the rest on restore.
 	Light bool `json:"light"`
@@ -275,7 +278,8 @@ func (h *Instances) setupDetail(
 		Instance: snap.Instance, Mods: setupModsView(snap.Mods),
 		Configs:    savedConfigViews(setupblob.New(h.Cfg.Data.Root), snap),
 		ConfigTree: snap.ConfigTree, ConfigsTruncated: snap.ConfigsTruncated, Automatic: row.Automatic,
-		Light: snap.Light,
+		WorldPending: row.WorldPending,
+		Light:        snap.Light,
 	}
 	if row.BackupID == "" {
 		return view, nil

@@ -31,13 +31,17 @@ export interface SavedSetup {
 	/** Keeps only the packages their registry archives cannot reproduce; the rest are
 	 * downloaded on restore. */
 	light: boolean;
+	/** Waiting to be linked to the world backup the next mod change takes, if its mods are
+	 * still the server's then. */
+	world_pending: boolean;
 }
 
-/** How a setup is saved: which world backup to link, or to take one now, and whether to keep
- * every package. */
+/** How a setup is saved: which world backup to link, to take one now, or to wait for the one
+ * the next mod change takes, and whether to keep every package. */
 export interface SetupSaveOptions {
 	worldBackupId?: string;
 	backUpWorld?: boolean;
+	linkNextWorld?: boolean;
 	light?: boolean;
 }
 
@@ -84,6 +88,7 @@ export const setups = {
 			name,
 			...(options.worldBackupId ? { world_backup_id: options.worldBackupId } : {}),
 			...(options.backUpWorld ? { back_up_world: true } : {}),
+			...(options.linkNextWorld ? { link_next_world_backup: true } : {}),
 			...(options.light ? { light: true } : {})
 		}),
 	get: (instanceId: string, setupId: string) => api.get<SetupDetail>(path(instanceId, setupId)),

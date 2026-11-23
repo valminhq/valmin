@@ -438,7 +438,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/backups/{bid}/restore`   | Restore into a stopped server; returns a job.                         |
 | `POST`   | `/instances/{id}/backups/{bid}/acknowledge` | Clear the archive's world check findings; needs `backups.restore`.  |
 | `GET`    | `/instances/{id}/setups`                  | Saved setups for the server.                                          |
-| `POST`   | `/instances/{id}/setups`                  | Save a setup from a stopped server; returns a job.                    |
+| `POST`   | `/instances/{id}/setups`                  | Save a setup from a stopped or running server; returns a job.         |
 | `GET`    | `/instances/{id}/setups/{sid}`            | One saved setup and its linked world backup.                          |
 | `GET`    | `/instances/{id}/setups/{sid}/configs/{file}` | The saved text of one config file of the setup.                   |
 | `GET`    | `/instances/{id}/setups/{sid}/preview`    | Compare and validate a restore; returns an `etag`.                    |
@@ -931,7 +931,8 @@ to the preview and import routes. Each problem has `source`, `path` and `detail`
 ### Saved setups
 
 Saved setup routes require an administrator. Send `{"name":"Working before update"}`
-to `POST /instances/{id}/setups` while the server is stopped. Add
+to `POST /instances/{id}/setups` while the server is stopped or running; any other state is
+`409 invalid_state` with `allowed_states`. Add
 `"world_backup_id":"BACKUP_ID"` to link a consistent backup from the same server, and
 `"light":true` to keep only the packages whose installed files differ from their cached
 registry archive or whose registry is disabled. `"back_up_world":true` takes a consistent
@@ -940,7 +941,13 @@ backup, and links it. A backup that fails its check, or a data root below its fr
 fails the save job and publishes nothing. It needs `backups.create` and cannot be combined with
 `world_backup_id`, which is `422 validation_failed`. A server whose selected world has no
 `.db` or `.fwl` yet gets no backup; a failed check carries the error code
-`backup_unverifiable`, as a manual backup's does. A setup's `world_backup` includes the archive's `size_bytes`.
+`backup_unverifiable`, as a manual backup's does. `back_up_world` on a running server is `422`.
+`"link_next_world_backup":true` saves the setup with `world_pending` set instead: the next
+`pre_update` backup a mod update or setup restore takes is linked to it. Any other change to the
+installed mods before then (a package added or removed, or its registry, version or enabled state
+changed, even back again) clears `world_pending`, and the setup keeps no backup. It cannot be combined with `world_backup_id` or
+`back_up_world` (`422`). A setup's `world_backup` includes the archive's `size_bytes`.
+A save of a running server fails if a mod or config file changes while it is read.
 The save job publishes the setup only after it captures every required package.
 Names can repeat; use the setup ID to identify one.
 
@@ -951,7 +958,8 @@ Config bytes are stored once per content and shared between setups. It retains p
 payloads for offline restore. Game build and world name are comparison-only. The server
 password, selected world, and world files are not restored.
 
-Each setup has `created_by`, `config_tree`, `configs_truncated`, `automatic` and `light`.
+Each setup has `created_by`, `config_tree`, `configs_truncated`, `automatic`, `light` and
+`world_pending`.
 `created_by` is the username of whoever saved the setup or made the change an automatic one
 comes before, `null` for the panel's own change or a deleted account. `config_tree` is
 `false` for a setup saved before setups held the whole config tree: it holds only the `.cfg`

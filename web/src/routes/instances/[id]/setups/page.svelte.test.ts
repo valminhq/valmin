@@ -59,7 +59,8 @@ const saved: SetupDetail = {
 	config_tree: true,
 	configs_truncated: false,
 	automatic: false,
-	light: false
+	light: false,
+	world_pending: false
 };
 
 function preview(overrides: Partial<SetupPreview> = {}): SetupPreview {
@@ -144,11 +145,9 @@ describe('Saved setups', () => {
 		daemon.on('POST', '/instances/inst-a/setups', () => Response.json(job()));
 		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
 		await open();
-		const selector = screen.getByLabelText(
-			'Associated world backup (optional)'
-		) as HTMLSelectElement;
-		await vi.waitFor(() => expect(selector.options).toHaveLength(2));
-		expect([...selector.options].map((option) => option.value)).toEqual(['', 'bk-1']);
+		const selector = screen.getByLabelText('Associated world backup') as HTMLSelectElement;
+		await vi.waitFor(() => expect(selector.options).toHaveLength(3));
+		expect([...selector.options].map((option) => option.value)).toEqual(['next', '', 'bk-1']);
 		expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Working before update');
 		await fireEvent.change(selector, { target: { value: 'bk-1' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Save setup' }));
@@ -167,10 +166,8 @@ describe('Saved setups', () => {
 		daemon.on('POST', '/instances/inst-a/setups', () => Response.json(job()));
 		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
 		await open();
-		const selector = screen.getByLabelText(
-			'Associated world backup (optional)'
-		) as HTMLSelectElement;
-		await vi.waitFor(() => expect(selector.options).toHaveLength(3));
+		const selector = screen.getByLabelText('Associated world backup') as HTMLSelectElement;
+		await vi.waitFor(() => expect(selector.options).toHaveLength(4));
 		await fireEvent.change(selector, { target: { value: 'now' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Save setup' }));
 		await vi.waitFor(() =>
@@ -198,8 +195,39 @@ describe('Saved setups', () => {
 		);
 		expect(daemon.requests('POST', '/instances/inst-a/setups')[0].body).toEqual({
 			name: 'Working before update',
+			link_next_world_backup: true,
 			light: true
 		});
+	});
+
+	it('saves while running, waiting for the next update to link a world backup', async () => {
+		session.permissions = permissions('inst-a', [actions.setupsManage, actions.backupsCreate]);
+		serve({ state: 'running' });
+		daemon.on('POST', '/instances/inst-a/setups', () => Response.json(job()));
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
+		await open();
+		const selector = screen.getByLabelText('Associated world backup') as HTMLSelectElement;
+		await vi.waitFor(() => expect(selector.options).toHaveLength(3));
+		expect([...selector.options].map((option) => option.value)).not.toContain('now');
+		await fireEvent.click(screen.getByRole('button', { name: 'Save setup' }));
+		await vi.waitFor(() =>
+			expect(daemon.requests('POST', '/instances/inst-a/setups')).toHaveLength(1)
+		);
+		expect(daemon.requests('POST', '/instances/inst-a/setups')[0].body).toEqual({
+			name: 'Working before update',
+			link_next_world_backup: true
+		});
+	});
+
+	it('says a setup waits for the next update to link a world backup', async () => {
+		serve();
+		daemon.on('GET', '/instances/inst-a/setups', () =>
+			Response.json({ items: [{ ...saved, world_backup: null, world_pending: true }] })
+		);
+		await open();
+		expect(card('Saved for this server').textContent).toContain(
+			'World backup: from the next mod update, if the mods are still the same'
+		);
 	});
 
 	it('saves what mod changes save first from the two switches', async () => {
@@ -311,10 +339,9 @@ describe('Saved setups', () => {
 		expect(within(details).getByText(/a: 2/)).toBeTruthy();
 	});
 
-	it('keeps save and restore unavailable while the server is running', async () => {
+	it('keeps restore unavailable while the server is running', async () => {
 		serve({ state: 'running' });
 		await open();
-		expect(screen.getByRole('button', { name: 'Save setup' }).hasAttribute('disabled')).toBe(true);
 		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
 		await screen.findByRole('heading', { name: 'Restore preview' });
 		expect(screen.getByRole('button', { name: 'Restore setup' }).hasAttribute('disabled')).toBe(

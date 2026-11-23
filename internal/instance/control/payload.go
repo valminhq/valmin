@@ -51,6 +51,8 @@ type (
 		// BackUpWorld takes a world backup during the save, to the archive ArchivePlan names,
 		// and links it to the setup.
 		BackUpWorld bool `json:"back_up_world,omitempty"`
+		// LinkNextWorld saves the setup waiting for the world backup the next mod change takes.
+		LinkNextWorld bool `json:"link_next_world_backup,omitempty"`
 		ArchivePlan
 	}
 	ConfigApplyPayload struct {

@@ -29,6 +29,9 @@ type SavedSetup struct {
 	Automatic bool `json:"automatic"`
 	// ConfigsTruncated reports that the config tree held files past the listing limits.
 	ConfigsTruncated bool `json:"configs_truncated"`
+	// WorldPending marks a setup waiting to be linked to the world backup the next mod change
+	// takes, if its mods are still the server's then.
+	WorldPending bool `json:"world_pending"`
 	// Configs are the config files the setup holds. SetupByID and TxSaveSetup fill and read
 	// them; ListSetups leaves them empty.
 	Configs []SetupConfigRef `json:"-"`
@@ -86,11 +89,11 @@ func TxSaveSetup(ctx context.Context, tx *sql.Tx, setup *SavedSetup, artifacts [
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO saved_setups (
 			id, instance_id, name, created_by, game_build_id, world_name,
-			snapshot_json, backup_id, created_at, automatic, configs_truncated
-		) VALUES (?, ?, ?, (SELECT id FROM users WHERE id = ?), ?, ?, ?, ?, ?, ?, ?)`,
+			snapshot_json, backup_id, created_at, automatic, configs_truncated, world_pending
+		) VALUES (?, ?, ?, (SELECT id FROM users WHERE id = ?), ?, ?, ?, ?, ?, ?, ?, ?)`,
 		setup.ID, setup.InstanceID, setup.Name, createdBy, setup.GameBuildID,
 		setup.WorldName, setup.SnapshotJSON, backupID, FormatTime(setup.CreatedAt),
-		setup.Automatic, setup.ConfigsTruncated); err != nil {
+		setup.Automatic, setup.ConfigsTruncated, setup.WorldPending); err != nil {
 		return fmt.Errorf("insert saved setup %s: %w", setup.ID, err)
 	}
 	for _, c := range setup.Configs {
@@ -155,7 +158,7 @@ func checkSetupBackup(ctx context.Context, tx *sql.Tx, setup *SavedSetup) error 
 }
 
 const savedSetupColumns = `id, instance_id, name, created_by, game_build_id,
-	world_name, snapshot_json, backup_id, created_at, automatic, configs_truncated,
+	world_name, snapshot_json, backup_id, created_at, automatic, configs_truncated, world_pending,
 	(SELECT username FROM users WHERE users.id = saved_setups.created_by)`
 
 func scanSavedSetup(row scanner) (SavedSetup, error) {
@@ -164,7 +167,7 @@ func scanSavedSetup(row scanner) (SavedSetup, error) {
 	var createdAt string
 	if err := row.Scan(&s.ID, &s.InstanceID, &s.Name, &createdBy,
 		&s.GameBuildID, &s.WorldName, &s.SnapshotJSON, &backupID, &createdAt,
-		&s.Automatic, &s.ConfigsTruncated, &createdByName); err != nil {
+		&s.Automatic, &s.ConfigsTruncated, &s.WorldPending, &createdByName); err != nil {
 		return SavedSetup{}, fmt.Errorf("scan saved setup: %w", err)
 	}
 	s.CreatedBy, s.CreatedByName = createdBy.String, createdByName.String
@@ -234,6 +237,83 @@ func (db *DB) SetupByID(ctx context.Context, instanceID, id string) (*SavedSetup
 		return nil, nil, err
 	}
 	return &s, artifacts, nil
+}
+
+// PendingSetups returns the instance's setups waiting for a world backup, newest first.
+func (db *DB) PendingSetups(ctx context.Context, instanceID string) ([]SavedSetup, error) {
+	rows, err := db.Reader.QueryContext(ctx, `SELECT `+savedSetupColumns+`
+		FROM saved_setups WHERE instance_id = ? AND world_pending
+		ORDER BY created_at DESC, id DESC`, instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("list setups of %s waiting for a world backup: %w", instanceID, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var setups []SavedSetup
+	for rows.Next() {
+		s, err := scanSavedSetup(rows)
+		if err != nil {
+			return nil, err
+		}
+		setups = append(setups, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list setups of %s waiting for a world backup: %w", instanceID, err)
+	}
+	return setups, nil
+}
+
+// TxLinkPendingSetups links backupID to the setups of the instance named in ids, which were
+// waiting for a world backup when it was taken. A setup waits only while the instance's mods are
+// the ones it holds: any change to them ends the wait.
+func TxLinkPendingSetups(ctx context.Context, tx *sql.Tx, instanceID, backupID string, ids []string) error {
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx, `UPDATE saved_setups SET backup_id = ?, world_pending = FALSE
+			WHERE instance_id = ? AND id = ? AND backup_id IS NULL`, backupID, instanceID, id); err != nil {
+			return fmt.Errorf("link world backup %s to setup %s: %w", backupID, id, err)
+		}
+	}
+	return nil
+}
+
+// TxKeepingSetupsWaiting runs fn, which rewrites the instance's mod rows without changing them,
+// and leaves the setups that were waiting for a world backup waiting.
+func TxKeepingSetupsWaiting(ctx context.Context, tx *sql.Tx, instanceID string, fn func() error) error {
+	ids, err := txPendingSetupIDs(ctx, tx, instanceID)
+	if err != nil {
+		return err
+	}
+	if err := fn(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx, `UPDATE saved_setups SET world_pending = TRUE
+			WHERE instance_id = ? AND id = ?`, instanceID, id); err != nil {
+			return fmt.Errorf("keep setup %s waiting for a world backup: %w", id, err)
+		}
+	}
+	return nil
+}
+
+// txPendingSetupIDs returns the IDs of the instance's setups waiting for a world backup.
+func txPendingSetupIDs(ctx context.Context, tx *sql.Tx, instanceID string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx,
+		`SELECT id FROM saved_setups WHERE instance_id = ? AND world_pending`, instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("list setups of %s waiting for a world backup: %w", instanceID, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan a setup waiting for a world backup: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list setups of %s waiting for a world backup: %w", instanceID, err)
+	}
+	return ids, nil
 }
 
 // NewestSetup returns the instance's most recently saved setup as SetupByID does, nil when it
