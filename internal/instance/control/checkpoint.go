@@ -48,17 +48,42 @@ func (s *SetupJobs) Checkpoint(
 	if err != nil {
 		return nil, err
 	}
-	var record func(context.Context, *sql.Tx) error
+	var record, link func(context.Context, *sql.Tx) error
 	setup := automaticSetup{name: name, createdBy: requestedBy, staging: scratch, before: "update"}
 	if world == nil {
 		jh.Log("no world archive was taken: this server has no world yet")
 	} else {
 		record, setup.worldID = recordSnapshot(world), world.ID
+		link = s.linkPending(ctx, jh, inst, world.ID)
 	}
 	if inst.SetupBeforeUpdate != string(SetupBeforeUpdateOff) {
 		jh.Progress(ctx, 66, "saving the current setup")
 	}
-	return joinFinish(record, s.saveVersion(ctx, jh, inst, &setup)), nil
+	return joinFinish(record, link, s.saveVersion(ctx, jh, inst, &setup)), nil
+}
+
+// linkPending returns the finish step that links the world backup worldID, being taken before
+// inst's mods change, to each of inst's setups waiting for one, naming them on jh; nil when none
+// waits.
+func (s *SetupJobs) linkPending(
+	ctx context.Context, jh *jobs.Handle, inst *store.Instance, worldID string,
+) func(context.Context, *sql.Tx) error {
+	pending, err := s.DB.PendingSetups(ctx, inst.ID)
+	if err != nil {
+		jh.Log(fmt.Sprintf("warning: setups waiting for a world backup were not linked: %v", err))
+		return nil
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(pending))
+	for i := range pending {
+		ids = append(ids, pending[i].ID)
+		jh.Log(fmt.Sprintf("setup %q is linked to this world backup", pending[i].Name))
+	}
+	return func(ctx context.Context, tx *sql.Tx) error {
+		return store.TxLinkPendingSetups(ctx, tx, inst.ID, worldID, ids)
+	}
 }
 
 // SaveVersion saves inst's current setup as an automatic setup named name, recorded as caused by

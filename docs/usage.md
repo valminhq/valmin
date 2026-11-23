@@ -1178,11 +1178,23 @@ kept on the same panel so you can go back after a change goes wrong.
 Mod installs, removals and updates save one on their own unless turned off; see
 [Undo a mod update](#undo-a-mod-update).
 
-Stop the server, then open **Saved setups**. The name field starts as **Working before
-update**; change it if needed, then choose **Save setup**. Under **Associated world backup**,
-link one consistent world backup from this server, or choose **Back up the world now** to take
-a backup during the save and link it. A linked backup stays outside retention and cannot
-be deleted while a setup links to it; **Backups** marks it **Kept for setup**.
+Open **Saved setups**, on a running or stopped server. The name field starts as **Working
+before update**; change it if needed, then choose **Save setup**. Under **Associated world
+backup**, choose one of:
+
+- **The backup the next mod update takes**, the default. The world backup the next mod update
+  or setup restore takes is linked to the setup, as long as the mods are still the ones the
+  setup holds: it is the world just before that change, with those mods installed. Installing
+  a new mod, removing one, or disabling and enabling one before then leaves the setup without
+  a backup, since none of them backs up the world. The setup says it is waiting until then.
+- **Back up the world now**, on a stopped server, to take a backup during the save and link it.
+- **None**, or one consistent world backup from this server.
+
+A linked backup stays outside retention and cannot be deleted while a setup links to it;
+**Backups** marks it **Kept for setup**. Saving a running server reads its config files as they
+are at that moment. If a mod rewrites one while the setup is saved, the save fails and asks
+you to save again. The server is busy while the setup is saved, so a scheduled restart or
+backup that falls in that time is skipped.
 
 A setup keeps launch and backup settings, Valmin-managed mods with their exact
 registries, versions, locks, enabled states, and client labels, plus every configuration

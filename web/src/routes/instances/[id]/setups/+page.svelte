@@ -28,9 +28,13 @@
 	const canBackUp = $derived(session.allowed(id).includes(actions.backupsCreate));
 	/** The world backup choice that takes a backup during the save. */
 	const backUpNow = 'now';
+	/** The world backup choice that waits for the one the next mod update takes. */
+	const linkNext = 'next';
 
 	let instance = $state<Instance | null>(null);
 	const stopped = $derived(instance?.state === 'stopped');
+	/** A setup saves from a stopped or a running server. */
+	const canSave = $derived(stopped || instance?.state === 'running');
 	let list = $state<SavedSetup[]>([]);
 	let loading = $state(true);
 	let failure = $state<unknown>(null);
@@ -40,7 +44,7 @@
 	let backupCursor = $state<string | null>(null);
 	let loadingBackups = $state(false);
 	let name = $state('Working before update');
-	let worldBackupId = $state('');
+	let worldBackupId = $state(linkNext);
 	let keepPackages = $state(true);
 	let selectedId = $state('');
 	let preview = $state<SetupPreview | null>(null);
@@ -152,13 +156,20 @@
 		}
 	}
 
+	/** The world backup choice to send: taking one now needs a stopped server, so a running one
+	 * waits for the next mod update's instead. */
+	const worldChoice = $derived(worldBackupId === backUpNow && !stopped ? linkNext : worldBackupId);
+
 	function save() {
 		const value = name.trim();
-		if (!value || !stopped || jobRunning) return;
+		if (!value || !canSave || jobRunning) return;
+		const choice = worldChoice;
 		void run('save', '', () =>
 			setups.save(id, value, {
-				worldBackupId: worldBackupId === backUpNow ? undefined : worldBackupId || undefined,
-				backUpWorld: worldBackupId === backUpNow,
+				worldBackupId:
+					choice === backUpNow || choice === linkNext ? undefined : choice || undefined,
+				backUpWorld: choice === backUpNow,
+				linkNextWorld: choice === linkNext,
 				light: !keepPackages
 			})
 		);
@@ -212,8 +223,8 @@
 					<Card.Title>Save current setup</Card.Title>
 					<Card.Description>
 						Captures launch and backup settings, managed mods, and every file in the configuration
-						editor except the console password file. The server must be stopped. Credentials and
-						world files are not included.
+						editor except the console password file. The server may be running or stopped.
+						Credentials and world files are not included.
 					</Card.Description>
 				</Card.Header>
 				<Card.Content class="grid gap-4">
@@ -222,20 +233,23 @@
 						<Input id="setup-name" bind:value={name} required />
 					</div>
 					<div class="grid max-w-lg gap-2">
-						<Label for="setup-backup">Associated world backup (optional)</Label>
+						<Label for="setup-backup">Associated world backup</Label>
 						<NativeSelect id="setup-backup" bind:value={worldBackupId}>
-							<option value="">None</option>
-							{#if canBackUp}
+							<option value={linkNext}>The backup the next mod update takes</option>
+							{#if canBackUp && stopped}
 								<option value={backUpNow}>Back up the world now</option>
 							{/if}
+							<option value="">None</option>
 							{#each linkedBackups as backup (backup.id)}
 								<option value={backup.id}>{when(backup.created_at)} · {backup.world_name}</option>
 							{/each}
 						</NativeSelect>
 						<p class="text-xs text-muted-foreground">
-							Only consistent backups from this server can be linked. A linked backup is kept until
-							the setup is deleted, outside the backup retention counts, so each one adds to disk
-							use. Linking does not restore the world.
+							{worldChoice === linkNext
+								? 'The world backup the next mod update takes is linked, if the mods are still the same then. Installing a new mod, removing one or disabling one before then leaves the setup without one.'
+								: 'Only consistent backups from this server can be linked.'}
+							A linked backup is kept until the setup is deleted, outside the backup retention counts,
+							so each one adds to disk use. Linking does not restore the world.
 						</p>
 						<Problem error={backupFailure} />
 						{#if backupCursor}
@@ -260,11 +274,13 @@
 						</p>
 					</div>
 					<div class="grid justify-items-start gap-2">
-						<Button disabled={!stopped || jobRunning || !name.trim()} onclick={save}
+						<Button disabled={!canSave || jobRunning || !name.trim()} onclick={save}
 							>Save setup</Button
 						>
-						{#if !stopped}
-							<p class="text-sm text-muted-foreground">Stop this server to save a setup.</p>
+						{#if !canSave}
+							<p class="text-sm text-muted-foreground">
+								Wait for this server to finish starting or stopping to save a setup.
+							</p>
 						{/if}
 					</div>
 				</Card.Content>
@@ -306,6 +322,11 @@
 											<span class="text-sm text-muted-foreground">
 												Some config files are not included: larger than 1 MiB, more than 8 folders
 												deep, or past the first 5,000.
+											</span>
+										{/if}
+										{#if setup.world_pending}
+											<span class="text-sm">
+												World backup: from the next mod update, if the mods are still the same
 											</span>
 										{/if}
 										{#if setup.world_backup}

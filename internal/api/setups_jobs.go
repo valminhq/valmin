@@ -27,8 +27,11 @@ type setupSaveRequest struct {
 	// Light keeps only the packages their registry archives cannot reproduce.
 	Light bool `json:"light,omitempty"`
 	// BackUpWorld takes a world backup during the save and links it, in place of
-	// WorldBackupID.
+	// WorldBackupID. The server must be stopped.
 	BackUpWorld bool `json:"back_up_world,omitempty"`
+	// LinkNextWorldBackup saves the setup waiting for the world backup the next mod change
+	// takes, in place of the other two.
+	LinkNextWorldBackup bool `json:"link_next_world_backup,omitempty"`
 }
 
 func (h *Instances) setupStopped(w http.ResponseWriter, r *http.Request, inst *store.Instance) bool {
@@ -48,6 +51,17 @@ func (h *Instances) setupStopped(w http.ResponseWriter, r *http.Request, inst *s
 		return false
 	}
 	return true
+}
+
+// setupSettled checks a setup save can read inst: stopped, or running with no operation open.
+func (h *Instances) setupSettled(w http.ResponseWriter, r *http.Request, inst *store.Instance) bool {
+	if !checkInstanceState(w, r, inst, jobs.KindSetupSave) {
+		return false
+	}
+	if instance.State(inst.State) == instance.StateRunning {
+		return operationSettled(w, r, h.DB, inst.ID)
+	}
+	return h.setupStopped(w, r, inst)
 }
 
 func (h *Instances) setupStaging() (string, error) {
@@ -77,7 +91,7 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	inst, ok := h.setupInstance(w, r)
-	if !ok || !h.setupStopped(w, r, inst) {
+	if !ok || !h.setupSettled(w, r, inst) {
 		return
 	}
 	var req setupSaveRequest
@@ -85,7 +99,7 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, err)
 		return
 	}
-	if err := h.checkSetupSave(r.Context(), u, inst.ID, &req); err != nil {
+	if err := h.checkSetupSave(r.Context(), u, inst, &req); err != nil {
 		apierr.Write(w, r, err)
 		return
 	}
@@ -103,7 +117,7 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 	}()
 	payload := control.SetupJobPayload{
 		SetupID: store.NewID(), StagingDir: staging, Name: req.Name, BackupID: req.WorldBackupID,
-		Light: req.Light, BackUpWorld: req.BackUpWorld,
+		Light: req.Light, BackUpWorld: req.BackUpWorld, LinkNextWorld: req.LinkNextWorldBackup,
 	}
 	if req.BackUpWorld {
 		archiveID := store.NewID()
@@ -122,14 +136,15 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 			id,
 			"instances.setups.save",
 			map[string]any{
-				"setup_id":        payload.SetupID,
-				setupNameField:    req.Name,
-				"world_backup_id": req.WorldBackupID,
-				"light":           req.Light,
-				"back_up_world":   req.BackUpWorld,
+				"setup_id":               payload.SetupID,
+				setupNameField:           req.Name,
+				"world_backup_id":        req.WorldBackupID,
+				"light":                  req.Light,
+				"back_up_world":          req.BackUpWorld,
+				"link_next_world_backup": req.LinkNextWorldBackup,
 			},
 		),
-		OnClaim: control.SetupStoppedClaim(id),
+		OnClaim: control.SetupClaim(id, instance.State(inst.State)),
 	}, h.ctl.SetupJobs.RunSave(inst, &payload, u.ID))
 	if err != nil {
 		writeJobSubmitError(w, r, err)
@@ -140,18 +155,28 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 }
 
 // checkSetupSave trims req's name and checks the request: a name of the right length, at most
-// one way to link a world backup, the backup permission for taking one, and a linkable backup.
-func (h *Instances) checkSetupSave(ctx context.Context, u *store.User, instanceID string, req *setupSaveRequest) error {
+// one way to link a world backup, a stopped server and the backup permission for taking one, and
+// a linkable backup.
+func (h *Instances) checkSetupSave(
+	ctx context.Context,
+	u *store.User,
+	inst *store.Instance,
+	req *setupSaveRequest,
+) error {
 	req.Name = strings.TrimSpace(req.Name)
 	switch {
 	case req.Name == "" || len(req.Name) > control.MaxSetupNameBytes:
 		return apierr.New(errcode.ValidationFailed).With("field", setupNameField)
+	case req.LinkNextWorldBackup && (req.BackUpWorld || req.WorldBackupID != ""):
+		return apierr.New(errcode.ValidationFailed).With("field", "link_next_world_backup")
 	case req.BackUpWorld && req.WorldBackupID != "":
 		return apierr.New(errcode.ValidationFailed).With("field", "back_up_world")
-	case req.BackUpWorld && !h.Authz.Can(ctx, u, authz.BackupsCreate, instanceID):
+	case req.BackUpWorld && inst.State != string(instance.StateStopped):
+		return apierr.New(errcode.ValidationFailed).With("field", "back_up_world")
+	case req.BackUpWorld && !h.Authz.Can(ctx, u, authz.BackupsCreate, inst.ID):
 		return apierr.New(errcode.Forbidden)
 	case req.WorldBackupID != "":
-		return h.validateSetupBackup(ctx, instanceID, req.WorldBackupID)
+		return h.validateSetupBackup(ctx, inst.ID, req.WorldBackupID)
 	}
 	return nil
 }
@@ -167,7 +192,7 @@ func (h *Instances) validateSetupBackup(ctx context.Context, instanceID, backupI
 	if !b.Consistent {
 		return apierr.New(errcode.ValidationFailed).With("field", "world_backup_id")
 	}
-	if _, err := os.Stat(b.Path); err != nil {
+	if _, err := os.Stat(b.Path); err != nil { //nolint:gosec // the path is the backup catalogue's own
 		return apierr.New(errcode.ValidationFailed).With("field", "world_backup_id").Wrap(err)
 	}
 	return nil
@@ -232,7 +257,7 @@ func (h *Instances) restoreSetup(w http.ResponseWriter, r *http.Request) {
 		Payload: payload,
 		Audit: jobAudit(r.Context(), u.ID, id, "instances.setups.restore",
 			map[string]any{"setup_id": row.ID, setupNameField: row.Name}),
-		OnClaim: control.SetupStoppedClaim(id),
+		OnClaim: control.SetupClaim(id, instance.StateStopped),
 	}, h.ctl.SetupJobs.RunRestore(inst, row, refs, &payload, u.ID))
 	if err != nil {
 		writeJobSubmitError(w, r, err)

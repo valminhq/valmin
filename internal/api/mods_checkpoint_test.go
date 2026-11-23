@@ -232,3 +232,107 @@ func TestInstallsThatCreateAServerSaveNoSetup(t *testing.T) {
 		t.Errorf("automatic setups = %+v, want none", setups)
 	}
 }
+
+// savePending saves a setup of inst-a that waits for the next mod change's world backup and
+// returns its ID.
+func savePending(t *testing.T, rt *Server, db *store.DB, admin *store.User, name string) string {
+	t.Helper()
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL,
+		jsonBody(t, map[string]any{"name": name, "link_next_world_backup": true})))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("save = %d %s, want 202", rec.Code, rec.Body)
+	}
+	var accepted jobView
+	decodeInto(t, rec, &accepted)
+	if job := waitJob(t, rt, admin, accepted.JobID); job.Status != "succeeded" {
+		t.Fatalf("save job = %+v, want succeeded", job)
+	}
+	rows, err := db.ListSetups(t.Context(), "inst-a")
+	if err != nil || len(rows) == 0 || !rows[0].WorldPending {
+		t.Fatalf("newest setup = %+v, %v, want one waiting for a world backup", rows, err)
+	}
+	return rows[0].ID
+}
+
+// setupRow reads one setup of inst-a.
+func setupRow(t *testing.T, db *store.DB, id string) *store.SavedSetup {
+	t.Helper()
+	row, _, err := db.SetupByID(t.Context(), "inst-a", id)
+	if err != nil || row == nil {
+		t.Fatalf("setup %s = %+v, %v", id, row, err)
+	}
+	return row
+}
+
+// TestAWaitingSetupGetsTheNextUpdatesWorldBackup asserts a setup saved to wait for a world backup
+// is linked to the one the next update takes while the mods are still its own, and stops waiting
+// without one once they change first, even back to the same set, or change without a world to
+// back up.
+func TestAWaitingSetupGetsTheNextUpdatesWorldBackup(t *testing.T) {
+	t.Parallel()
+	t.Run("mods unchanged", func(t *testing.T) {
+		t.Parallel()
+		rt, db, admin, _, dataDir := installWorld(t, twoVersions()...)
+		alreadyModded(t, db)
+		installOK(t, rt, admin, "Ns-Only", "1.0.0")
+		giveWorld(t, dataDir)
+		id := savePending(t, rt, db, admin, "known good")
+
+		installOK(t, rt, admin, "Ns-Only", "2.0.0")
+
+		backups := preUpdateBackupIDs(t, db)
+		if row := setupRow(t, db, id); len(backups) != 1 || row.BackupID != backups[0] || row.WorldPending {
+			t.Errorf("setup linked to %q, waiting %v, want %v and done", row.BackupID, row.WorldPending, backups)
+		}
+	})
+	t.Run("mods changed in between", func(t *testing.T) {
+		t.Parallel()
+		rt, db, admin, _, dataDir := installWorld(t, twoVersions()...)
+		alreadyModded(t, db)
+		installOK(t, rt, admin, "Ns-Only", "2.0.0")
+		giveWorld(t, dataDir)
+		id := savePending(t, rt, db, admin, "on 2.0.0")
+		rec := deleteMod(t, rt, admin, "Ns-Only", "")
+		var accepted jobView
+		decodeInto(t, rec, &accepted)
+		if job := waitJob(t, rt, admin, accepted.JobID); job.Status != "succeeded" {
+			t.Fatalf("uninstall job = %+v, want succeeded", job)
+		}
+		installOK(t, rt, admin, "Ns-Only", "1.0.0")
+
+		installOK(t, rt, admin, "Ns-Only", "2.0.0")
+
+		if row := setupRow(t, db, id); row.BackupID != "" || row.WorldPending {
+			t.Errorf("setup linked to %q, waiting %v, want neither", row.BackupID, row.WorldPending)
+		}
+	})
+	t.Run("mods changed and changed back", func(t *testing.T) {
+		t.Parallel()
+		rt, db, admin, _, dataDir := installWorld(t, twoVersions()...)
+		alreadyModded(t, db)
+		installOK(t, rt, admin, "Ns-Only", "1.0.0")
+		giveWorld(t, dataDir)
+		id := savePending(t, rt, db, admin, "before a toggle")
+		toggleMod(t, rt, admin, "Ns-Only", false)
+		toggleMod(t, rt, admin, "Ns-Only", true)
+
+		installOK(t, rt, admin, "Ns-Only", "2.0.0")
+
+		if row := setupRow(t, db, id); row.BackupID != "" || row.WorldPending {
+			t.Errorf("setup linked to %q, waiting %v, want neither", row.BackupID, row.WorldPending)
+		}
+	})
+	t.Run("no world", func(t *testing.T) {
+		t.Parallel()
+		rt, db, admin, _, _ := installWorld(t, twoVersions()...)
+		alreadyModded(t, db)
+		installOK(t, rt, admin, "Ns-Only", "1.0.0")
+		id := savePending(t, rt, db, admin, "no world")
+
+		installOK(t, rt, admin, "Ns-Only", "2.0.0")
+
+		if row := setupRow(t, db, id); row.BackupID != "" || row.WorldPending {
+			t.Errorf("setup linked to %q, waiting %v, want neither", row.BackupID, row.WorldPending)
+		}
+	})
+}

@@ -290,3 +290,45 @@ func TestPruneReleasesWorldBackupsPastTheWorldsKept(t *testing.T) {
 		}
 	}
 }
+
+// TestAModChangeEndsTheWaitForAWorldBackup asserts a setup stops waiting for a world backup once
+// one of the instance's mods is added, removed, or changes registry, version or enabled state,
+// and keeps waiting through changes to its side or lock.
+func TestAModChangeEndsTheWaitForAWorldBackup(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, change string
+		ends         bool
+	}{
+		{"side", `UPDATE instance_mods SET side = 'client_required' WHERE full_name = 'Ns-A'`, false},
+		{"lock", `UPDATE instance_mods SET locked = TRUE WHERE full_name = 'Ns-A'`, false},
+		{"same version", `UPDATE instance_mods SET version = '1.0.0' WHERE full_name = 'Ns-A'`, false},
+		{"version", `UPDATE instance_mods SET version = '2.0.0' WHERE full_name = 'Ns-A'`, true},
+		{"registry", `UPDATE instance_mods SET source = 'hexium' WHERE full_name = 'Ns-A'`, true},
+		{"enabled", `UPDATE instance_mods SET enabled = FALSE WHERE full_name = 'Ns-A'`, true},
+		{"removed", `DELETE FROM instance_mods WHERE full_name = 'Ns-A'`, true},
+		{"added", `INSERT INTO instance_mods (instance_id, full_name, version, installed_as, file_manifest,
+			installed_at) VALUES ('server-a', 'Ns-B', '1.0.0', 'explicit', '[]', '2026-01-01T00:00:00Z')`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			db := open(t)
+			seedInstance(t, db, "server-a", 28000)
+			exec(t, db.Writer, `INSERT INTO instance_mods (instance_id, full_name, version, installed_as,
+				file_manifest, installed_at) VALUES ('server-a', 'Ns-A', '1.0.0', 'explicit', '[]', ?)`, Now())
+			if err := db.SaveSetup(t.Context(), &SavedSetup{
+				ID: "waiting", InstanceID: "server-a", Name: "waiting", SnapshotJSON: "{}", WorldPending: true,
+			}, nil); err != nil {
+				t.Fatal(err)
+			}
+			exec(t, db.Writer, tc.change)
+			row, _, err := db.SetupByID(t.Context(), "server-a", "waiting")
+			if err != nil || row == nil {
+				t.Fatalf("SetupByID = %+v, %v", row, err)
+			}
+			if row.WorldPending == tc.ends {
+				t.Errorf("after a %s change, waiting = %v, want %v", tc.name, row.WorldPending, !tc.ends)
+			}
+		})
+	}
+}

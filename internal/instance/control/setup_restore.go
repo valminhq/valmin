@@ -288,7 +288,7 @@ func (s *SetupJobs) prepareSetupRestore(
 	ctx context.Context, jh *jobs.Handle, inst *store.Instance, row *store.SavedSetup,
 	refs []store.SetupArtifactRef, payload *SetupJobPayload,
 ) (setupRestorePlan, error) {
-	fresh, err := s.stoppedInstance(ctx, inst.ID)
+	fresh, err := s.settledInstance(ctx, inst.ID, instance.StateStopped)
 	if err != nil {
 		return setupRestorePlan{}, err
 	}
@@ -331,7 +331,7 @@ func (s *SetupJobs) prepareSetupRestore(
 	if err := PreflightSetupTargets(inst, currentPaths, targetPaths); err != nil {
 		return setupRestorePlan{}, err
 	}
-	fresh, err = s.stoppedInstance(ctx, inst.ID)
+	fresh, err = s.settledInstance(ctx, inst.ID, instance.StateStopped)
 	if err != nil {
 		return setupRestorePlan{}, err
 	}
@@ -447,7 +447,12 @@ func (s *SetupJobs) RunRestore(
 		out := jobs.Outcome{
 			Status: jobs.StatusSucceeded,
 			OnFinish: joinFinish(func(ctx context.Context, tx *sql.Tx) error {
-				if err := store.TxApplySetupState(ctx, tx, inst.ID, mods, &launch, backup); err != nil {
+				write := func() error { return store.TxApplySetupState(ctx, tx, inst.ID, mods, &launch, backup) }
+				apply := write
+				if !plan.ModsChanged {
+					apply = func() error { return store.TxKeepingSetupsWaiting(ctx, tx, inst.ID, write) }
+				}
+				if err := apply(); err != nil {
 					return err
 				}
 				return store.TxRecordConfigRevisions(ctx, tx, written)
@@ -478,7 +483,8 @@ func (s *SetupJobs) saveBeforeRestore(
 			return nil, nil, err
 		}
 		if world != nil {
-			archived, before.worldID = recordSnapshot(world), world.ID
+			archived = joinFinish(recordSnapshot(world), s.linkPending(ctx, jh, plan.Instance, world.ID))
+			before.worldID = world.ID
 		}
 	}
 	jh.Progress(ctx, 60, "saving the current setup")

@@ -312,7 +312,7 @@ func TestSetupPreviewRejectsMissingOrCorruptArtifact(t *testing.T) {
 	}
 }
 
-func TestSetupActionsRequireAdministratorAndStoppedServer(t *testing.T) {
+func TestSetupActionsRequireAnAdministratorAndRestoreAStoppedServer(t *testing.T) {
 	t.Parallel()
 	rt, db, admin, member, dataDir := setupTestWorld(t)
 	setupTestMod(t, db, dataDir, "Ns-One", source.Thunderstore,
@@ -341,15 +341,86 @@ func TestSetupActionsRequireAdministratorAndStoppedServer(t *testing.T) {
 		}
 	}
 	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
-	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL,
-		jsonBody(t, map[string]string{"name": "running"})))
-	if rec.Code != http.StatusConflict || errCode(t, rec) != "instance_must_be_stopped" {
-		t.Errorf("save while running = %d %s", rec.Code, rec.Body.String())
-	}
-	rec = as(rt, admin, httptest.NewRequest(http.MethodPost,
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost,
 		setupsURL+"/"+saved.ID+"/restore", http.NoBody))
 	if rec.Code != http.StatusConflict || errCode(t, rec) != "instance_must_be_stopped" {
 		t.Errorf("restore while running = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestSetupSaveReadsARunningServer asserts a setup saves from a running server, that taking a
+// world backup then is refused, that a server between states cannot save one, and that the
+// next-backup link excludes the other two ways to link a world backup.
+func TestSetupSaveReadsARunningServer(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	setupTestMod(t, db, dataDir, "Ns-One", source.Thunderstore,
+		"1.0.0", "one", false, true, false, "unknown")
+	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
+	saved := setupTestSave(t, rt, db, admin, "while running")
+	if _, refs, err := db.SetupByID(t.Context(), "inst-a", saved.ID); err != nil || len(refs) != 1 {
+		t.Errorf("setup saved while running holds %+v, %v, want the installed package", refs, err)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		body  map[string]any
+		field string
+	}{
+		{"back up while running", map[string]any{"name": "x", "back_up_world": true}, "back_up_world"},
+		{
+			"next and now",
+			map[string]any{"name": "x", "link_next_world_backup": true, "back_up_world": true},
+			"link_next_world_backup",
+		},
+		{
+			"next and existing",
+			map[string]any{"name": "x", "link_next_world_backup": true, "world_backup_id": "b"},
+			"link_next_world_backup",
+		},
+	} {
+		rec := as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL, jsonBody(t, tc.body)))
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), tc.field) {
+			t.Errorf("%s = %d %s, want 422 naming %s", tc.name, rec.Code, rec.Body.String(), tc.field)
+		}
+	}
+
+	seed(t, db, `UPDATE instances SET state = 'starting' WHERE id = 'inst-a'`)
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL,
+		jsonBody(t, map[string]string{"name": "starting"})))
+	if rec.Code != http.StatusConflict || errCode(t, rec) != "invalid_state" {
+		t.Errorf("save while starting = %d %s, want 409 invalid_state", rec.Code, rec.Body.String())
+	}
+}
+
+// TestAConfigOnlyRestoreKeepsSetupsWaiting asserts a restore that changes config files but no
+// mods leaves the setups waiting for a world backup still waiting.
+func TestAConfigOnlyRestoreKeepsSetupsWaiting(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	setupTestMod(t, db, dataDir, "Ns-One", source.Thunderstore,
+		"1.0.0", "one", false, true, false, "unknown")
+	writeServerFile(t, dataDir, "BepInEx/config/one.cfg", "a = 1\n")
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL,
+		jsonBody(t, map[string]any{"name": "waiting", "link_next_world_backup": true})))
+	var accepted jobView
+	decodeInto(t, rec, &accepted)
+	if job := waitJob(t, rt, admin, accepted.JobID); job.Status != "succeeded" {
+		t.Fatalf("save job = %+v, want succeeded", job)
+	}
+	rows, err := db.ListSetups(t.Context(), "inst-a")
+	if err != nil || len(rows) != 1 || !rows[0].WorldPending {
+		t.Fatalf("setups = %+v, %v, want one waiting", rows, err)
+	}
+	writeServerFile(t, dataDir, "BepInEx/config/one.cfg", "a = 2\n")
+
+	preview := setupTestPreview(t, rt, admin, rows[0].ID)
+	if job := setupTestRestore(t, rt, admin, rows[0].ID, preview.ETag); job.Status != "succeeded" {
+		t.Fatalf("restore job = %+v, want succeeded", job)
+	}
+	setupTestFile(t, serverPath(dataDir, "BepInEx/config/one.cfg"), "a = 1\n")
+	if row, _, err := db.SetupByID(t.Context(), "inst-a", rows[0].ID); err != nil || !row.WorldPending {
+		t.Errorf("setup after a config-only restore = %+v, %v, want still waiting", row, err)
 	}
 }
 

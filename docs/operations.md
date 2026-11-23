@@ -159,8 +159,8 @@ overview shows **This server needs a check** until you choose **Check this serve
 
 ## Recover a saved setup
 
-On **Saved setups**, stop the server and save a named setup before changing its mods
-or settings. Valmin stores the installed package files along with mod versions,
+On **Saved setups**, save a named setup before changing a server's mods or settings, while it
+runs or once it is stopped. Valmin stores the installed package files along with mod versions,
 registries, locks, enabled states, client tags, launch and backup settings, and every
 file the config editor lists in `BepInEx/config` and its subfolders, YAML, JSON and text
 files included, apart from the RCON plugin's file, which holds the console password. A
@@ -211,8 +211,16 @@ one past the world count, releases its snapshot to normal retention. If the curr
 be saved, for example because an installed mod's files are missing, the restore or change goes
 ahead and its job log says so.
 
-You can link a consistent backup from the same server, or choose **Back up the world now** to
-take one while the setup is saved and link it. That backup is consistent, since the server is
+A setup saved with **The backup the next mod update takes**, the default, waits for the
+pre-update snapshot the next mod update or setup restore takes, and is linked to it. That
+snapshot is the world just before the change, with exactly the setup's mods installed. A change
+to the installed mods that takes no snapshot first (installing a new mod, removing one, or
+disabling or enabling one, even back to the same set) ends the wait, and so does an update on a
+server with no world yet: the setup then keeps no backup. A restore that changes only config
+files leaves it waiting. The update's job log names each setup it links.
+
+You can also link a consistent backup from the same server, or, on a stopped server, choose
+**Back up the world now** to take one while the setup is saved and link it. That backup is consistent, since the server is
 stopped, and is checked like **Stop and back up**: its world size and any **Attention required**
 findings show on **Backups**. If the archive fails its check, or the data root is below its
 free-space floor, the save fails and keeps nothing; save again without the backup if you need

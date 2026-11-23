@@ -95,21 +95,26 @@ func (s *SetupJobs) ValidateSettings(ctx context.Context, inst *store.Instance, 
 	return nil
 }
 
-// SetupStoppedClaim confirms that a setup job still owns a stopped instance at claim.
-func SetupStoppedClaim(id string) func(context.Context, *sql.Tx) error {
+// SetupClaim confirms that a setup job still owns an instance in state at claim.
+func SetupClaim(id string, state instance.State) func(context.Context, *sql.Tx) error {
 	return func(ctx context.Context, tx *sql.Tx) error {
-		ok, err := instance.HoldStateTx(ctx, tx, id, instance.StateStopped)
+		ok, err := instance.HoldStateTx(ctx, tx, id, state)
 		if err != nil {
 			return fmt.Errorf("claim setup job: %w", err)
 		}
-		if !ok {
+		if !ok && state == instance.StateStopped {
 			return store.ErrInstanceNotStopped
+		}
+		if !ok {
+			return fmt.Errorf("instance %s is no longer %s", id, state)
 		}
 		return nil
 	}
 }
 
-func (s *SetupJobs) stoppedInstance(ctx context.Context, id string) (*store.Instance, error) {
+// settledInstance reads the instance id, failing unless it is in state and, for a stopped one,
+// Docker shows its server down.
+func (s *SetupJobs) settledInstance(ctx context.Context, id string, state instance.State) (*store.Instance, error) {
 	inst, err := s.DB.InstanceByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("read instance for setup job: %w", err)
@@ -117,8 +122,14 @@ func (s *SetupJobs) stoppedInstance(ctx context.Context, id string) (*store.Inst
 	if inst == nil {
 		return nil, errors.New("instance no longer exists")
 	}
-	if inst.State != string(instance.StateStopped) {
-		return nil, store.ErrInstanceNotStopped
+	if inst.State != string(state) {
+		if state == instance.StateStopped {
+			return nil, store.ErrInstanceNotStopped
+		}
+		return nil, fmt.Errorf("the server is %s, no longer %s", inst.State, state)
+	}
+	if state != instance.StateStopped {
+		return inst, nil
 	}
 	if err := AssertStopped(ctx, s.Runtime, inst); err != nil {
 		return nil, err
@@ -126,13 +137,15 @@ func (s *SetupJobs) stoppedInstance(ctx context.Context, id string) (*store.Inst
 	return inst, nil
 }
 
-// RunSave captures the setup and its package bytes, checking the state again before commit.
+// RunSave captures the setup and its package bytes from a stopped or running instance, checking
+// before commit that its state and its setup are unchanged.
 func (s *SetupJobs) RunSave(inst *store.Instance, payload *SetupJobPayload, requestedBy string) jobs.Runner {
 	state := &SetupState{DB: s.DB}
 	artifacts := &setupArtifacts{DataRoot: s.DataRoot, Archives: s.Archives}
+	settled := instance.State(inst.State)
 	return func(ctx context.Context, jh *jobs.Handle) jobs.Outcome {
 		defer func() { _ = os.RemoveAll(payload.StagingDir) }()
-		fresh, err := s.stoppedInstance(ctx, inst.ID)
+		fresh, err := s.settledInstance(ctx, inst.ID, settled)
 		if err != nil {
 			return jobs.Failed(errcode.Internal, err)
 		}
@@ -151,7 +164,7 @@ func (s *SetupJobs) RunSave(inst *store.Instance, payload *SetupJobPayload, requ
 		if err := artifacts.stage(ctx, &snap, refs, payload.StagingDir); err != nil {
 			return jobs.Failed(errcode.Internal, fmt.Errorf("verify saved package files: %w", err))
 		}
-		fresh, err = s.stoppedInstance(ctx, inst.ID)
+		fresh, err = s.settledInstance(ctx, inst.ID, settled)
 		if err != nil {
 			return jobs.Failed(errcode.Internal, err)
 		}
@@ -160,7 +173,8 @@ func (s *SetupJobs) RunSave(inst *store.Instance, payload *SetupJobPayload, requ
 			return jobs.Failed(errcode.Internal, err)
 		}
 		if after != etag {
-			return jobs.Failed(errcode.Internal, errors.New("server state changed while the setup was saved"))
+			return jobs.Failed(errcode.Internal,
+				errors.New("a mod or config file changed while the setup was saved; save it again"))
 		}
 		raw, err := json.Marshal(snap)
 		if err != nil {
@@ -175,6 +189,7 @@ func (s *SetupJobs) RunSave(inst *store.Instance, payload *SetupJobPayload, requ
 			CreatedBy: requestedBy, GameBuildID: deref(inst.GameBuildID),
 			WorldName: inst.WorldName, SnapshotJSON: string(raw), BackupID: backupID,
 			Configs: snap.ConfigFiles, ConfigsTruncated: snap.ConfigsTruncated,
+			WorldPending: payload.LinkNextWorld,
 		}
 		jh.Progress(ctx, 100, "setup saved")
 		out := jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: func(ctx context.Context, tx *sql.Tx) error {
