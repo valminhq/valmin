@@ -39,6 +39,49 @@ type SetupJobs struct {
 	Backups *Backupper
 	// Apply replaces ApplySetupPaths, so a test can fail a restore after it placed files.
 	Apply func(inst *store.Instance, staging string, current, target SetupFiles) error
+	// Engine runs the restores SubmitRestore queues.
+	Engine *jobs.Engine
+}
+
+// SetupRestoreSubmission is one setup restore to queue: the setup with its package references,
+// the fingerprint of the server state the restore was previewed against, and who asked.
+type SetupRestoreSubmission struct {
+	Instance    *store.Instance
+	Setup       *store.SavedSetup
+	Refs        []store.SetupArtifactRef
+	ETag        string
+	RequestedBy string
+	// Audit is the request's entry, nil for a restore another job runs.
+	Audit *store.AuditEntry
+}
+
+// SubmitRestore queues the restore of sub's setup onto its stopped instance, in a staging
+// directory of its own.
+func (s *SetupJobs) SubmitRestore(ctx context.Context, sub *SetupRestoreSubmission) (*store.Job, error) {
+	staging, err := NewSetupStaging(s.DataRoot)
+	if err != nil {
+		return nil, err
+	}
+	submitted := false
+	defer func() {
+		if !submitted {
+			_ = os.RemoveAll(staging)
+		}
+	}()
+	id := sub.Instance.ID
+	payload := SetupJobPayload{SetupID: sub.Setup.ID, StagingDir: staging, ETag: sub.ETag}
+	job, err := s.Engine.Submit(ctx, &jobs.Spec{
+		Kind: jobs.KindSetupRestore, LockKey: jobs.InstanceLockKey(id),
+		LockKeys:   []string{SetupArtifactLock},
+		InstanceID: &id, InstanceName: sub.Instance.Name, RequestedBy: sub.RequestedBy,
+		Payload: payload, Audit: sub.Audit,
+		OnClaim: SetupClaim(id, instance.StateStopped),
+	}, s.RunRestore(sub.Instance, sub.Setup, sub.Refs, &payload, sub.RequestedBy))
+	if err != nil {
+		return nil, err
+	}
+	submitted = true
+	return job, nil
 }
 
 // SubmitSetupDelete removes a saved setup in the job finish transaction.

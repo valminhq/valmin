@@ -26,6 +26,7 @@ const LABELS: Record<string, string> = {
 	'instances.backups.delete': 'Backup deleted',
 	'instances.setups.save': 'Setup saved',
 	'instances.setups.restore': 'Setup restored',
+	'instances.setups.rollback': 'Rolled back to a setup',
 	'instances.setups.delete': 'Setup deleted',
 	'instances.worlds.import': 'World imported',
 	'instances.worlds.restore': 'World restored',
@@ -213,6 +214,8 @@ const PHRASES: Record<string, Phrase> = {
 	'instances.backups.delete': (_, __, on) => `deleted a backup${on}`,
 	'instances.setups.save': (d, _, on) => `saved setup ${text(d.name) || '(unnamed)'}${on}`,
 	'instances.setups.restore': (d, _, on) => `restored setup ${text(d.name) || '(unnamed)'}${on}`,
+	'instances.setups.rollback': (d, _, on) =>
+		`rolled back to setup ${text(d.name) || '(unnamed)'}${d.world ? ' and its world' : ''}${on}`,
 	'instances.setups.delete': (d, _, on) => `deleted setup ${text(d.name) || '(unnamed)'}${on}`,
 	'instances.worlds.import': (d, _, on) => `imported world ${text(d.world) || '(unnamed)'}${on}`,
 	'instances.worlds.restore': (d, _, on) => `restored world ${text(d.world) || '(unnamed)'}${on}`,

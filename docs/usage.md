@@ -869,10 +869,11 @@ the installs that create a server from a template or code. A game update on its 
 mods, so it saves no setup either. The dialog before the change
 says what is saved.
 
-To undo a change, stop the server, open **Saved setups**, select the automatic setup and
-restore it. The mods, their configuration files and settings go back as they were (see
+To undo a change, open **Saved setups**, select the automatic setup and choose **Roll back to
+this setup**. The mods, their configuration files and settings go back as they were (see
 [Save and restore a setup](#save-and-restore-a-setup)). If the update also changed the
-world, restore the linked backup on **Backups** too.
+world, switch on **Also restore the linked world backup** to put the world back in the same
+step.
 
 Each server keeps its newest ten automatic setups, counting those a setup restore saves. The
 newest three that link a world backup keep it. A kept backup stays outside the backup retention
@@ -1212,18 +1213,29 @@ password and world files are excluded.
 The list shows when each setup was saved and by whom; an automatic setup names who made the
 change it comes before. Select a setup to compare it with the current server. Under **Configuration files**, the
 comparison lists the files the restore removes and adds, and each changed file opens to a
-line-by-line comparison. Review the restore preview, then restore while the server is
-stopped. Valmin first saves the current setup as an **Automatic** one named **Before
-restoring** and the setup's name, linked to the world backup the restore takes when mods
-change, then applies the saved mod set, configuration, and settings
-together. Restore the automatic setup to undo the restore. If installation fails, Valmin rolls
-back the changes. The server stays stopped; start it after checking the job result. A setup
-marked **Top-level .cfg only** was saved before setups held every config file, and restoring
-it changes only the `.cfg` files directly in `BepInEx/config`.
+line-by-line comparison. Review the preview, then choose **Roll back to this setup**, on a
+running or a stopped server. Valmin stops a running server, saves the current setup as an
+**Automatic** one named **Before restoring** and the setup's name, linked to the world backup it
+takes when mods change, then applies the saved mod set, configuration, and settings together.
+Roll back to that automatic setup to undo the rollback. If installation fails, Valmin rolls
+back the changes and does nothing after it. The job is not cancellable.
 
-To recover the world too, restore the linked backup separately on **Backups**. World
-restoration replaces world files, so choose it only when needed. Delete a setup to
-release its package references and its link to the backup. More detail is in
+Two options come with a rollback:
+
+- **Also restore the linked world backup**, shown when the setup links an available backup and
+  you may restore backups. It replaces the current world with that backup after archiving the
+  current one, so everything played since the backup is lost, and asks you to type the server
+  name. The setup is restored first, so a setup that cannot be applied leaves the world alone.
+  If the world restore fails, the setup stays restored and the server shows **This server needs
+  a check**.
+- **Start the server again when done**, on a running server and for those who may start it.
+  A server that was stopped stays stopped.
+
+A setup marked **Top-level .cfg only** was saved before setups held every config file, and
+restoring it changes only the `.cfg` files directly in `BepInEx/config`.
+
+Restoring a world from **Backups** stays available on its own. Delete a setup to release its
+package references and its link to the backup. More detail is in
 [recover a saved setup](operations.md#recover-a-saved-setup).
 
 ## Share a server as a template

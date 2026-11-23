@@ -19,7 +19,34 @@ const (
 	restoreSwapped        = "swapped"
 )
 
-type Restorer struct{ Worlds *Worlds }
+// Restorer replaces an instance's world with a backup archive.
+type Restorer struct {
+	Worlds *Worlds
+	Engine *jobs.Engine
+}
+
+// Submit queues the restore of backup b over inst's world for requestedBy, claiming inst from
+// stopped into restoring. audit is the request's entry, nil for a restore another job runs.
+func (r *Restorer) Submit(
+	ctx context.Context, inst *store.Instance, b *store.Backup, requestedBy string, audit *store.AuditEntry,
+) (*store.Job, error) {
+	id := inst.ID
+	return r.Engine.Submit(ctx, &jobs.Spec{
+		Kind: jobs.KindRestore, LockKey: jobs.InstanceLockKey(id),
+		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy,
+		Payload: RestorePayload{BackupID: b.ID}, Audit: audit,
+		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
+			ok, err := instance.SetStateTx(ctx, tx, id, instance.StateStopped, instance.StateRestoring)
+			if err != nil {
+				return fmt.Errorf("claim restore for instance %s: %w", id, err)
+			}
+			if !ok {
+				return fmt.Errorf("instance %s is no longer stopped", id)
+			}
+			return nil
+		},
+	}, r.Run(inst, b))
+}
 
 // Run is the restore job: prove the archive, snapshot what is there, stage the archive
 // beside the world, swap it in.

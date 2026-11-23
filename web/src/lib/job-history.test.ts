@@ -159,6 +159,7 @@ describe('what to do after a failure', () => {
 		['restore', 'backups'],
 		['setup_save', 'setups'],
 		['setup_restore', 'setups'],
+		['setup_rollback', 'setups'],
 		['setup_delete', 'setups'],
 		['game_update', 'update']
 	];

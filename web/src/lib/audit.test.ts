@@ -122,6 +122,12 @@ describe('summaries of recorded actions', () => {
 			'Alex restored setup Working before update on Viking World'
 		],
 		[
+			'setup rollback',
+			'instances.setups.rollback',
+			{ name: 'Working before update', world: true },
+			'Alex rolled back to setup Working before update and its world on Viking World'
+		],
+		[
 			'setup delete',
 			'instances.setups.delete',
 			{ name: 'Working before update' },

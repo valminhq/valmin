@@ -345,7 +345,7 @@ network timeout means the operation did not start.
 
 While the data root has less free space than `data.free_space_floor_bytes`, jobs that
 write a lot to it (provision, clone, world import, mod install, game update, backup,
-restore, world tool, setup save and restore, update test and its apply) return
+restore, world tool, setup save, restore and rollback, update test and its apply) return
 `409 insufficient_disk` with
 `free_bytes` and `floor_bytes`. Other jobs still run.
 
@@ -443,6 +443,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `GET`    | `/instances/{id}/setups/{sid}/configs/{file}` | The saved text of one config file of the setup.                   |
 | `GET`    | `/instances/{id}/setups/{sid}/preview`    | Compare and validate a restore; returns an `etag`.                    |
 | `POST`   | `/instances/{id}/setups/{sid}/restore`    | Restore a stopped server; requires `If-Match`, returns a job.         |
+| `POST`   | `/instances/{id}/setups/{sid}/rollback`   | Roll back a stopped or running server; returns a job.                 |
 | `DELETE` | `/instances/{id}/setups/{sid}`            | Delete a setup and release its links; returns a job.                  |
 | `GET`    | `/instances/{id}/worlds`                  | Worlds in the server's save directory.                                |
 | `POST`   | `/instances/{id}/worlds/import`           | Upload a world into a stopped server; returns a job.                  |
@@ -988,15 +989,34 @@ config routes, and the current one from `GET /instances/{id}/configs/{file}/raw`
 current server and checks whether its packages, config files and settings can be applied.
 For a setup whose `config_tree` is `false`, `current.configs` lists only the files that
 restore would change. The response contains `etag`, `ready`, `problems`, `current`, and
-`setup`. Send that `etag` as `If-Match` to `POST /instances/{id}/setups/{sid}/restore` while
-the server is stopped. Missing or stale fingerprints return `412 stale_write`. A restore
+`setup`, and `stop_required`, which is `true` while the server is not stopped: a restore
+refuses it, and a rollback stops a running one first. Send that `etag` as `If-Match` to
+`POST /instances/{id}/setups/{sid}/restore` while the server is stopped. Missing or stale
+fingerprints return `412 stale_write`. A restore
 removes config files the setup does not hold and keeps each file it replaces or removes in
 that file's history. A failed installation rolls back its changes, and the restore never
 starts the server.
 
+`POST /instances/{id}/setups/{sid}/rollback` does the whole undo as one job (`setup_rollback`,
+not cancellable): it stops the server if it runs, restores the setup, restores the world
+backup the setup links with `{"world":true}`, and starts the server again with
+`{"start":true}`. It needs `setups.manage`, plus `instance.stop` for a running server,
+`instance.start` for `start` and `backups.restore` for `world`. A server that is neither stopped
+nor running returns `409 invalid_state`; `world` without an available linked backup is `422`
+naming `world`. On a stopped server an optional `If-Match` is checked against the preview's
+`etag` (`412 stale_write` when it differs); on a running server it is ignored, and the job
+fingerprints the server once it is stopped. A step whose job meets another job holding a lock
+it needs waits for that job and tries again, up to three times. A step runs only after the one
+before succeeded, so a failed setup restore never restores the world or starts the server, and
+a stop that was done stays done. A failed world restore leaves the setup restored and the server
+in `error`. Each step is its own job, so with `world` the current
+world is archived by the setup restore when the mods change and once more as the world
+restore's own `pre_restore` snapshot.
+
 A linked backup stays outside retention. Deleting it returns `409 invalid_state`
-while any setup links to it. Deleting the setup releases the link. Restore the
-world backup through `POST /instances/{id}/backups/{bid}/restore` separately.
+while any setup links to it. Deleting the setup releases the link. Besides a rollback with
+`world`, the world backup can be restored on its own through
+`POST /instances/{id}/backups/{bid}/restore`.
 
 ### Send server commands
 

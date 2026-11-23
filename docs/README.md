@@ -48,6 +48,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | See what happened between two backups           | [Compare two backups](operations.md#compare-two-backups)                                   |
 | Undo a bad mod or config change                 | [Save and restore a setup](usage.md#save-and-restore-a-setup)                              |
 | Undo a setup restore                            | [Recover a saved setup](operations.md#recover-a-saved-setup)                               |
+| Roll back mods and the world in one step        | [Save and restore a setup](usage.md#save-and-restore-a-setup)                              |
 | Roll back a mod update                          | [Undo a mod update](usage.md#undo-a-mod-update)                                            |
 | Save a setup without copying mod packages       | [Recover a saved setup](operations.md#recover-a-saved-setup)                               |
 | Share a server's setup with another panel       | [Share a server as a template](usage.md#share-a-server-as-a-template)                      |

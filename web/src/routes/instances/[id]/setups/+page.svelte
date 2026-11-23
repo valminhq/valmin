@@ -26,6 +26,9 @@
 	const id = $derived(page.params.id ?? '');
 	const canManage = $derived(session.allowed(id).includes(actions.setupsManage));
 	const canBackUp = $derived(session.allowed(id).includes(actions.backupsCreate));
+	const canRestoreWorld = $derived(session.allowed(id).includes(actions.backupsRestore));
+	const canStart = $derived(session.allowed(id).includes(actions.start));
+	const canStop = $derived(session.allowed(id).includes(actions.stop));
 	/** The world backup choice that takes a backup during the save. */
 	const backUpNow = 'now';
 	/** The world backup choice that waits for the one the next mod update takes. */
@@ -33,8 +36,14 @@
 
 	let instance = $state<Instance | null>(null);
 	const stopped = $derived(instance?.state === 'stopped');
-	/** A setup saves from a stopped or a running server. */
+	/** A setup saves from, and rolls back, a stopped or a running server. */
 	const canSave = $derived(stopped || instance?.state === 'running');
+	/** Why the server can neither save a setup nor roll back now. */
+	const unsettled = $derived(
+		instance?.state === 'error'
+			? 'This server needs a check first; open its overview.'
+			: 'Wait for this server to finish starting or stopping.'
+	);
 	let list = $state<SavedSetup[]>([]);
 	let loading = $state(true);
 	let failure = $state<unknown>(null);
@@ -54,18 +63,39 @@
 	let deleteOpen = $state(false);
 	let jobId = $state<string | null>(null);
 	let jobRunning = $state(false);
-	let jobAction = $state<'save' | 'restore' | 'delete' | null>(null);
+	let jobAction = $state<'save' | 'rollback' | 'delete' | null>(null);
+	let restoreWorld = $state(false);
+	let startAfter = $state(true);
 	let jobTarget = $state('');
 	let loadRequest = 0;
 	let previewRequest = 0;
 
 	const selected = $derived(list.find((setup) => setup.id === selectedId) ?? null);
 	const linkedBackups = $derived(availableBackups.filter((backup) => backup.consistent));
+	/** The linked world backup, when the rollback can restore it. */
+	const worldBackup = $derived(
+		preview?.setup.world_backup && preview.setup.world_backup.available !== false
+			? preview.setup.world_backup
+			: null
+	);
+	const running = $derived(instance?.state === 'running');
+	/** Whether the rollback restores the linked world backup too. */
+	const withWorld = $derived(restoreWorld && worldBackup !== null && canRestoreWorld);
+	const rollbackDescription = $derived(
+		"This replaces the server's managed mods, configuration files, and included settings with the saved setup, after saving the current setup as an automatic one, so the rollback can be undone." +
+			(withWorld
+				? ' It also replaces the current world with the linked backup, after archiving it. Everything played since that backup is lost.'
+				: ' World files are unchanged.') +
+			(running ? ' The server is stopped first.' : '') +
+			' Valmin rolls the setup back if it fails to apply.'
+	);
 	const restoreBlocked = $derived.by(() => {
 		if (jobRunning) return 'Wait for the current task to finish.';
-		if (!stopped) return 'Stop this server to restore a setup.';
-		if (!preview) return 'Load a current preview before restoring.';
-		if (!preview.ready) return 'Resolve the preview problems before restoring.';
+		if (!canSave) return unsettled;
+		if (running && !canStop)
+			return "You can't stop this server, so it can't be rolled back while it runs.";
+		if (!preview) return 'Load a current preview before rolling back.';
+		if (!preview.ready) return 'Resolve the preview problems before rolling back.';
 		return null;
 	});
 
@@ -130,12 +160,13 @@
 	}
 
 	function compare(setup: SavedSetup) {
+		if (setup.id !== selectedId) restoreWorld = false;
 		selectedId = setup.id;
 		void loadPreview(setup.id);
 	}
 
 	async function run(
-		action: 'save' | 'restore' | 'delete',
+		action: 'save' | 'rollback' | 'delete',
 		target: string,
 		call: () => Promise<Job>
 	) {
@@ -175,10 +206,17 @@
 		);
 	}
 
-	function restore() {
+	function rollback() {
 		const current = preview;
-		if (!current || !current.ready || !stopped || jobRunning) return;
-		void run('restore', current.setup.id, () => setups.restore(id, current.setup.id, current.etag));
+		if (!current || !current.ready || !canSave || jobRunning) return;
+		const start = startAfter && canStart && running;
+		void run('rollback', current.setup.id, () =>
+			setups.rollback(id, current.setup.id, {
+				world: withWorld,
+				start,
+				etag: stopped ? current.etag : undefined
+			})
+		);
 	}
 
 	function remove() {
@@ -193,7 +231,8 @@
 			selectedId = '';
 			preview = null;
 		}
-		if (jobAction === 'restore' && jobTarget && jobTarget === selectedId)
+		if (jobAction === 'rollback') restoreWorld = false;
+		if (jobAction === 'rollback' && jobTarget && jobTarget === selectedId)
 			void loadPreview(jobTarget);
 		void load(id);
 	}
@@ -205,10 +244,10 @@
 
 <div class="grid gap-6">
 	<PageHeader title="Saved setups" level={2}>
-		Save exact mod versions and every configuration file, then compare and restore them later.
-		Restoring, and each mod install, removal and update unless turned off below, saves the current
-		setup first, so the change can be undone. World backups are linked for reference and restored
-		separately.
+		Save exact mod versions and every configuration file, then compare and roll back to them later.
+		Rolling back, and each mod install, removal and update unless turned off below, saves the
+		current setup first, so the change can be undone. A rollback can restore the world backup a
+		setup links in the same step.
 	</PageHeader>
 
 	{#if !canManage}
@@ -278,9 +317,7 @@
 							>Save setup</Button
 						>
 						{#if !canSave}
-							<p class="text-sm text-muted-foreground">
-								Wait for this server to finish starting or stopping to save a setup.
-							</p>
+							<p class="text-sm text-muted-foreground">{unsettled}</p>
 						{/if}
 					</div>
 				</Card.Content>
@@ -376,12 +413,12 @@
 						<SetupComparison {preview} instanceId={id} />
 						<Card.Root>
 							<Card.Header>
-								<Card.Title>Restore preview</Card.Title>
+								<Card.Title>Rollback preview</Card.Title>
 								<Card.Description>
-									Restoring applies the saved mods, configuration files, and launch and backup
-									settings while stopped, after saving the current setup as an automatic one. It
-									does not change the game build, selected world, credentials, or world files. The
-									server stays stopped.
+									Rolling back applies the saved mods, configuration files, and launch and backup
+									settings, after saving the current setup as an automatic one. A running server is
+									stopped first. It does not change the game build, selected world or credentials.
+									World files change only if you restore the linked world backup below.
 								</Card.Description>
 							</Card.Header>
 							<Card.Content class="grid gap-4">
@@ -392,11 +429,23 @@
 										<p class="text-sm">
 											<Badge variant="outline">World backup linked</Badge>
 											{when(preview.setup.world_backup.created_at)} · {preview.setup.world_backup
-												.world_name}. To restore the world too, choose it separately under
+												.world_name}. You can also restore it from
 											<a class="underline" href={resolve('/instances/[id]/backups', { id })}
 												>Backups</a
 											>.
 										</p>
+										{#if canRestoreWorld}
+											<div class="flex items-start gap-2">
+												<Switch id="rollback-world" bind:checked={restoreWorld} />
+												<Label for="rollback-world" class="grid gap-1 font-normal">
+													Also restore the linked world backup
+													<span class="text-xs text-muted-foreground">
+														Replaces the current world with that backup, which is archived first.
+														Everything played since it was taken is lost.
+													</span>
+												</Label>
+											</div>
+										{/if}
 									{/if}
 								{:else}
 									<p class="text-sm text-muted-foreground">
@@ -405,15 +454,28 @@
 								{/if}
 								{#if preview.problems.length > 0}
 									<div role="alert" class="rounded-md border border-destructive p-3 text-sm">
-										<p class="font-medium">This setup is not ready to restore</p>
+										<p class="font-medium">This setup is not ready to roll back to</p>
 										<ul class="mt-2 list-disc pl-5">
 											{#each preview.problems as problem (problem)}<li>{problem}</li>{/each}
 										</ul>
 									</div>
 								{/if}
+								{#if running && canStart}
+									<div class="flex items-center gap-2">
+										<Switch id="rollback-start" bind:checked={startAfter} />
+										<Label for="rollback-start" class="font-normal">
+											Start the server again when done
+										</Label>
+									</div>
+								{/if}
+								{#if running}
+									<p class="text-sm text-muted-foreground">
+										This server is running, so it is stopped first and players are disconnected.
+									</p>
+								{/if}
 								<div class="flex flex-wrap items-center gap-3">
 									<Button disabled={restoreBlocked !== null} onclick={() => (restoreOpen = true)}
-										>Restore setup</Button
+										>Roll back to this setup</Button
 									>
 									<Button
 										variant="destructive"
@@ -435,11 +497,11 @@
 
 <DestructiveConfirm
 	bind:open={restoreOpen}
-	name={instance?.name ?? ''}
-	title="Restore this setup?"
-	description="This replaces the server's managed mods, configuration files, and included settings with the saved setup, after saving the current setup as an automatic one. Valmin rolls these changes back if the restore fails. World files and the selected world are unchanged. The server stays stopped."
-	confirmLabel="Restore setup"
-	onconfirm={restore}
+	name={withWorld ? (instance?.name ?? '') : undefined}
+	title="Roll back to this setup?"
+	description={rollbackDescription}
+	confirmLabel="Roll back"
+	onconfirm={rollback}
 />
 <DestructiveConfirm
 	bind:open={deleteOpen}

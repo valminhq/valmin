@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -19,6 +18,8 @@ import (
 
 const (
 	setupNameField = "name"
+	// rollbackWorldField is the rollback request's field that restores the linked world too.
+	rollbackWorldField = "world"
 )
 
 type setupSaveRequest struct {
@@ -64,18 +65,6 @@ func (h *Instances) setupSettled(w http.ResponseWriter, r *http.Request, inst *s
 	return h.setupStopped(w, r, inst)
 }
 
-func (h *Instances) setupStaging() (string, error) {
-	root := control.SetupStagingRoot(h.Cfg.Data.Root)
-	if err := os.MkdirAll(root, 0o750); err != nil {
-		return "", fmt.Errorf("create setup staging root: %w", err)
-	}
-	staging, err := os.MkdirTemp(root, "job-")
-	if err != nil {
-		return "", fmt.Errorf("create setup staging directory: %w", err)
-	}
-	return staging, nil
-}
-
 func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 	u, ok := caller(w, r)
 	if !ok {
@@ -104,7 +93,7 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	staging, err := h.setupStaging()
+	staging, err := control.NewSetupStaging(h.Cfg.Data.Root)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
@@ -238,32 +227,15 @@ func (h *Instances) restoreSetup(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.InvalidState).With("problems", preview.Problems))
 		return
 	}
-	staging, err := h.setupStaging()
-	if err != nil {
-		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
-		return
-	}
-	submitted := false
-	defer func() {
-		if !submitted {
-			_ = os.RemoveAll(staging)
-		}
-	}()
-	payload := control.SetupJobPayload{SetupID: row.ID, StagingDir: staging, ETag: preview.ETag}
-	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
-		Kind: jobs.KindSetupRestore, LockKey: jobs.InstanceLockKey(id),
-		LockKeys:   []string{control.SetupArtifactLock},
-		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
-		Payload: payload,
+	job, err := h.ctl.SetupJobs.SubmitRestore(r.Context(), &control.SetupRestoreSubmission{
+		Instance: inst, Setup: row, Refs: refs, ETag: preview.ETag, RequestedBy: u.ID,
 		Audit: jobAudit(r.Context(), u.ID, id, "instances.setups.restore",
 			map[string]any{"setup_id": row.ID, setupNameField: row.Name}),
-		OnClaim: control.SetupClaim(id, instance.StateStopped),
-	}, h.ctl.SetupJobs.RunRestore(inst, row, refs, &payload, u.ID))
+	})
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return
 	}
-	submitted = true
 	Accepted(w, r, job.ID, toJobView(job))
 }
 
@@ -302,4 +274,106 @@ func (h *Instances) deleteSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	Accepted(w, r, job.ID, toJobView(job))
+}
+
+// setupRollbackRequest is what a rollback does besides restoring the setup.
+type setupRollbackRequest struct {
+	// World restores the world backup the setup links after the setup.
+	World bool `json:"world,omitempty"`
+	// Start starts the server once everything is restored.
+	Start bool `json:"start,omitempty"`
+}
+
+// rollbackSetup handles POST /instances/{id}/setups/{sid}/rollback: one job that stops the
+// server if it runs, restores the setup and, if asked, its linked world, and starts the server if
+// asked. An If-Match on a stopped server must be the preview's ETag.
+func (h *Instances) rollbackSetup(w http.ResponseWriter, r *http.Request) {
+	u, ok := caller(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	if !h.Authz.Can(r.Context(), u, authz.InstanceView, id) {
+		apierr.Write(w, r, apierr.New(errcode.NotFound))
+		return
+	}
+	if !h.Authz.Can(r.Context(), u, authz.SetupsManage, id) {
+		apierr.Write(w, r, apierr.New(errcode.Forbidden))
+		return
+	}
+	inst, ok := h.setupInstance(w, r)
+	if !ok || !checkInstanceState(w, r, inst, jobs.KindSetupRollback) || !operationSettled(w, r, h.DB, inst.ID) {
+		return
+	}
+	var req setupRollbackRequest
+	if err := Decode(r, &req); err != nil {
+		apierr.Write(w, r, err)
+		return
+	}
+	row, payload, err := h.checkRollback(r, u, inst, &req)
+	if err != nil {
+		apierr.Write(w, r, err)
+		return
+	}
+	job, err := h.ctl.SetupRollback.Submit(r.Context(), &control.RollbackSubmission{
+		Instance: inst, Payload: *payload, RequestedBy: u.ID,
+		Audit: jobAudit(r.Context(), u.ID, id, "instances.setups.rollback", map[string]any{
+			"setup_id": row.ID, setupNameField: row.Name, rollbackWorldField: req.World, "start": req.Start,
+		}),
+	})
+	if err != nil {
+		writeJobSubmitError(w, r, err)
+		return
+	}
+	Accepted(w, r, job.ID, toJobView(job))
+}
+
+// checkRollback checks a rollback of the setup the request names onto inst and returns that setup
+// and the job's payload: the rights to stop, start and restore the world as req needs them, a
+// linked world backup that is still there, a ready preview, and a current If-Match on a stopped
+// server.
+func (h *Instances) checkRollback(
+	r *http.Request, u *store.User, inst *store.Instance, req *setupRollbackRequest,
+) (*store.SavedSetup, *control.RollbackPayload, error) {
+	ctx := r.Context()
+	running := inst.State == string(instance.StateRunning)
+	if !h.canRollBack(ctx, u, inst.ID, running, req) {
+		return nil, nil, apierr.New(errcode.Forbidden)
+	}
+	row, refs, err := h.DB.SetupByID(ctx, inst.ID, r.PathValue("sid"))
+	if err != nil {
+		return nil, nil, apierr.New(errcode.Internal).Wrap(err)
+	}
+	if row == nil {
+		return nil, nil, apierr.New(errcode.NotFound)
+	}
+	preview, err := h.setupPreview(ctx, inst, row, refs)
+	if err != nil {
+		return nil, nil, apierr.New(errcode.Internal).Wrap(err)
+	}
+	if req.World && (preview.Setup.WorldBackup == nil || !preview.Setup.WorldBackup.Available) {
+		return nil, nil, apierr.New(errcode.ValidationFailed).With("field", rollbackWorldField)
+	}
+	if !preview.Ready {
+		return nil, nil, apierr.New(errcode.InvalidState).With("problems", preview.Problems)
+	}
+	payload := &control.RollbackPayload{SetupID: row.ID, World: req.World, Start: req.Start}
+	if match := r.Header.Get("If-Match"); match != "" && !running {
+		if match != preview.ETag {
+			return nil, nil, apierr.New(errcode.StaleWrite)
+		}
+		payload.ETag = match
+	}
+	return row, payload, nil
+}
+
+// canRollBack reports whether u holds the rights a rollback's steps need on the instance id: to
+// stop it when it runs, to start it when req starts it, and to restore backups when req restores
+// the world.
+func (h *Instances) canRollBack(
+	ctx context.Context, u *store.User, id string, running bool, req *setupRollbackRequest,
+) bool {
+	return (!running || h.Authz.Can(ctx, u, authz.InstanceStop, id)) &&
+		(!req.Start || h.Authz.Can(ctx, u, authz.InstanceStart, id)) &&
+		(!req.World || h.Authz.Can(ctx, u, authz.BackupsRestore, id))
 }
