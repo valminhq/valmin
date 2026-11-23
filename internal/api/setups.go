@@ -119,6 +119,21 @@ func (h *Instances) setupRoutes(rt *routeTable) {
 	rt.Handle("DELETE /api/v1/instances/{id}/setups/{sid}", http.HandlerFunc(h.deleteSetup))
 }
 
+// canSeeSetups reports whether u may see the instance id's saved setups and roll it back to one:
+// an administrator, or a member who may manage its mods, who rolls back mods and config files
+// only.
+func (h *Instances) canSeeSetups(ctx context.Context, u *store.User, id string) bool {
+	return h.Authz.Can(ctx, u, authz.SetupsManage, id) || h.Authz.Can(ctx, u, authz.ModsManage, id)
+}
+
+// withoutContent drops the file text from configs, for a caller who may not read raw config
+// files.
+func withoutContent(configs []setupConfigView) {
+	for i := range configs {
+		configs[i].Content = nil
+	}
+}
+
 func (h *Instances) setupInstance(w http.ResponseWriter, r *http.Request) (*store.Instance, bool) {
 	return h.mustLoadInstance(w, r, r.PathValue("id"))
 }
@@ -133,7 +148,7 @@ func (h *Instances) listSetups(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
-	if !h.Authz.Can(r.Context(), u, authz.SetupsManage, id) {
+	if !h.canSeeSetups(r.Context(), u, id) {
 		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
@@ -174,7 +189,7 @@ func (h *Instances) getSetup(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
-	if !h.Authz.Can(r.Context(), u, authz.SetupsManage, id) {
+	if !h.canSeeSetups(r.Context(), u, id) {
 		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
@@ -201,6 +216,9 @@ func (h *Instances) getSetup(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
+	if !h.Authz.Can(r.Context(), u, authz.ConfigRaw, id) {
+		withoutContent(view.Configs)
+	}
 	JSON(w, r, http.StatusOK, view)
 }
 
@@ -217,7 +235,7 @@ func (h *Instances) readSetupConfig(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
-	if !h.Authz.Can(r.Context(), u, authz.SetupsManage, id) {
+	if !h.Authz.Can(r.Context(), u, authz.ConfigRaw, id) {
 		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
@@ -341,7 +359,7 @@ func (h *Instances) previewSetup(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
-	if !h.Authz.Can(r.Context(), u, authz.SetupsManage, id) {
+	if !h.canSeeSetups(r.Context(), u, id) {
 		apierr.Write(w, r, apierr.New(errcode.Forbidden))
 		return
 	}
@@ -358,17 +376,25 @@ func (h *Instances) previewSetup(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.NotFound))
 		return
 	}
-	preview, err := h.setupPreview(r.Context(), inst, row, refs)
+	modsOnly := r.URL.Query().Get("mods_only") == "true" || !h.Authz.Can(r.Context(), u, authz.SetupsManage, id)
+	preview, err := h.setupPreview(r.Context(), inst, row, refs, modsOnly)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
+	}
+	if !h.Authz.Can(r.Context(), u, authz.ConfigRaw, id) {
+		withoutContent(preview.Current.Configs)
+		withoutContent(preview.Setup.Configs)
 	}
 	w.Header().Set("ETag", preview.ETag)
 	JSON(w, r, http.StatusOK, preview)
 }
 
+// setupPreview compares row with inst's current setup and lists what keeps a restore of it from
+// running. A mods-only restore keeps the current launch and backup settings, so the saved ones
+// are not checked.
 func (h *Instances) setupPreview(
-	ctx context.Context, inst *store.Instance, row *store.SavedSetup, refs []store.SetupArtifactRef,
+	ctx context.Context, inst *store.Instance, row *store.SavedSetup, refs []store.SetupArtifactRef, modsOnly bool,
 ) (setupPreviewView, error) {
 	snap, err := control.DecodeSetupSnapshot(row)
 	if err != nil {
@@ -394,7 +420,7 @@ func (h *Instances) setupPreview(
 			return p, err
 		}
 	}
-	if err := h.ctl.SetupJobs.ValidateSettings(ctx, inst, &snap.Instance); err != nil {
+	if err := h.ctl.SetupJobs.ValidateSettings(ctx, inst, &snap.Instance); err != nil && !modsOnly {
 		p.Problems = append(p.Problems, err.Error())
 	}
 	targetPaths, err := control.SetupPaths(snap.Mods, snap.ConfigPaths())

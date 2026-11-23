@@ -16,7 +16,19 @@
 	import DiffView from '#lib/components/diff-view.svelte';
 	import Problem from '#lib/components/problem.svelte';
 
-	let { preview, instanceId }: { preview: SetupPreview; instanceId: string } = $props();
+	let {
+		preview,
+		instanceId,
+		settingsRestored = true,
+		readable = true
+	}: {
+		preview: SetupPreview;
+		instanceId: string;
+		/** Whether the rollback restores the launch and backup settings shown. */
+		settingsRestored?: boolean;
+		/** Whether the viewer may read config file contents; otherwise only names are shown. */
+		readable?: boolean;
+	} = $props();
 	let opened = $state<Record<string, boolean>>({});
 	/** Both texts of each changed file opened so far, or why they could not be read. */
 	let texts = $state<Record<string, { a: string; b: string } | { failure: unknown }>>({});
@@ -66,8 +78,9 @@
 		<Card.Header>
 			<Card.Title>Game and settings</Card.Title>
 			<Card.Description>
-				Game build and world name are for comparison only. Restoring changes the other settings
-				shown here.
+				{settingsRestored
+					? 'Game build and world name are for comparison only. Rolling back changes the other settings shown here.'
+					: 'For comparison only: this rollback keeps the current settings.'}
 			</Card.Description>
 		</Card.Header>
 		<Card.Content>
@@ -163,7 +176,9 @@
 			{:else}
 				{@render fileList('Removed by the restore', removed)}
 				{@render fileList('Added by the restore', added)}
-				{#if changed.length > 0}
+				{#if changed.length > 0 && !readable}
+					{@render fileList('Changed by the restore', changed)}
+				{:else if changed.length > 0}
 					<h4 class="text-sm font-medium">Changed by the restore ({changed.length})</h4>
 					<p class="text-sm text-muted-foreground">
 						Lines marked − are from the current server; lines marked + are from the saved setup.

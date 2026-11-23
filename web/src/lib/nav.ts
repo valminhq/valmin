@@ -57,7 +57,11 @@ export function serverSections(allowed: readonly string[]): ServerSection[] {
 			visible: holds(actions.notificationsManage)
 		},
 		{ segment: 'backups', label: 'Backups', visible: holds(actions.backupsList) },
-		{ segment: 'setups', label: 'Saved setups', visible: holds(actions.setupsManage) },
+		{
+			segment: 'setups',
+			label: 'Saved setups',
+			visible: holds(actions.setupsManage) || holds(actions.modsManage)
+		},
 		{
 			segment: 'maintenance',
 			label: 'Maintenance',

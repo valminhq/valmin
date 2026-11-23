@@ -510,12 +510,18 @@ func validDigest(digest string) bool {
 	return err == nil && strings.ToLower(digest) == digest
 }
 
-// TxApplySetupState replaces managed-mod rows and saved launch and backup settings in one
-// transaction. World selection, game build, credentials, and other instance fields remain
-// untouched. Files must already have been staged and verified before the transaction starts.
+// SetupSettings are the launch and backup settings a setup restore writes.
+type SetupSettings struct {
+	Launch InstanceLaunch
+	Backup BackupPolicy
+}
+
+// TxApplySetupState replaces managed-mod rows and, unless settings is nil, the launch and backup
+// settings in one transaction. World selection, game build, credentials, and other instance
+// fields remain untouched. Files must already have been staged and verified before the
+// transaction starts.
 func TxApplySetupState(
-	ctx context.Context, tx *sql.Tx, instanceID string,
-	mods []InstanceMod, launch *InstanceLaunch, backup BackupPolicy,
+	ctx context.Context, tx *sql.Tx, instanceID string, mods []InstanceMod, settings *SetupSettings,
 ) error {
 	if instanceID == "" {
 		return errors.New("empty setup instance id")
@@ -551,15 +557,8 @@ func TxApplySetupState(
 		}
 	}
 	res, err := tx.ExecContext(ctx, `
-		UPDATE instances SET
-			server_name = ?, public = ?, crossplay = ?, preset = ?, modifiers = ?,
-			mem_limit_mb = ?, cpu_limit = ?, extra_args = ?,
-			backup_keep_cold = ?, backup_keep_hot = ?, backup_on_restart = ?,
-			modded = ?, bepinex_version = ?, pending_restart = TRUE, updated_at = ?
+		UPDATE instances SET modded = ?, bepinex_version = ?, pending_restart = TRUE, updated_at = ?
 		WHERE id = ? AND state = 'stopped'`,
-		launch.ServerName, launch.Public, launch.Crossplay, launch.Preset,
-		launch.Modifiers, launch.MemLimitMB, launch.CPULimit, launch.ExtraArgs,
-		backup.KeepCold, backup.KeepHot, backup.OnRestart,
 		bepinexVersion != nil, bepinexVersion, Now(), instanceID)
 	if err != nil {
 		return fmt.Errorf("apply saved setup to instance %s: %w", instanceID, err)
@@ -570,6 +569,27 @@ func TxApplySetupState(
 	}
 	if n == 0 {
 		return ErrInstanceNotStopped
+	}
+	return txApplySetupSettings(ctx, tx, instanceID, settings)
+}
+
+// txApplySetupSettings writes a restore's launch and backup settings to the stopped instance,
+// nothing when settings is nil.
+func txApplySetupSettings(ctx context.Context, tx *sql.Tx, instanceID string, settings *SetupSettings) error {
+	if settings == nil {
+		return nil
+	}
+	launch, backup := &settings.Launch, &settings.Backup
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE instances SET
+			server_name = ?, public = ?, crossplay = ?, preset = ?, modifiers = ?,
+			mem_limit_mb = ?, cpu_limit = ?, extra_args = ?,
+			backup_keep_cold = ?, backup_keep_hot = ?, backup_on_restart = ?
+		WHERE id = ? AND state = 'stopped'`,
+		launch.ServerName, launch.Public, launch.Crossplay, launch.Preset,
+		launch.Modifiers, launch.MemLimitMB, launch.CPULimit, launch.ExtraArgs,
+		backup.KeepCold, backup.KeepHot, backup.OnRestart, instanceID); err != nil {
+		return fmt.Errorf("apply saved settings to instance %s: %w", instanceID, err)
 	}
 	return nil
 }

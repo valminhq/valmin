@@ -46,10 +46,12 @@ type SetupJobs struct {
 // SetupRestoreSubmission is one setup restore to queue: the setup with its package references,
 // the fingerprint of the server state the restore was previewed against, and who asked.
 type SetupRestoreSubmission struct {
-	Instance    *store.Instance
-	Setup       *store.SavedSetup
-	Refs        []store.SetupArtifactRef
-	ETag        string
+	Instance *store.Instance
+	Setup    *store.SavedSetup
+	Refs     []store.SetupArtifactRef
+	ETag     string
+	// ModsOnly restores mods and config files and keeps the current launch and backup settings.
+	ModsOnly    bool
 	RequestedBy string
 	// Audit is the request's entry, nil for a restore another job runs.
 	Audit *store.AuditEntry
@@ -69,7 +71,7 @@ func (s *SetupJobs) SubmitRestore(ctx context.Context, sub *SetupRestoreSubmissi
 		}
 	}()
 	id := sub.Instance.ID
-	payload := SetupJobPayload{SetupID: sub.Setup.ID, StagingDir: staging, ETag: sub.ETag}
+	payload := SetupJobPayload{SetupID: sub.Setup.ID, StagingDir: staging, ETag: sub.ETag, ModsOnly: sub.ModsOnly}
 	job, err := s.Engine.Submit(ctx, &jobs.Spec{
 		Kind: jobs.KindSetupRestore, LockKey: jobs.InstanceLockKey(id),
 		LockKeys:   []string{SetupArtifactLock},

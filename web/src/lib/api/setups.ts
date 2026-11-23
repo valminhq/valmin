@@ -99,22 +99,28 @@ export const setups = {
 		api
 			.getText(`${path(instanceId, setupId)}/configs/${encodeURIComponent(file)}`)
 			.then((res) => res.text),
-	preview: (instanceId: string, setupId: string) =>
-		api.get<SetupPreview>(`${path(instanceId, setupId)}/preview`),
+	/** Compares the setup with the server and checks a restore of it; `modsOnly` checks one that
+	 * keeps the current launch and backup settings. */
+	preview: (instanceId: string, setupId: string, modsOnly = false) =>
+		api.get<SetupPreview>(
+			`${path(instanceId, setupId)}/preview${modsOnly ? '?mods_only=true' : ''}`
+		),
 	/** Puts the server back on the setup in one job: stops it if it runs, restores the setup and
-	 * optionally its linked world, and optionally starts it again. The fingerprint is sent only for
-	 * a stopped server. */
+	 * optionally its linked world, and optionally starts it again. `modsOnly` keeps the current
+	 * launch and backup settings, which a caller who may not manage setups must ask for. The
+	 * fingerprint is sent only for a stopped server. */
 	rollback: (
 		instanceId: string,
 		setupId: string,
-		options: { world?: boolean; start?: boolean; etag?: string } = {}
+		options: { world?: boolean; start?: boolean; modsOnly?: boolean; etag?: string } = {}
 	) =>
 		request<Job>(`${path(instanceId, setupId)}/rollback`, {
 			method: 'POST',
 			headers: options.etag ? { 'If-Match': options.etag } : {},
 			body: {
 				...(options.world ? { world: true } : {}),
-				...(options.start ? { start: true } : {})
+				...(options.start ? { start: true } : {}),
+				...(options.modsOnly ? { mods_only: true } : {})
 			}
 		}),
 	remove: (instanceId: string, setupId: string) =>
