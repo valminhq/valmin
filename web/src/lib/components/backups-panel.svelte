@@ -197,6 +197,14 @@
 		}
 	}
 
+	/** What the archive says about the mods its world was played with, '' when it recorded none. */
+	function modsLine(archive: Backup): string {
+		if (archive.mods_match_current === true) return 'Mods: same as now';
+		if (archive.mods_match_current !== false) return '';
+		const setup = archive.matching_setups?.[0];
+		return setup ? `Mods: as in ${setup.name}` : 'Mods: differ from now';
+	}
+
 	function askRestore(archive: Backup) {
 		restoring = archive;
 		restoreOpen = true;
@@ -564,6 +572,11 @@
 														: 'linked to a saved setup'}</span
 												>
 											{/if}
+											{#if modsLine(archive)}
+												<span class="text-xs text-muted-foreground" data-testid="backup-mods"
+													>{modsLine(archive)}</span
+												>
+											{/if}
 										</div>
 										<div class="grid gap-0.5">
 											<span class="text-xs text-muted-foreground md:hidden">Size</span>
@@ -817,7 +830,30 @@
 		: ''}. Mods, configuration, server files and player lists are not touched. The panel first backs up what is there now, if anything, as a pre restore backup, and leaves this server stopped afterwards so you can check it before starting."
 	confirmLabel="Restore backup"
 	onconfirm={restore}
-/>
+>
+	{#if restoring?.mods_match_current === false}
+		{@const setup = restoring.matching_setups?.[0]}
+		<div
+			class={['grid justify-items-start gap-2 rounded-md border p-3 text-sm', warningBox]}
+			data-testid="restore-mods-warning"
+		>
+			<span
+				>This world was played with other mods than are installed now, so it would start with mods
+				it was not played with.</span
+			>
+			{#if setup}
+				<Button
+					variant="outline"
+					size="sm"
+					href="{resolve('/instances/[id]/setups', {
+						id: instance.id
+					})}?setup={encodeURIComponent(setup.id)}&world={encodeURIComponent(restoring.id)}"
+					>Roll back to {setup.name} with this world instead</Button
+				>
+			{/if}
+		</div>
+	{/if}
+</DestructiveConfirm>
 
 <!--
 	F5 again: deleting an archive is not recoverable, so it is named in full and something is
