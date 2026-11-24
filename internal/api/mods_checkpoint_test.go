@@ -336,3 +336,36 @@ func TestAWaitingSetupGetsTheNextUpdatesWorldBackup(t *testing.T) {
 		}
 	})
 }
+
+// TestAnUnchangedSetupIsNotSavedAgain asserts a mod change saves no automatic setup when the
+// newest setup already holds the server's setup: an update's world backup goes to the waiting
+// setup instead, and a removal that backs up no world needs nothing more.
+func TestAnUnchangedSetupIsNotSavedAgain(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := installWorld(t, twoVersions()...)
+	alreadyModded(t, db)
+	installOK(t, rt, admin, "Ns-Only", "1.0.0")
+	giveWorld(t, dataDir)
+	updated := savePending(t, rt, db, admin, "before the update")
+
+	installOK(t, rt, admin, "Ns-Only", "2.0.0")
+
+	backups := preUpdateBackupIDs(t, db)
+	if row := setupRow(t, db, updated); len(backups) != 1 || row.BackupID != backups[0] {
+		t.Errorf("setup linked to %q, want %v", row.BackupID, backups)
+	}
+	if setups := automaticSetups(t, db); len(setups) != 1 {
+		t.Errorf("automatic setups = %+v, want only the install's", setups)
+	}
+
+	savePending(t, rt, db, admin, "before the removal")
+	rec := deleteMod(t, rt, admin, "Ns-Only", "")
+	var accepted jobView
+	decodeInto(t, rec, &accepted)
+	if job := waitJob(t, rt, admin, accepted.JobID); job.Status != "succeeded" {
+		t.Fatalf("uninstall job = %+v, want succeeded", job)
+	}
+	if setups := automaticSetups(t, db); len(setups) != 1 {
+		t.Errorf("automatic setups after removal = %+v, want only the install's", setups)
+	}
+}

@@ -41,9 +41,13 @@ afterEach(() => {
 
 describe('LastModChange', () => {
 	it('names the newest automatic setup, what changed since and links to roll back to it', async () => {
+		const current = setup({ id: 'manual', name: 'Mine', automatic: false }).mods.map((m) => ({
+			...m,
+			version: '2.0.0'
+		}));
 		daemon.on('GET', '/instances/inst-a/setups', () =>
 			Response.json({
-				items: [setup({ id: 'manual', name: 'Mine', automatic: false }), setup({})]
+				items: [setup({ id: 'manual', name: 'Mine', automatic: false, mods: current }), setup({})]
 			})
 		);
 		render(LastModChange, { instanceId: 'inst-a', installed });
@@ -53,6 +57,20 @@ describe('LastModChange', () => {
 		expect(line.textContent).toContain('since then: Author-Plugin 1.0.0 → 2.0.0');
 		expect(screen.getByRole('link', { name: 'Undo' }).getAttribute('href')).toBe(
 			'/instances/inst-a/setups?setup=auto-1'
+		);
+	});
+
+	it('names a newer manual setup holding other mods, which stood in for the automatic one', async () => {
+		daemon.on('GET', '/instances/inst-a/setups', () =>
+			Response.json({
+				items: [setup({ id: 'manual', name: 'Mine', automatic: false }), setup({ id: 'older' })]
+			})
+		);
+		render(LastModChange, { instanceId: 'inst-a', installed });
+		const line = await screen.findByTestId('last-mod-change');
+		expect(line.textContent).toContain('Mine');
+		expect(screen.getByRole('link', { name: 'Undo' }).getAttribute('href')).toBe(
+			'/instances/inst-a/setups?setup=manual'
 		);
 	});
 

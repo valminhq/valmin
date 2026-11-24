@@ -5,11 +5,14 @@
 	import { setups, type SavedSetup } from '#lib/api/setups.js';
 	import { changeSummary } from '#lib/compare.js';
 
-	// The newest automatic setup of a server, what changed in its mods since, and a link to roll
-	// back to it. Shows nothing when there is none or nothing changed since.
+	// The setup saved before a server's last mod change, what changed in its mods since, and a link
+	// to roll back to it: the newest setup that is automatic or holds other mods than installed,
+	// which is the one standing in when an automatic setup was not saved because it matched it.
+	// Shows nothing when there is none or nothing changed since.
 	let { instanceId, installed }: { instanceId: string; installed: InstalledMod[] } = $props();
 
-	let newest = $state<SavedSetup | null>(null);
+	// The server's setups, newest first; null until read or when the read failed.
+	let items = $state<SavedSetup[] | null>(null);
 	let request = 0;
 
 	// Reloads each time the installed list is read again, which every mod change does.
@@ -18,17 +21,20 @@
 		void load(instanceId);
 	});
 
-	/** Reads the setups of instance id and keeps its newest automatic one. */
+	/** Reads the setups of instance id, newest first. */
 	async function load(id: string) {
 		const mine = ++request;
 		try {
 			const list = await setups.list(id);
-			if (mine === request) newest = list.items.find((setup) => setup.automatic) ?? null;
+			if (mine === request) items = list.items;
 		} catch {
-			if (mine === request) newest = null;
+			if (mine === request) items = null;
 		}
 	}
 
+	const newest = $derived(
+		items?.find((setup) => setup.automatic || changeSummary(setup.mods, installed) !== '') ?? null
+	);
 	const since = $derived(newest ? changeSummary(newest.mods, installed) : '');
 </script>
 

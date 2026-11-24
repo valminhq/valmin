@@ -200,8 +200,11 @@ update keeps both even when it fails. Disabling or enabling a mod saves nothing,
 the installs that create a server.
 **Before mod changes** on **Saved setups** turns this off, or saves light setups; the
 `setup_before_update` instance field holds the choice (`full`, `light` or `off`). Copies made
-to test an update never save one. A capture reuses the package copy of the newest setup for
-every mod whose files are unchanged since, as long as that copy still verifies.
+to test an update never save one. No automatic setup is saved when the server's newest setup
+already holds the same game build, settings, mod files and configuration files, and is not light
+where the automatic one would be full, as long as the change takes no world snapshot or the
+newest setup is waiting for one and is linked to it. A capture reuses the package copy of the
+newest setup for every mod whose files are unchanged since, as long as that copy still verifies.
 
 Each server keeps its newest ten automatic setups, from restores and changes together, and the
 newest three of those that link a world snapshot keep it. Both numbers are set under **Before
