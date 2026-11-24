@@ -16,6 +16,8 @@ B- POST /api/v1/admin/alert-rules
 B- POST /api/v1/admin/alert-rules/test
 B- DELETE /api/v1/admin/alert-rules/{rid}
 B- PATCH /api/v1/admin/alert-rules/{rid}
+B- GET /api/v1/admin/cache
+B- POST /api/v1/admin/cache/prune
 B- GET /api/v1/admin/diagnostics
 B- GET /api/v1/admin/diagnostics/bundle
 B- POST /api/v1/admin/diagnostics/run

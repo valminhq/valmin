@@ -1883,6 +1883,57 @@ Every route needs `panel.settings`; an account without it gets `404`.
 - `GET /api/v1/admin/export/download` returns that archive as `application/gzip`, with
   range requests supported, and `404` when there is none. Each download is written to the audit log.
 
+## Cache
+
+Both routes need `panel.settings`; an account without it gets `404`. What counts as in use
+is described in [Reclaim cache space](operations.md#reclaim-cache-space).
+
+- `GET /api/v1/admin/cache` lists the cached mod archives, game builds, saved setup files
+  and partial downloads in one page (`next_cursor` is always `null`), with a `summary` per
+  kind and `grace_seconds`, the time an unused entry is kept after it was last written or
+  used. Each item has `kind` (`mod_archive`, `game_build`, `setup_blob` or
+  `partial_download`), `name`, `registry` (set for mod archives and their partial
+  downloads), `size_bytes`, `reclaimable_bytes`, `in_use`, `prunable` (a prune now
+  removes it), `servers` (`id` and `name` of the servers using it), `setups` (the saved
+  setups holding it) and `prunable_at` (`null` while in use). `reclaimable_bytes` is what
+  a prune now would free: `0` for an entry in use or inside its grace period, and for a
+  file whose bytes another name still links, so a mod archive and the saved setup file
+  sharing its bytes count once.
+- `POST /api/v1/admin/cache/prune` returns a job that removes every unused entry past its
+  grace period. The job holds every server's instance and sequence locks, the saved-setup
+  lock and the export lock, so it answers `409` while any of those jobs runs, and they get
+  `409` while it runs. It is written to the audit log and cannot be cancelled; it takes
+  seconds. While a game build download is in progress it leaves the game builds for a
+  later prune and says so in its log.
+
+```json
+{
+  "items": [
+    {
+      "kind": "mod_archive",
+      "name": "denikson-BepInExPack_Valheim-5.4.2202",
+      "registry": "thunderstore",
+      "size_bytes": 798720,
+      "reclaimable_bytes": 798720,
+      "in_use": false,
+      "prunable": true,
+      "servers": [],
+      "setups": 0,
+      "prunable_at": "2026-11-24T10:00:00Z"
+    }
+  ],
+  "next_cursor": null,
+  "total": null,
+  "summary": [
+    { "kind": "mod_archive", "count": 1, "size_bytes": 798720, "reclaimable_bytes": 798720 },
+    { "kind": "game_build", "count": 0, "size_bytes": 0, "reclaimable_bytes": 0 },
+    { "kind": "setup_blob", "count": 0, "size_bytes": 0, "reclaimable_bytes": 0 },
+    { "kind": "partial_download", "count": 0, "size_bytes": 0, "reclaimable_bytes": 0 }
+  ],
+  "grace_seconds": 3600
+}
+```
+
 ## Change your password
 
 `POST /api/v1/me/password` changes the password of the signed-in account. It needs the

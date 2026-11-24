@@ -83,6 +83,7 @@ describe('summaries of recorded actions', () => {
 			'Alex blocked sign-ins to bea after repeated failures'
 		],
 		['deep checks', 'panel.settings', { operation: 'deep_checks' }, 'Alex ran the deep checks'],
+		['cache prune', 'panel.settings', { operation: 'cache_prune' }, 'Alex pruned the unused cache'],
 		[
 			'create from scratch',
 			'instances.create',

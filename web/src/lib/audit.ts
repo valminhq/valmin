@@ -187,6 +187,12 @@ const clip = (raw: string, max = 120) => (raw.length > max ? `${raw.slice(0, max
  */
 type Phrase = (d: Detail, server: string, on: string) => string;
 
+/** The panel operations audited under panel.settings that read as a sentence. */
+const PANEL_OPERATIONS: Record<string, string> = {
+	deep_checks: 'ran the deep checks',
+	cache_prune: 'pruned the unused cache'
+};
+
 const PHRASES: Record<string, Phrase> = {
 	'orphans.remove': (d) =>
 		`removed the unrecoverable container ${text(d.container_name) || ''}`.trim(),
@@ -303,7 +309,7 @@ const PHRASES: Record<string, Phrase> = {
 	'auth.login.blocked': (d) =>
 		`blocked sign-ins to ${text(d.username) || 'an account'} after repeated failures`,
 	// Only operations with a sentence; the rest keep their raw detail, which names them.
-	'panel.settings': (d) => (d.operation === 'deep_checks' ? 'ran the deep checks' : '')
+	'panel.settings': (d) => PANEL_OPERATIONS[text(d.operation)] ?? ''
 };
 
 /**

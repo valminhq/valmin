@@ -214,6 +214,7 @@ var cancelActions = map[jobs.Kind]authz.Action{
 	jobs.KindUpdateTest:       authz.InstanceUpdate,
 	jobs.KindUpdateApply:      authz.InstanceUpdate,
 	jobs.KindExport:           authz.PanelSettings,
+	jobs.KindCachePrune:       authz.PanelSettings,
 }
 
 // canCancel reports whether u may cancel job, checking the action cancelActions requires for

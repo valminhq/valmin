@@ -52,6 +52,8 @@ every server gets its own copy.
 - Save a named setup of mods, configuration and settings, and roll back to it later.
 - Move the whole panel to a new host from one export: a light one carries only what
   cannot be downloaded again, a full one also the game builds, mods and backups.
+- See which cached game builds and mod archives no server or saved setup uses, and
+  prune them to free disk space.
 
 **Sharing and people**
 

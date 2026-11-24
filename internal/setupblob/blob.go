@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
@@ -78,7 +79,7 @@ func (s *Store) PutLink(ctx context.Context, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := s.Verify(digest); err == nil {
+	if s.reuse(digest) {
 		return digest, nil
 	}
 	if err := os.MkdirAll(s.root, 0o750); err != nil {
@@ -132,7 +133,7 @@ func (s *Store) hashFile(ctx context.Context, path string) (string, error) {
 func (s *Store) PutBytes(ctx context.Context, data []byte) (string, error) {
 	sum := sha256.Sum256(data)
 	digest := hex.EncodeToString(sum[:])
-	if _, err := s.Verify(digest); err == nil {
+	if s.reuse(digest) {
 		return digest, nil
 	}
 	return s.Put(ctx, bytes.NewReader(data))
@@ -209,28 +210,80 @@ func (s *Store) Verify(digest string) (string, error) {
 	return path, nil
 }
 
-// GC removes unreferenced blobs and the temporary files of interrupted writes. Call only while
-// setup save jobs are idle, since a blob written by an unfinished save has not yet acquired its
-// database reference.
-func (s *Store) GC(referenced map[string]bool) error {
-	entries, err := os.ReadDir(s.root)
+// Entry is one file in the store: a blob named by its digest, or the temporary file of an
+// interrupted write.
+type Entry struct {
+	Name    string
+	Partial bool
+	fsutil.Usage
+}
+
+// Entries lists the blobs and temporary files in the store in name order. A missing directory
+// is an empty store.
+func (s *Store) Entries() ([]Entry, error) {
+	dirents, err := os.ReadDir(s.root)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return fmt.Errorf("list setup blobs: %w", err)
+		return nil, fmt.Errorf("list setup blobs: %w", err)
 	}
-	for _, entry := range entries {
-		name := entry.Name()
-		temporary := strings.HasPrefix(name, ".part-") || strings.HasPrefix(name, ".link-")
-		if !temporary && (!validDigest(name) || referenced[name]) {
+	var entries []Entry
+	for _, d := range dirents {
+		name := d.Name()
+		partial := strings.HasPrefix(name, ".part-") || strings.HasPrefix(name, ".link-")
+		if !partial && !validDigest(name) {
 			continue
 		}
-		if err := os.Remove(filepath.Join(s.root, name)); err != nil {
-			return fmt.Errorf("remove orphan setup blob %s: %w", name, err)
+		info, err := d.Info()
+		if err != nil {
+			continue
 		}
+		entries = append(entries, Entry{Name: name, Partial: partial, Usage: fsutil.StatUsage(info)})
 	}
-	return fsutil.SyncDir(s.root)
+	return entries, nil
+}
+
+// GC removes unreferenced blobs and the temporary files of interrupted writes whose inode last
+// changed before cutoff, and returns what it removed. A blob a save is writing or reusing has
+// not yet acquired its database reference, so call it only while setup saves are idle, or with
+// a cutoff that leaves the files they touched alone.
+func (s *Store) GC(referenced map[string]bool, cutoff time.Time) ([]Entry, error) {
+	entries, err := s.Entries()
+	if err != nil {
+		return nil, err
+	}
+	var removed []Entry
+	for _, e := range entries {
+		if (!e.Partial && referenced[e.Name]) || e.Changed.After(cutoff) {
+			continue
+		}
+		path := filepath.Join(s.root, e.Name)
+		// A save may have reused the blob since the listing; its touch moved the ctime.
+		if info, err := os.Lstat(path); err != nil || fsutil.StatUsage(info).Changed.After(cutoff) {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return removed, fmt.Errorf("remove orphan setup blob %s: %w", e.Name, err)
+		}
+		removed = append(removed, e)
+	}
+	if len(removed) == 0 {
+		return nil, nil
+	}
+	return removed, fsutil.SyncDir(s.root)
+}
+
+// reuse reports whether the store already holds digest intact, and marks it as just used so a
+// GC cutoff spares it until the caller's setup references it.
+func (s *Store) reuse(digest string) bool {
+	path, err := s.Verify(digest)
+	if err != nil {
+		return false
+	}
+	now := time.Now()
+	_ = os.Chtimes(path, now, now)
+	return true
 }
 
 func validDigest(digest string) bool {

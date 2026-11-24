@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/runtime"
 )
 
@@ -178,15 +179,21 @@ func NewBuildCache() *BuildCache {
 
 // lock blocks until cacheDir has no other writer and returns its release.
 func (b *BuildCache) lock(cacheDir string) func() {
+	mu := b.dirLock(cacheDir)
+	mu.Lock()
+	return mu.Unlock
+}
+
+// dirLock is cacheDir's writer lock, created on first use.
+func (b *BuildCache) dirLock(cacheDir string) *sync.Mutex {
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	mu := b.locks[cacheDir]
 	if mu == nil {
 		mu = &sync.Mutex{}
 		b.locks[cacheDir] = mu
 	}
-	b.mu.Unlock()
-	mu.Lock()
-	return mu.Unlock
+	return mu
 }
 
 // Ensure caches in.BuildID, publishing it only under the installed manifest's build ID. The
@@ -201,7 +208,11 @@ func (b *BuildCache) Ensure(ctx context.Context, in *BuildCacheInput) (string, e
 	}
 	final := filepath.Join(in.CacheDir, in.BuildID)
 	if _, err := os.Lstat(final); err == nil {
-		return cachedBuildID(final, in.BuildID)
+		id, err := cachedBuildID(final, in.BuildID)
+		if err == nil {
+			touchBuild(final)
+		}
+		return id, err
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", fmt.Errorf("stat build cache: %w", err)
 	}
@@ -276,6 +287,118 @@ func publishBuild(cacheDir, partLocal, actual string) error {
 		if err := os.Rename(partLocal, final); err != nil {
 			return fmt.Errorf("publish build %s: %w", actual, err)
 		}
+	}
+	touchBuild(final)
+	return nil
+}
+
+// touchBuild marks a cached build as just handed out, so a prune's grace period covers the
+// clone that follows. A failure only costs that protection.
+func touchBuild(dir string) {
+	now := time.Now()
+	_ = os.Chtimes(dir, now, now)
+}
+
+// BuildEntry is one directory in a build cache: a published build, or the staging a download
+// or a removal left behind. SizeBytes is summed over the tree; Changed is the directory's own.
+type BuildEntry struct {
+	Name    string
+	BuildID string
+	Partial bool
+	fsutil.Usage
+}
+
+// trashSuffix names a build being removed. Renaming it first means a crash mid-removal leaves
+// a tree no lookup ever treats as a build.
+const trashSuffix = ".trash"
+
+// Entries lists the builds and leftover staging directories in cacheDir in name order, with
+// their sizes. Anything else in the directory is not the cache's and is never listed.
+func (b *BuildCache) Entries(cacheDir string) ([]BuildEntry, error) {
+	dirents, err := os.ReadDir(cacheDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list build cache: %w", err)
+	}
+	var entries []BuildEntry
+	for _, d := range dirents {
+		name := d.Name()
+		if !d.IsDir() {
+			continue
+		}
+		e := BuildEntry{Name: name}
+		if strings.HasSuffix(name, ".part") || strings.HasSuffix(name, trashSuffix) {
+			e.Partial = true
+		} else if id, err := validSteamBuild(name); err == nil {
+			e.BuildID = id
+		} else {
+			continue
+		}
+		info, err := d.Info()
+		if err != nil {
+			continue
+		}
+		e.Usage = fsutil.StatUsage(info)
+		if e.SizeBytes, err = diskUsage(filepath.Join(cacheDir, name)); err != nil {
+			return nil, err
+		}
+		entries = append(entries, e)
+	}
+	return entries, nil
+}
+
+// ErrBuildCacheBusy is a prune that found a download holding the build cache.
+var ErrBuildCacheBusy = errors.New("a game build download is in progress")
+
+// Prune removes the entries remove selects and returns them. It holds cacheDir's lock, so no
+// download starts, publishes or hands out a cached build until it ends, and returns
+// ErrBuildCacheBusy without waiting when a download holds the lock.
+func (b *BuildCache) Prune(ctx context.Context, cacheDir string, remove func(BuildEntry) bool) ([]BuildEntry, error) {
+	mu := b.dirLock(cacheDir)
+	if !mu.TryLock() {
+		return nil, ErrBuildCacheBusy
+	}
+	defer mu.Unlock()
+	entries, err := b.Entries(cacheDir)
+	if err != nil {
+		return nil, err
+	}
+	var removed []BuildEntry
+	for _, e := range entries {
+		if err := ctx.Err(); err != nil {
+			return removed, fmt.Errorf("prune build cache: %w", err)
+		}
+		if !remove(e) {
+			continue
+		}
+		if err := removeBuildDir(cacheDir, e.Name); err != nil {
+			return removed, err
+		}
+		removed = append(removed, e)
+	}
+	return removed, nil
+}
+
+// removeBuildDir moves name aside under the trash suffix, then deletes the tree.
+func removeBuildDir(cacheDir, name string) error {
+	dir := filepath.Join(cacheDir, name)
+	if !strings.HasSuffix(name, trashSuffix) {
+		trash := dir + trashSuffix
+		if err := os.RemoveAll(trash); err != nil {
+			return fmt.Errorf("clear %s: %w", trash, err)
+		}
+		if err := os.Rename(dir, trash); err != nil {
+			return fmt.Errorf("set aside cached build %s: %w", name, err)
+		}
+		if err := fsutil.SyncDir(cacheDir); err != nil {
+			return err
+		}
+		dir = trash
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("remove cached build %s: %w", name, err)
 	}
 	return nil
 }

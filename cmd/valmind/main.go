@@ -30,6 +30,7 @@ import (
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/jobs"
 	"github.com/valminhq/valmin/internal/mods/cache"
+	"github.com/valminhq/valmin/internal/mods/source"
 	"github.com/valminhq/valmin/internal/runtime"
 	"github.com/valminhq/valmin/internal/store"
 	"github.com/valminhq/valmin/internal/version"
@@ -351,8 +352,10 @@ func (d *daemon) serve(ctx context.Context, cfg *config.Config, patterns instanc
 	// The rule for a partial artefact, applied to the mod zip cache: a
 	// .part a killed panel left behind is deleted unconditionally before anything else
 	// touches the cache directory.
-	if err := cache.Sweep(cache.Root(cfg.Data.Root)); err != nil {
-		return fmt.Errorf("mod cache sweep: %w", err)
+	for _, src := range source.All() {
+		if err := cache.Sweep(cache.RootFor(cfg.Data.Root, src)); err != nil {
+			return fmt.Errorf("mod cache sweep: %w", err)
+		}
 	}
 
 	server, err := api.NewServer(&api.Dependencies{
