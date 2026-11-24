@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestPutVerifyAndGC(t *testing.T) {
@@ -28,7 +29,7 @@ func TestPutVerifyAndGC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	if err := s.GC(map[string]bool{first: true}); err != nil {
+	if _, err := s.GC(map[string]bool{first: true}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -43,7 +44,7 @@ func TestPutVerifyAndGC(t *testing.T) {
 	if _, err := s.Verify(first); !errors.Is(err, ErrCorruptBlob) {
 		t.Errorf("corrupt blob = %v, want ErrCorruptBlob", err)
 	}
-	if err := s.GC(nil); err != nil {
+	if _, err := s.GC(nil, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
@@ -174,11 +175,40 @@ func TestGCRemovesInterruptedWrites(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := s.GC(map[string]bool{digest: true}); err != nil {
+	if _, err := s.GC(map[string]bool{digest: true}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(s.root)
 	if err != nil || len(entries) != 1 || entries[0].Name() != digest {
 		t.Errorf("blobs after GC = %v, %v, want only %s", entries, err, digest)
+	}
+}
+
+// TestGCSparesAJustLinkedBlob covers a blob hard-linked from an old file: its mtime is the
+// file's, but the link moved its ctime, so a GC cutoff an hour back leaves it alone.
+func TestGCSparesAJustLinkedBlob(t *testing.T) {
+	s := New(t.TempDir())
+	src := filepath.Join(t.TempDir(), "Mod-1.0.0.zip")
+	if err := os.WriteFile(src, []byte("package archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(src, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PutLink(t.Context(), src); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := s.GC(nil, time.Now().Add(-time.Hour))
+	if err != nil || len(removed) != 0 {
+		t.Fatalf("GC an hour back = %v, %v, want nothing removed", removed, err)
+	}
+	removed, err = s.GC(nil, time.Now().Add(time.Minute))
+	if err != nil || len(removed) != 1 {
+		t.Fatalf("GC past the link = %v, %v, want the orphan removed", removed, err)
+	}
+	if freed := removed[0].FreedBytes(); freed != 0 {
+		t.Errorf("orphan still linked by its source freed %d bytes, want 0", freed)
 	}
 }

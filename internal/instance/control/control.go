@@ -60,6 +60,7 @@ type Components struct {
 	Restarter   *Restarter
 	Backupper   *Backupper
 	Pruner      *Pruner
+	CachePruner *CachePruner
 	Provisioner *Provisioner
 	Deleter     *Deleter
 	Cloner      *Cloner
@@ -97,7 +98,7 @@ func New(cfg *config.Config, d *Deps) (*Components, error) {
 	states := &stateWatch{}
 	d.Engine.Announce(func(_ context.Context, instanceID string) { states.notify(instanceID) })
 	builds := instance.NewBuildCache()
-	c := &Components{Worlds: d.Worlds}
+	c := &Components{Worlds: d.Worlds, CachePruner: newCachePruner(d, dataRoot, builds)}
 	sandbox := instance.SandboxOf(cfg)
 	c.Starter = &Starter{
 		DB: d.DB, Engine: d.Engine, Runtime: d.Runtime, Streams: d.Streams, Keeper: d.Keeper,

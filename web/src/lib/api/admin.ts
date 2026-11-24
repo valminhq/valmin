@@ -151,6 +151,40 @@ export const installExport = {
 	downloadUrl: '/api/v1/admin/export/download'
 };
 
+export type CacheKind = 'mod_archive' | 'game_build' | 'setup_blob' | 'partial_download';
+
+/**
+ * One cached file or directory and who still uses it. `prunable` says a prune now removes it;
+ * `prunable_at` is null while in use.
+ */
+export interface CacheEntry {
+	kind: CacheKind;
+	name: string;
+	registry: string | null;
+	size_bytes: number;
+	reclaimable_bytes: number;
+	in_use: boolean;
+	prunable: boolean;
+	servers: { id: string; name: string }[];
+	setups: number;
+	prunable_at: string | null;
+}
+
+export interface CacheInventory {
+	items: CacheEntry[];
+	next_cursor: string | null;
+	total: number | null;
+	summary: { kind: CacheKind; count: number; size_bytes: number; reclaimable_bytes: number }[];
+	grace_seconds: number;
+}
+
+export const caches = {
+	/** Every cached mod archive, game build and setup file, with what pruning would free. */
+	inventory: (signal?: AbortSignal) => api.get<CacheInventory>('/admin/cache', signal),
+	/** Removes what nothing uses as a job. It holds every server's lock while it runs. */
+	prune: () => api.post<Job>('/admin/cache/prune')
+};
+
 /** One diagnosed fact. `status` and `source` are closed sets the backend owns. */
 export interface DiagnosticCheck {
 	id: string;

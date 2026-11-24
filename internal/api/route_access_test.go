@@ -141,6 +141,8 @@ var globalRouteAccess = map[string]string{
 	"POST /api/v1/admin/alert-rules/test":                 accessHidden,
 	"DELETE /api/v1/admin/alert-rules/{rid}":              accessHidden,
 	"PATCH /api/v1/admin/alert-rules/{rid}":               accessHidden,
+	"GET /api/v1/admin/cache":                             accessHidden,
+	"POST /api/v1/admin/cache/prune":                      accessHidden,
 	"GET /api/v1/admin/diagnostics":                       accessAdmin,
 	"GET /api/v1/admin/diagnostics/bundle":                accessAdmin,
 	"POST /api/v1/admin/diagnostics/run":                  accessAdmin,

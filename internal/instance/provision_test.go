@@ -3,6 +3,8 @@ package instance
 import (
 	"context"
 	"crypto/rand"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -667,5 +669,105 @@ func TestWatchDownloadReportsWhatIsOnDisk(t *testing.T) {
 	}
 	if len(messages) != seen {
 		t.Errorf("%d reports arrived after stop", len(messages)-seen)
+	}
+}
+
+func TestBuildCachePruneRemovesSelectedBuildsAndLeftovers(t *testing.T) {
+	cache := t.TempDir()
+	for _, name := range []string{"100", "200", "300.part", "branch-beta.part", "400.trash", "notabuild"} {
+		if err := os.MkdirAll(filepath.Join(cache, name, "sub"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(cache, name, "sub", "file"), []byte("bytes"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(cache, "500"), []byte("a file, not a build"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	builds := NewBuildCache()
+
+	entries, err := builds.Entries(cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := make([]string, 0, len(entries))
+	for _, e := range entries {
+		listed = append(listed, fmt.Sprintf("%s:%s:%v", e.Name, e.BuildID, e.Partial))
+		if e.SizeBytes <= 0 {
+			t.Errorf("%s size = %d, want its tree's size", e.Name, e.SizeBytes)
+		}
+	}
+	wantListed := []string{
+		"100:100:false",
+		"200:200:false",
+		"300.part::true",
+		"400.trash::true",
+		"branch-beta.part::true",
+	}
+	if !slices.Equal(listed, wantListed) {
+		t.Errorf("Entries = %v, want %v", listed, wantListed)
+	}
+
+	removed, err := builds.Prune(t.Context(), cache, func(e BuildEntry) bool { return e.BuildID != "100" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 4 {
+		t.Errorf("Prune removed %d entries, want 4", len(removed))
+	}
+	left, err := os.ReadDir(cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(left))
+	for _, d := range left {
+		names = append(names, d.Name())
+	}
+	if want := []string{"100", "500", "notabuild"}; !slices.Equal(names, want) {
+		t.Errorf("left after Prune = %v, want %v", names, want)
+	}
+}
+
+func TestBuildCacheEnsureRefreshesACachedBuildsTimes(t *testing.T) {
+	cache := t.TempDir()
+	build := filepath.Join(cache, "21981590")
+	writeSteamManifest(t, build)
+	old := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(build, old, old); err != nil {
+		t.Fatal(err)
+	}
+	fake := runtime.NewFake()
+	fake.CreateErr = errFailIfCalled
+	if _, err := NewBuildCache().Ensure(t.Context(), &BuildCacheInput{
+		Runtime: fake, Image: "steamcmd/steamcmd:latest",
+		HostCacheDir: cache, CacheDir: cache, BuildID: "21981590",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(build)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(info.ModTime()) > time.Minute {
+		t.Errorf("cached build mtime = %s, want refreshed when handed out", info.ModTime())
+	}
+}
+
+func TestBuildCachePruneSkipsWhileADownloadHoldsTheCache(t *testing.T) {
+	cache := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cache, "100"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	builds := NewBuildCache()
+	release := builds.lock(cache)
+	defer release()
+
+	removed, err := builds.Prune(t.Context(), cache, func(BuildEntry) bool { return true })
+	if !errors.Is(err, ErrBuildCacheBusy) || len(removed) != 0 {
+		t.Fatalf("Prune during a download = %v, %v, want ErrBuildCacheBusy and nothing removed", removed, err)
+	}
+	if _, err := os.Stat(filepath.Join(cache, "100")); err != nil {
+		t.Errorf("build removed during a download: %v", err)
 	}
 }

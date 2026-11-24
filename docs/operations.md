@@ -541,6 +541,39 @@ Game containers run alongside Compose services. Stopping the Compose stack does
 not stop those game containers. On recovery, restore the data with UID/GID
 `10000:10000`, start the panel, and start the servers you want running.
 
+## Reclaim cache space
+
+Valmin never deletes a downloaded game build or mod archive on its own, so `cache/` grows
+with every game update and every mod version a server has ever installed. Open **Cache**
+in the header menu (it needs `panel.settings`) to see what is cached, what uses each item
+and how much a prune would free, then select **Prune cache**.
+
+A prune removes:
+
+- a mod archive no server has installed and no saved setup holds, light or not, in any version;
+- a game build no server runs, has recorded, or was installing when an update was
+  interrupted. A build that only saved setups name is removed, since restoring a setup never
+  reinstalls a build;
+- a saved setup file no saved setup holds any more, such as one left by a deleted setup;
+- an unfinished download.
+
+It keeps anything written or used in the last hour, so a server being created keeps the
+game build it is copying, and leaves `cache/catalogue.db` alone. The prune holds every
+server's lock and takes seconds; jobs on servers, sequences, saved-setup jobs and exports
+are refused while it runs, and it is refused while any of them runs, so it never cuts a
+sequence between two steps. While a game build is downloading, it leaves the game builds for
+the next prune.
+
+A saved setup that keeps package files shares the disk space of the cached mod archive, so
+removing one of the two frees nothing while the other remains; **Cache** counts such
+bytes once. On btrfs or XFS, a server's game files share blocks with the build they were
+copied from, so freeing a build can free less than its listed size.
+
+A pruned item is downloaded again when it is needed, which costs bandwidth and, for a game
+build, a few minutes. A mod version its registry no longer lists cannot be downloaded again
+once its archive is gone: save a setup that keeps package files for any server you may need
+to rebuild offline.
+
 ## Move to a new host
 
 An installation export is one archive with everything the new host cannot download again.

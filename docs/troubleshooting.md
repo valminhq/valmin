@@ -417,8 +417,10 @@ default), the panel still starts, and its home page shows the low-disk condition
 installs, game updates, new servers, clones, backups, restores, world imports, world
 tools and setup saves, restores and rollbacks are refused with `insufficient_disk` until there is
 room again. Starting and stopping servers, editing configs and deleting backups, worlds,
-setups and servers still work, so delete what you no longer need from the panel. The
-refusal lifts as soon as enough space is free, without a restart.
+setups and servers still work, so delete what you no longer need from the panel.
+[Prune the cache](operations.md#reclaim-cache-space) too: old game builds and mod archives
+nothing uses are often the largest thing on the disk. The refusal lifts as soon as enough
+space is free, without a restart.
 
 ## A backup says attention required
 

@@ -462,7 +462,7 @@ func (w *wiring) profileHosts() profileHosts {
 }
 
 // diagnostics builds the diagnostics endpoints, reusing the enabled registry clients for their
-// live checks.
+// live checks, and the cache endpoints beside them.
 func (w *wiring) diagnostics(instances *Instances, mods *Mods) *Diagnostics {
 	clients := make(map[source.Source]diag.PackageIndex, len(mods.Clients))
 	for src, client := range mods.Clients {
@@ -470,6 +470,7 @@ func (w *wiring) diagnostics(instances *Instances, mods *Mods) *Diagnostics {
 	}
 	d := &Diagnostics{Instances: instances, Clients: clients, StartedAt: time.Now().UTC()}
 	diagnosticRoutes(w.routes, d)
+	cacheRoutes(w.routes, &Caches{Authz: w.az, Pruner: instances.ctl.CachePruner})
 	return d
 }
 

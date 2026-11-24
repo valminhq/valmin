@@ -120,6 +120,9 @@ var (
 	// KindExport writes an installation export. It is global, holds every instance's lock so
 	// no instance job changes the data it copies, and is never resumed.
 	KindExport = Kind{"export"}
+	// KindCachePrune removes the cached mod archives, game builds and setup files no server or
+	// saved setup uses. It is global, holds every instance's lock, and is never resumed.
+	KindCachePrune = Kind{"cache_prune"}
 )
 
 // resumeIntentHonoured is ADR-032 / 12 §9.3: a resume intent is honoured only for kinds whose
@@ -147,6 +150,7 @@ var needsDiskRoom = map[Kind]bool{
 	KindWorldDelete: false, KindSetupDelete: false, KindKeyRotate: false,
 	KindWebhookDeliver: false, KindAlertScan: false, KindDiagnose: false, KindChain: false,
 	KindRemoteCopy: false, KindRemoteTest: false, KindRemotePrune: false, KindRemoteCreate: false,
+	KindCachePrune: false,
 }
 
 // NeedsDiskRoom reports whether a job of this kind is refused below the free-space floor.
@@ -161,7 +165,7 @@ var allKinds = []Kind{
 	KindWorldDelete, KindSetupSave, KindSetupRestore, KindSetupDelete,
 	KindKeyRotate, KindWebhookDeliver, KindAlertScan, KindDiagnose,
 	KindRemoteCopy, KindRemoteTest, KindRemotePrune, KindRemoteCreate, KindWorldTool, KindChain,
-	KindUpdateTest, KindUpdateApply, KindExport, KindSetupRollback,
+	KindUpdateTest, KindUpdateApply, KindExport, KindSetupRollback, KindCachePrune,
 }
 
 // Kinds returns every kind this build knows, for tables that need a row per kind.
