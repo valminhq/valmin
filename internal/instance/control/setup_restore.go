@@ -503,8 +503,9 @@ func (s *SetupJobs) saveBeforeRestore(
 			return nil, nil, err
 		}
 		if world != nil {
-			archived = joinFinish(recordSnapshot(world), s.linkPending(ctx, jh, plan.Instance, world.ID))
-			before.worldID = world.ID
+			link := s.linkPending(ctx, jh, plan.Instance, world.ID)
+			archived = joinFinish(recordSnapshot(world), link)
+			before.worldID, before.linked = world.ID, link != nil
 		}
 	}
 	jh.Progress(ctx, 60, "saving the current setup")

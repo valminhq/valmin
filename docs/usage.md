@@ -866,11 +866,15 @@ after the change and after who made it:
 
 An update keeps both even if it fails. Disabling or enabling a mod saves nothing, and neither do
 the installs that create a server from a template or code. A game update on its own changes no
-mods, so it saves no setup either. The dialog before the change
-says what is saved.
+mods, so it saves no setup either. Nothing is saved either when the newest setup, such as one
+you saved just before the change, already holds the server's setup: an install or a removal
+then needs nothing more, and an update links its world backup to that setup when it was saved
+to wait for one. The dialog before the change says what is saved.
 
 To undo a change, choose **Undo** on the line above the installed mods, which names the newest
-automatic setup, when and by whom it was saved, and what changed in the mods since. It opens
+automatic setup, when and by whom it was saved, and what changed in the mods since. A setup you
+saved yourself after it, or without any automatic setup, takes its place when it holds other
+mods than the installed ones. It opens
 **Saved setups** on that setup; choose **Roll back to this setup**. The line is shown to those
 who may manage mods, and only while the mods differ from that setup. You can also open **Saved
 setups** and select any automatic setup. The mods, their configuration files and settings go back as they were (see
