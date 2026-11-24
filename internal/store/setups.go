@@ -32,6 +32,14 @@ type SavedSetup struct {
 	// WorldPending marks a setup waiting to be linked to the world backup the next mod change
 	// takes, if its mods are still the server's then.
 	WorldPending bool `json:"world_pending"`
+	// ModsFingerprint hashes the managed mods the setup holds. Empty for a setup saved before
+	// fingerprints were recorded and not yet backfilled.
+	ModsFingerprint string `json:"-"`
+	// WorldBackups counts the instance's backups that fit the setup: those taken under the same
+	// mods, and the linked one. WorldBackupsNewest is the newest one's time, zero when none.
+	// Both are read back and never written.
+	WorldBackups       int       `json:"-"`
+	WorldBackupsNewest time.Time `json:"-"`
 	// Configs are the config files the setup holds. SetupByID and TxSaveSetup fill and read
 	// them; ListSetups leaves them empty.
 	Configs []SetupConfigRef `json:"-"`
@@ -89,11 +97,13 @@ func TxSaveSetup(ctx context.Context, tx *sql.Tx, setup *SavedSetup, artifacts [
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO saved_setups (
 			id, instance_id, name, created_by, game_build_id, world_name,
-			snapshot_json, backup_id, created_at, automatic, configs_truncated, world_pending
-		) VALUES (?, ?, ?, (SELECT id FROM users WHERE id = ?), ?, ?, ?, ?, ?, ?, ?, ?)`,
+			snapshot_json, backup_id, created_at, automatic, configs_truncated, world_pending,
+			mods_fingerprint
+		) VALUES (?, ?, ?, (SELECT id FROM users WHERE id = ?), ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		setup.ID, setup.InstanceID, setup.Name, createdBy, setup.GameBuildID,
 		setup.WorldName, setup.SnapshotJSON, backupID, FormatTime(setup.CreatedAt),
-		setup.Automatic, setup.ConfigsTruncated, setup.WorldPending); err != nil {
+		setup.Automatic, setup.ConfigsTruncated, setup.WorldPending,
+		nullIfEmpty(setup.ModsFingerprint)); err != nil {
 		return fmt.Errorf("insert saved setup %s: %w", setup.ID, err)
 	}
 	for _, c := range setup.Configs {
@@ -157,25 +167,38 @@ func checkSetupBackup(ctx context.Context, tx *sql.Tx, setup *SavedSetup) error 
 	return nil
 }
 
+// fitsSetup is the condition under which backup row b fits the saved_setups row in scope: taken
+// under the same mods, or linked to it.
+const fitsSetup = `b.instance_id = saved_setups.instance_id AND (b.id = saved_setups.backup_id
+	OR b.mods_fingerprint = saved_setups.mods_fingerprint)`
+
 const savedSetupColumns = `id, instance_id, name, created_by, game_build_id,
 	world_name, snapshot_json, backup_id, created_at, automatic, configs_truncated, world_pending,
-	(SELECT username FROM users WHERE users.id = saved_setups.created_by)`
+	(SELECT username FROM users WHERE users.id = saved_setups.created_by), mods_fingerprint,
+	(SELECT COUNT(*) FROM backups b WHERE ` + fitsSetup + `),
+	(SELECT MAX(b.created_at) FROM backups b WHERE ` + fitsSetup + `)`
 
 func scanSavedSetup(row scanner) (SavedSetup, error) {
 	var s SavedSetup
-	var createdBy, backupID, createdByName sql.NullString
+	var createdBy, backupID, createdByName, fingerprint, newest sql.NullString
 	var createdAt string
 	if err := row.Scan(&s.ID, &s.InstanceID, &s.Name, &createdBy,
 		&s.GameBuildID, &s.WorldName, &s.SnapshotJSON, &backupID, &createdAt,
-		&s.Automatic, &s.ConfigsTruncated, &s.WorldPending, &createdByName); err != nil {
+		&s.Automatic, &s.ConfigsTruncated, &s.WorldPending, &createdByName, &fingerprint,
+		&s.WorldBackups, &newest); err != nil {
 		return SavedSetup{}, fmt.Errorf("scan saved setup: %w", err)
 	}
 	s.CreatedBy, s.CreatedByName = createdBy.String, createdByName.String
-	s.BackupID = backupID.String
+	s.BackupID, s.ModsFingerprint = backupID.String, fingerprint.String
 	var err error
 	s.CreatedAt, err = ParseTime(createdAt)
 	if err != nil {
 		return SavedSetup{}, fmt.Errorf("saved setup created_at: %w", err)
+	}
+	if newest.Valid {
+		if s.WorldBackupsNewest, err = ParseTime(newest.String); err != nil {
+			return SavedSetup{}, fmt.Errorf("saved setup newest world backup: %w", err)
+		}
 	}
 	return s, nil
 }
@@ -489,6 +512,93 @@ func (db *DB) BackupSetupLinks(ctx context.Context, instanceID string) (map[stri
 		return nil, fmt.Errorf("list setup links of %s: %w", instanceID, err)
 	}
 	return links, nil
+}
+
+// BackupSetupMatches maps each backup of an instance taken under the mods a saved setup holds
+// to those setups, newest first.
+func (db *DB) BackupSetupMatches(ctx context.Context, instanceID string) (map[string][]SetupLink, error) {
+	rows, err := db.Reader.QueryContext(ctx, `
+		SELECT b.id, s.id, s.name FROM backups b
+		JOIN saved_setups s ON s.instance_id = b.instance_id AND s.mods_fingerprint = b.mods_fingerprint
+		WHERE b.instance_id = ? ORDER BY s.created_at DESC, s.id DESC`, instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("list setups matching the backups of %s: %w", instanceID, err)
+	}
+	defer func() { _ = rows.Close() }()
+	matches := map[string][]SetupLink{}
+	for rows.Next() {
+		var backupID string
+		var link SetupLink
+		if err := rows.Scan(&backupID, &link.ID, &link.Name); err != nil {
+			return nil, fmt.Errorf("scan setup match: %w", err)
+		}
+		matches[backupID] = append(matches[backupID], link)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list setups matching the backups of %s: %w", instanceID, err)
+	}
+	return matches, nil
+}
+
+// SetupWorldBackups returns the backups that fit setup: those of its instance taken under the
+// mods it holds, and the one it links, newest first.
+func (db *DB) SetupWorldBackups(ctx context.Context, setup *SavedSetup) ([]Backup, error) {
+	rows, err := db.Reader.QueryContext(ctx, `SELECT `+backupColumns+` FROM backups
+		WHERE instance_id = ? AND (id = ? OR (mods_fingerprint IS NOT NULL AND mods_fingerprint = ?))
+		ORDER BY created_at DESC, id DESC`,
+		setup.InstanceID, setup.BackupID, setup.ModsFingerprint)
+	if err != nil {
+		return nil, fmt.Errorf("list the world backups of setup %s: %w", setup.ID, err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := []Backup{}
+	for rows.Next() {
+		b, err := scanBackup(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list the world backups of setup %s: %w", setup.ID, err)
+	}
+	return out, nil
+}
+
+// UnfingerprintedSetups returns every setup without a mods fingerprint, for a backfill.
+func (db *DB) UnfingerprintedSetups(ctx context.Context) ([]SavedSetup, error) {
+	rows, err := db.Reader.QueryContext(ctx, `SELECT `+savedSetupColumns+`
+		FROM saved_setups WHERE mods_fingerprint IS NULL`)
+	if err != nil {
+		return nil, fmt.Errorf("list setups without a mods fingerprint: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []SavedSetup
+	for rows.Next() {
+		s, err := scanSavedSetup(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list setups without a mods fingerprint: %w", err)
+	}
+	return out, nil
+}
+
+// SetSetupFingerprints records the mods fingerprint of each setup named in fingerprints, by
+// setup ID, leaving any that already has one unchanged.
+func (db *DB) SetSetupFingerprints(ctx context.Context, fingerprints map[string]string) error {
+	return db.inTx(ctx, "record setup mods fingerprints", func(tx *sql.Tx) error {
+		for id, fingerprint := range fingerprints {
+			if _, err := tx.ExecContext(ctx, `UPDATE saved_setups SET mods_fingerprint = ?
+				WHERE id = ? AND mods_fingerprint IS NULL`, fingerprint, id); err != nil {
+				return fmt.Errorf("record the mods fingerprint of setup %s: %w", id, err)
+			}
+		}
+		return nil
+	})
 }
 
 // BackupPinned reports whether any saved setup references an instance's backup.

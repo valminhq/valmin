@@ -214,6 +214,17 @@ one past the world count, releases its snapshot to normal retention. If the curr
 be saved, for example because an installed mod's files are missing, the restore or change goes
 ahead and its job log says so.
 
+Every backup records the managed mods its world was last played with: each mod's name, version
+and enabled state, as installed when the server last started, or as recorded by the backup a
+world restore brought back. After a world import, a restore of a backup that recorded no mods, or
+deleting the selected world, the installed mods count as the world's, as they do when Valmin
+starts for a server whose world's mods were never recorded. A clone takes its source's. A rollback to a setup can restore any backup on disk taken with exactly the
+setup's mods, so a server that ran for weeks on one mod set can go back to its newest world
+rather than the one kept with the setup. Only the kept backup is outside retention; the other
+matching backups are removed by retention like any other, so set retention to keep as far back
+as you may want to go. Backups taken before backups recorded their mods match only the setup that
+keeps them.
+
 A setup saved with **The backup the next mod update takes**, the default, waits for the
 pre-update snapshot the next mod update or setup restore takes, and is linked to it. That
 snapshot is the world just before the change, with exactly the setup's mods installed. A change

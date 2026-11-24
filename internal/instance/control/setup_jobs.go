@@ -234,7 +234,7 @@ func (s *SetupJobs) RunSave(inst *store.Instance, payload *SetupJobPayload, requ
 			CreatedBy: requestedBy, GameBuildID: deref(inst.GameBuildID),
 			WorldName: inst.WorldName, SnapshotJSON: string(raw), BackupID: backupID,
 			Configs: snap.ConfigFiles, ConfigsTruncated: snap.ConfigsTruncated,
-			WorldPending: payload.LinkNextWorld,
+			WorldPending: payload.LinkNextWorld, ModsFingerprint: ModsFingerprint(snap.Mods),
 		}
 		jh.Progress(ctx, 100, "setup saved")
 		out := jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: func(ctx context.Context, tx *sql.Tx) error {

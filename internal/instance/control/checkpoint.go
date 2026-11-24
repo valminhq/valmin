@@ -191,7 +191,7 @@ func (s *SetupJobs) captureAutomatic(
 		ID: store.NewID(), InstanceID: inst.ID, Name: setupName(a.name), CreatedBy: a.createdBy,
 		GameBuildID: deref(inst.GameBuildID), WorldName: inst.WorldName, SnapshotJSON: string(raw),
 		BackupID: a.worldID, Automatic: true, Configs: snap.ConfigFiles,
-		ConfigsTruncated: snap.ConfigsTruncated,
+		ConfigsTruncated: snap.ConfigsTruncated, ModsFingerprint: ModsFingerprint(snap.Mods),
 	}, refs, nil
 }
 

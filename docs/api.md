@@ -937,7 +937,9 @@ Reading a setup's config text needs `config.raw`, as a config file's history doe
 `content` of `.cfg` files in a setup or preview is left out without it. Send `{"name":"Working before update"}`
 to `POST /instances/{id}/setups` while the server is stopped or running; any other state is
 `409 invalid_state` with `allowed_states`. Add
-`"world_backup_id":"BACKUP_ID"` to link a consistent backup from the same server, and
+`"world_backup_id":"BACKUP_ID"` to link a consistent backup from the same server taken with the
+mods installed now (a backup taken with other mods is `422 validation_failed` naming
+`world_backup_id`; one that recorded no mods is accepted), and
 `"light":true` to keep only the packages whose installed files differ from their cached
 registry archive or whose registry is disabled. `"back_up_world":true` takes a consistent
 backup during the save, with trigger `manual`, verified and world-checked like any manual
@@ -966,6 +968,19 @@ Each setup has `created_by`, `config_tree`, `configs_truncated`, `automatic`, `l
 `world_pending` and `configs_digest`. `configs_digest` is a hash over the setup's config file
 paths and bytes: two setups holding the same files have the same digest. The list carries each
 setup's `mods` and `configs_digest`, but not its `configs`.
+
+Every backup records the managed mods its world was last played with: those installed when the
+server last started, or, after a world restore, those the restored backup recorded. After a world
+import, a restore of a backup that recorded no mods, or deleting the selected world, the installed
+mods count as the world's; a clone takes its source's. It records each
+mod's name, version and enabled state, not its registry, client tag, lock or config files, and
+not the game build. A backup fits a setup when it was taken with exactly the mods the setup holds, or when the setup
+links it. Each setup has `world_backups_count`, how many backups fit it, and
+`world_backups_newest_at`, when the newest of them was taken (`null` for none). Reading a setup
+and its preview add `world_backups`, those backups newest first, each with `id`, `world_name`,
+`created_at`, `consistent`, `available` (the archive is on disk), `size_bytes`, `trigger` and
+`linked` (the backup the setup links). Best-effort backups are included. Backups taken before
+backups recorded their mods fit only the setup that links them.
 `created_by` is the username of whoever saved the setup or made the change an automatic one
 comes before, `null` for the panel's own change or a deleted account. `config_tree` is
 `false` for a setup saved before setups held the whole config tree: it holds only the `.cfg`
@@ -1004,16 +1019,18 @@ starts the server.
 
 `POST /instances/{id}/setups/{sid}/rollback` does the whole undo as one job (`setup_rollback`,
 not cancellable): it stops the server if it runs, restores the setup, restores the world
-backup the setup links with `{"world":true}`, and starts the server again with
+backup the setup links with `{"world":true}` or any of its `world_backups` with
+`{"world_backup_id":"BACKUP_ID"}`, and starts the server again with
 `{"start":true}`. `{"mods_only":true}` restores mods and config files and keeps the current
 launch and backup settings, which it then leaves as they are; a caller without
 `setups.manage` always gets it. `GET …/preview?mods_only=true` checks such a rollback, leaving
 the saved settings out of `problems`, as a preview for a caller without `setups.manage` always
 does. It needs `setups.manage` or `mods.manage`, plus
 `instance.stop` for a running server,
-`instance.start` for `start` and `backups.restore` for `world`. A server that is neither stopped
-nor running returns `409 invalid_state`; `world` without an available linked backup is `422`
-naming `world`. On a stopped server an optional `If-Match` is checked against the preview's
+`instance.start` for `start` and `backups.restore` for `world` or `world_backup_id`. A server that
+is neither stopped nor running returns `409 invalid_state`; `world` without an available linked
+backup is `422` naming `world`, and a `world_backup_id` that is not one of the setup's available
+`world_backups` is `422` naming `world_backup_id`. On a stopped server an optional `If-Match` is checked against the preview's
 `etag` (`412 stale_write` when it differs); on a running server it is ignored, and the job
 fingerprints the server once it is stopped. A step whose job meets another job holding a lock
 it needs waits for that job and tries again, up to three times. A step runs only after the one
@@ -1561,6 +1578,10 @@ inside the archive (`null` when never measured) and `world_attention` is a list 
 `kept_for_setup` is `true` while a saved setup links the archive, which keeps it out of
 retention and makes deleting it `409 invalid_state`; `linked_setups` lists those setups as
 `{id, name}` for a caller with `setups.manage` and is absent otherwise.
+`mods_match_current` is `true` when the archive's world was played with the mods installed now,
+`false` when with other mods, and `null` when it recorded none. `matching_setups` lists, newest first,
+the saved setups holding the mods the archive was taken with, as `{id, name}`, for a caller who
+may see setups (`setups.manage` or `mods.manage`) and is absent otherwise.
 
 Each rule sends its own message: a destination named by rules of different kinds, such as
 `job_failed` and `backup_failed`, gets one from each. A destination named by several rules of

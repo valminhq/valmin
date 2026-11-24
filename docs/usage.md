@@ -879,8 +879,7 @@ mods than the installed ones. It opens
 who may manage mods, and only while the mods differ from that setup. You can also open **Saved
 setups** and select any automatic setup. The mods, their configuration files and settings go back as they were (see
 [Save and restore a setup](#save-and-restore-a-setup)). If the update also changed the
-world, switch on **Also restore the linked world backup** to put the world back in the same
-step.
+world, choose one of the backups under **World** to put the world back in the same step.
 
 Each server keeps its newest ten automatic setups, counting those a setup restore saves. The
 newest three that link a world backup keep it. A kept backup stays outside the backup retention
@@ -1187,8 +1186,8 @@ Mod installs, removals and updates save one on their own unless turned off; see
 [Undo a mod update](#undo-a-mod-update).
 
 Open **Saved setups**, on a running or stopped server. The name field starts as **Working
-before update**; change it if needed, then choose **Save setup**. Under **Associated world
-backup**, choose one of:
+before update**; change it if needed, then choose **Save setup**. Under **World backup to keep
+with this setup**, choose one of:
 
 - **The backup the next mod update takes**, the default. The world backup the next mod update
   or setup restore takes is linked to the setup, as long as the mods are still the ones the
@@ -1196,9 +1195,10 @@ backup**, choose one of:
   a new mod, removing one, or disabling and enabling one before then leaves the setup without
   a backup, since none of them backs up the world. The setup says it is waiting until then.
 - **Back up the world now**, on a stopped server, to take a backup during the save and link it.
-- **None**, or one consistent world backup from this server.
+- **None**, or one consistent world backup from this server taken with the mods installed now.
 
-A linked backup stays outside retention and cannot be deleted while a setup links to it;
+A rollback can restore any backup taken with the setup's mods, not only the one kept with it.
+The kept backup is the one that is sure to be there: it stays outside retention and cannot be deleted while a setup links to it;
 **Backups** marks it **Kept for setup**. Saving a running server reads its config files as they
 are at that moment. If a mod rewrites one while the setup is saved, the save fails and asks
 you to save again. The server is busy while the setup is saved, so a scheduled restart or
@@ -1218,7 +1218,9 @@ build and world name appear in the comparison but do not change on restore. The 
 password and world files are excluded.
 
 The list shows when each setup was saved and by whom; an automatic setup names who made the
-change it comes before. Under each one, **Then** says what changed in the mods after it: up to
+change it comes before. **Worlds** says how many catalogued backups were taken with exactly the
+setup's mods, counting the kept one, and how old the newest is; **World kept** marks a setup
+with a kept backup. Under each one, **Then** says what changed in the mods after it: up to
 the next newer setup, and whether config files changed too, or for the newest up to the
 installed mods. Select a setup to compare it with the current server, or choose another setup
 under **Compare with** to see what differs between the two. Under **Configuration files**, the
@@ -1239,10 +1241,16 @@ for the same mods-only rollback.
 
 Two options come with a rollback:
 
-- **Also restore the linked world backup**, shown when the setup links an available backup and
-  you may restore backups. It replaces the current world with that backup after archiving the
-  current one, so everything played since the backup is lost, and asks you to type the server
-  name. The setup is restored first, so a setup that cannot be applied leaves the world alone.
+- **World**, shown when backups were taken with exactly the setup's mods and you may restore
+  backups. **Keep the current world** is chosen at first. Below it are those backups, newest
+  first and five at a time (**Show more** lists the rest), each with its date, age, reason and
+  size: **Kept with this setup** marks the kept one and **Best-effort** one copied while the
+  server ran. Choosing a backup replaces the current world with it after archiving the current
+  one, so everything played since that backup is lost, and asks you to type the server name.
+  Every backup records the mods its world was played with (their names, versions and enabled
+  states), so a world left from before a mods-only rollback is not offered for the restored
+  setup, and backups taken before Valmin recorded mods are not listed unless kept with the
+  setup. The setup is restored first, so a setup that cannot be applied leaves the world alone.
   If the world restore fails, the setup stays restored and the server shows **This server needs
   a check**.
 - **Start the server again when done**, on a running server and for those who may start it.

@@ -88,19 +88,84 @@ func (s *SetupState) Capture(
 	if err != nil {
 		return SetupSnapshot{}, err
 	}
-	snap := SetupSnapshot{
-		Instance: launch, Mods: make([]SetupMod, 0, len(rows)), Configs: []ManifestConfig{},
+	return SetupSnapshot{
+		Instance: launch, Mods: setupMods(rows), Configs: []ManifestConfig{},
 		ConfigTree: true, ConfigFiles: configs, ConfigsTruncated: truncated,
+	}, nil
+}
+
+// ModsFingerprint hashes the installed managed mods of instance id as ModsFingerprint does.
+func (s *SetupState) ModsFingerprint(ctx context.Context, id string) (string, error) {
+	rows, err := s.DB.InstanceMods(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("read installed mods: %w", err)
 	}
+	return ModsFingerprint(setupMods(rows)), nil
+}
+
+// ModsFingerprint is a hash over each mod's name, version and enabled state, independent of
+// order. A world backup fits a setup when both were taken with the same fingerprint.
+func ModsFingerprint(mods []SetupMod) string {
+	lines := make([]string, 0, len(mods))
+	for _, m := range mods {
+		lines = append(lines, fmt.Sprintf("%s\x00%s\x00%t\n", m.FullName, m.Version, m.Enabled))
+	}
+	slices.Sort(lines)
+	hash := sha256.New()
+	for _, line := range lines {
+		_, _ = io.WriteString(hash, line)
+	}
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+// BackfillSetupFingerprints records the mods fingerprint of each setup saved without one, from
+// the mods it holds. A setup that will not decode is left without one.
+func BackfillSetupFingerprints(ctx context.Context, db *store.DB) error {
+	rows, err := db.UnfingerprintedSetups(ctx)
+	if err != nil || len(rows) == 0 {
+		return err
+	}
+	fingerprints := make(map[string]string, len(rows))
+	for i := range rows {
+		snap, err := DecodeSetupSnapshot(&rows[i])
+		if err != nil {
+			continue
+		}
+		fingerprints[rows[i].ID] = ModsFingerprint(snap.Mods)
+	}
+	return db.SetSetupFingerprints(ctx, fingerprints)
+}
+
+// BackfillWorldMods records, for each instance whose world's mods are unknown, its installed mods
+// as those its world was played with: right for a server that last started with them, which is
+// every server unless its mods changed since.
+func BackfillWorldMods(ctx context.Context, db *store.DB) error {
+	ids, err := db.InstancesWithoutWorldMods(ctx)
+	if err != nil || len(ids) == 0 {
+		return err
+	}
+	state := &SetupState{DB: db}
+	fingerprints := make(map[string]string, len(ids))
+	for _, id := range ids {
+		if fingerprints[id], err = state.ModsFingerprint(ctx, id); err != nil {
+			return err
+		}
+	}
+	return db.SetUnknownWorldMods(ctx, fingerprints)
+}
+
+// setupMods maps installed mod rows to a setup's mods.
+func setupMods(rows []store.InstanceMod) []SetupMod {
+	mods := make([]SetupMod, 0, len(rows))
 	for i := range rows {
 		m := &rows[i]
-		snap.Mods = append(snap.Mods, SetupMod{
+		mods = append(mods, SetupMod{
 			FullName: m.FullName, Source: m.Source.String(), Version: m.Version,
 			InstalledAs: m.InstalledAs, Side: m.Side, Enabled: m.Enabled,
 			Locked: m.Locked, FileManifest: m.FileManifest,
 		})
 	}
-	return snap, nil
+	return mods
 }
 
 // captureSetupConfigs hashes the files instance.ConfigTree lists in inst's config directory,

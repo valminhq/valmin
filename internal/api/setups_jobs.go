@@ -20,6 +20,8 @@ const (
 	setupNameField = "name"
 	// rollbackWorldField is the rollback request's field that restores the linked world too.
 	rollbackWorldField = "world"
+	// worldBackupIDField names the world backup a setup links or a rollback restores.
+	worldBackupIDField = "world_backup_id"
 )
 
 type setupSaveRequest struct {
@@ -127,7 +129,7 @@ func (h *Instances) saveSetup(w http.ResponseWriter, r *http.Request) {
 			map[string]any{
 				"setup_id":               payload.SetupID,
 				setupNameField:           req.Name,
-				"world_backup_id":        req.WorldBackupID,
+				worldBackupIDField:       req.WorldBackupID,
 				"light":                  req.Light,
 				"back_up_world":          req.BackUpWorld,
 				"link_next_world_backup": req.LinkNextWorldBackup,
@@ -165,13 +167,15 @@ func (h *Instances) checkSetupSave(
 	case req.BackUpWorld && !h.Authz.Can(ctx, u, authz.BackupsCreate, inst.ID):
 		return apierr.New(errcode.Forbidden)
 	case req.WorldBackupID != "":
-		return h.validateSetupBackup(ctx, inst.ID, req.WorldBackupID)
+		return h.validateSetupBackup(ctx, inst, req.WorldBackupID)
 	}
 	return nil
 }
 
-func (h *Instances) validateSetupBackup(ctx context.Context, instanceID, backupID string) error {
-	b, err := h.DB.BackupByID(ctx, instanceID, backupID)
+// validateSetupBackup checks backupID names a consistent backup of inst that is on disk and, when
+// it recorded its mods, was taken under the mods inst has installed now.
+func (h *Instances) validateSetupBackup(ctx context.Context, inst *store.Instance, backupID string) error {
+	b, err := h.DB.BackupByID(ctx, inst.ID, backupID)
 	if err != nil {
 		return apierr.New(errcode.Internal).Wrap(err)
 	}
@@ -179,10 +183,20 @@ func (h *Instances) validateSetupBackup(ctx context.Context, instanceID, backupI
 		return apierr.New(errcode.NotFound)
 	}
 	if !b.Consistent {
-		return apierr.New(errcode.ValidationFailed).With("field", "world_backup_id")
+		return apierr.New(errcode.ValidationFailed).With("field", worldBackupIDField)
 	}
 	if _, err := os.Stat(b.Path); err != nil { //nolint:gosec // the path is the backup catalogue's own
-		return apierr.New(errcode.ValidationFailed).With("field", "world_backup_id").Wrap(err)
+		return apierr.New(errcode.ValidationFailed).With("field", worldBackupIDField).Wrap(err)
+	}
+	if b.ModsFingerprint == "" {
+		return nil
+	}
+	current, err := h.ctl.SetupState.ModsFingerprint(ctx, inst.ID)
+	if err != nil {
+		return apierr.New(errcode.Internal).Wrap(err)
+	}
+	if current != b.ModsFingerprint {
+		return apierr.New(errcode.ValidationFailed).With("field", worldBackupIDField)
 	}
 	return nil
 }
@@ -280,6 +294,9 @@ func (h *Instances) deleteSetup(w http.ResponseWriter, r *http.Request) {
 type setupRollbackRequest struct {
 	// World restores the world backup the setup links after the setup.
 	World bool `json:"world,omitempty"`
+	// WorldBackupID restores this backup after the setup in place of the linked one. It must
+	// have been taken under the setup's mods, or be the linked one.
+	WorldBackupID string `json:"world_backup_id,omitempty"`
 	// Start starts the server once everything is restored.
 	Start bool `json:"start,omitempty"`
 	// ModsOnly restores mods and config files and keeps the current launch and backup settings,
@@ -314,6 +331,7 @@ func (h *Instances) rollbackSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.ModsOnly = req.ModsOnly || !h.Authz.Can(r.Context(), u, authz.SetupsManage, id)
+	req.World = req.World || req.WorldBackupID != ""
 	row, payload, err := h.checkRollback(r, u, inst, &req)
 	if err != nil {
 		apierr.Write(w, r, err)
@@ -323,7 +341,7 @@ func (h *Instances) rollbackSetup(w http.ResponseWriter, r *http.Request) {
 		Instance: inst, Payload: *payload, RequestedBy: u.ID,
 		Audit: jobAudit(r.Context(), u.ID, id, "instances.setups.rollback", map[string]any{
 			"setup_id": row.ID, setupNameField: row.Name, rollbackWorldField: req.World, "start": req.Start,
-			"mods_only": req.ModsOnly,
+			"mods_only": req.ModsOnly, worldBackupIDField: payload.WorldBackupID,
 		}),
 	})
 	if err != nil {
@@ -356,13 +374,15 @@ func (h *Instances) checkRollback(
 	if err != nil {
 		return nil, nil, apierr.New(errcode.Internal).Wrap(err)
 	}
-	if req.World && (preview.Setup.WorldBackup == nil || !preview.Setup.WorldBackup.Available) {
-		return nil, nil, apierr.New(errcode.ValidationFailed).With("field", rollbackWorldField)
+	if err := checkRollbackWorld(req, &preview.Setup); err != nil {
+		return nil, nil, err
 	}
 	if !preview.Ready {
 		return nil, nil, apierr.New(errcode.InvalidState).With("problems", preview.Problems)
 	}
-	payload := &control.RollbackPayload{SetupID: row.ID, World: req.World, Start: req.Start, ModsOnly: req.ModsOnly}
+	payload := &control.RollbackPayload{
+		SetupID: row.ID, World: req.World, WorldBackupID: req.WorldBackupID, Start: req.Start, ModsOnly: req.ModsOnly,
+	}
 	if match := r.Header.Get("If-Match"); match != "" && !running {
 		if match != preview.ETag {
 			return nil, nil, apierr.New(errcode.StaleWrite)
@@ -370,6 +390,26 @@ func (h *Instances) checkRollback(
 		payload.ETag = match
 	}
 	return row, payload, nil
+}
+
+// checkRollbackWorld checks the world backup req restores is one of setup's world backups and
+// still on disk: the one req names, or the linked one when it names none.
+func checkRollbackWorld(req *setupRollbackRequest, setup *setupDetailView) error {
+	if !req.World {
+		return nil
+	}
+	if req.WorldBackupID == "" {
+		if setup.WorldBackup == nil || !setup.WorldBackup.Available {
+			return apierr.New(errcode.ValidationFailed).With("field", rollbackWorldField)
+		}
+		return nil
+	}
+	for _, b := range setup.WorldBackups {
+		if b.ID == req.WorldBackupID && b.Available {
+			return nil
+		}
+	}
+	return apierr.New(errcode.ValidationFailed).With("field", worldBackupIDField)
 }
 
 // canRollBack reports whether u holds the rights a rollback's steps need on the instance id: to

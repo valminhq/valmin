@@ -108,6 +108,37 @@ func TestModUpdateSavesALinkedSetup(t *testing.T) {
 	}
 }
 
+// TestAPreUpdateBackupRecordsTheModsBeforeTheChange asserts the world backup a mod update takes
+// records the mods the world was played with, which the setup saved before the update holds, and
+// not the mods the update installs.
+func TestAPreUpdateBackupRecordsTheModsBeforeTheChange(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := installWorld(t, twoVersions()...)
+	alreadyModded(t, db)
+	installOK(t, rt, admin, "Ns-Only", "1.0.0")
+	giveWorld(t, dataDir)
+
+	installOK(t, rt, admin, "Ns-Only", "2.0.0")
+
+	backups := preUpdateBackupIDs(t, db)
+	setups := automaticSetups(t, db)
+	if len(backups) != 1 || len(setups) == 0 {
+		t.Fatalf("pre_update backups = %v, automatic setups = %d, want one and some", backups, len(setups))
+	}
+	b, err := db.BackupByID(t.Context(), "inst-a", backups[0])
+	if err != nil || b == nil {
+		t.Fatalf("BackupByID = %+v, %v", b, err)
+	}
+	current, err := rt.instances.ctl.SetupState.ModsFingerprint(t.Context(), "inst-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.ModsFingerprint == "" || b.ModsFingerprint != setups[0].ModsFingerprint || b.ModsFingerprint == current {
+		t.Errorf("backup mods %q, setup before the update %q, installed now %q: want the backup to "+
+			"match the setup and not the installed mods", b.ModsFingerprint, setups[0].ModsFingerprint, current)
+	}
+}
+
 // TestInstallAndRemovalSaveASetupWithoutAWorld asserts an install that replaces nothing and an
 // uninstall each save the setup before them as an automatic one named after the mods, recorded
 // as the requester's and linked to no world backup, while archiving no world.

@@ -10,6 +10,10 @@ export interface LinkedWorldBackup {
 	consistent: boolean;
 	available?: boolean;
 	size_bytes?: number;
+	/** Why the backup was taken: `manual`, `scheduled`, `pre_update`, ... */
+	trigger?: string;
+	/** In `world_backups`, marks the backup the setup links. */
+	linked?: boolean;
 }
 
 export interface SavedSetup {
@@ -21,6 +25,13 @@ export interface SavedSetup {
 	game_build_id: string;
 	world_name: string;
 	world_backup?: LinkedWorldBackup | null;
+	/** How many backups a rollback to the setup can restore: those taken with its mods, and the
+	 * linked one. */
+	world_backups_count?: number;
+	/** When the newest of them was taken; null when there is none. */
+	world_backups_newest_at?: string | null;
+	/** Those backups, newest first. The setup list leaves them out. */
+	world_backups?: LinkedWorldBackup[];
 	/** False for a setup saved before setups held the whole config tree: it restores only
 	 * the `.cfg` files directly in `BepInEx/config`. */
 	config_tree: boolean;
@@ -116,13 +127,20 @@ export const setups = {
 	rollback: (
 		instanceId: string,
 		setupId: string,
-		options: { world?: boolean; start?: boolean; modsOnly?: boolean; etag?: string } = {}
+		options: {
+			world?: boolean;
+			worldBackupId?: string;
+			start?: boolean;
+			modsOnly?: boolean;
+			etag?: string;
+		} = {}
 	) =>
 		request<Job>(`${path(instanceId, setupId)}/rollback`, {
 			method: 'POST',
 			headers: options.etag ? { 'If-Match': options.etag } : {},
 			body: {
 				...(options.world ? { world: true } : {}),
+				...(options.worldBackupId ? { world_backup_id: options.worldBackupId } : {}),
 				...(options.start ? { start: true } : {}),
 				...(options.modsOnly ? { mods_only: true } : {})
 			}

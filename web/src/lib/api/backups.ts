@@ -32,6 +32,11 @@ export interface Backup {
 	kept_for_setup: boolean;
 	/** The setups linking it, sent only to someone who may manage setups. */
 	linked_setups?: { id: string; name: string }[];
+	/** Whether the archive was taken with the mods installed now; null when it recorded none. */
+	mods_match_current?: boolean | null;
+	/** The saved setups holding the mods the archive was taken with, newest first, sent only to
+	 * someone who may see setups. */
+	matching_setups?: { id: string; name: string }[];
 }
 
 /** An archive that retention deletes once the next backup of a kind is taken. */

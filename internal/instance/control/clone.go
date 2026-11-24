@@ -73,6 +73,7 @@ func (c *Cloner) executeClone(ctx context.Context, jh *jobs.Handle, run *CloneRu
 	if out != nil {
 		return *out
 	}
+	worldMods := modsFingerprintOf(ctx, c.DB, run.Source)
 	containerID, buildID, err := c.createCloneContainer(ctx, jh, run)
 	if err != nil {
 		return cloneFailed(run.Destination.ID, err)
@@ -84,7 +85,7 @@ func (c *Cloner) executeClone(ctx context.Context, jh *jobs.Handle, run *CloneRu
 	jh.Progress(ctx, 100, "clone ready")
 	return jobs.Outcome{
 		Status:   jobs.StatusSucceeded,
-		OnFinish: finishClone(run, mods, archiveResult, worldPresent, containerID, buildID),
+		OnFinish: finishClone(run, mods, archiveResult, worldPresent, worldMods, containerID, buildID),
 	}
 }
 
@@ -205,7 +206,7 @@ func (c *Cloner) createCloneContainer(
 
 func finishClone(
 	run *CloneRun, mods []store.InstanceMod, archiveResult backup.Result, worldPresent bool,
-	containerID, buildID string,
+	worldMods, containerID, buildID string,
 ) func(context.Context, *sql.Tx) error {
 	return func(ctx context.Context, tx *sql.Tx) error {
 		if err := instance.FinishProvisioningTx(ctx, tx, run.Destination.ID,
@@ -228,10 +229,14 @@ func finishClone(
 		if !worldPresent {
 			return nil
 		}
+		if err := store.TxSetWorldMods(ctx, tx, run.Destination.ID, worldMods); err != nil {
+			return err
+		}
 		if err := store.TxCreateBackup(ctx, tx, &store.Backup{
 			ID: run.ArchiveID, InstanceID: run.Destination.ID, Path: archiveResult.Path,
 			SizeBytes: archiveResult.SizeBytes, SHA256: archiveResult.SHA256,
 			WorldName: run.Source.WorldName, Trigger: store.TriggerManual, Consistent: !run.liveSource(),
+			ModsFingerprint: worldMods,
 		}); err != nil {
 			return fmt.Errorf("catalogue clone seed backup: %w", err)
 		}

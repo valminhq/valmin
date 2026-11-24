@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -45,11 +46,13 @@ func (h *Worlds) RunWorldDelete(inst *store.Instance, world *instance.World) job
 			}
 		}
 		msg := world.Name + " removed"
+		finish := snapshot
 		if world.Name == inst.WorldName {
 			msg += "; the server will generate a new world on its next start"
+			finish = chainFinish(snapshot, h.installedWorldMods(ctx, inst.ID))
 		}
 		jh.Progress(ctx, 100, msg)
-		return jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: snapshot}
+		return jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: finish}
 	}
 }
 
@@ -96,7 +99,23 @@ func (h *Worlds) RunWorldImport(
 				world.Info.Name, inst.WorldName)
 		}
 		jh.Progress(ctx, 100, msg)
-		return jobs.Outcome{Status: jobs.StatusSucceeded, OnFinish: snapshot}
+		return jobs.Outcome{
+			Status:   jobs.StatusSucceeded,
+			OnFinish: chainFinish(snapshot, h.installedWorldMods(ctx, inst.ID)),
+		}
+	}
+}
+
+// installedWorldMods returns the finish step recording instanceID's installed mods as those its
+// world was played with, for a world the panel did not see played: it will be played with them.
+// They are recorded as unknown when they cannot be read.
+func (h *Worlds) installedWorldMods(ctx context.Context, instanceID string) func(context.Context, *sql.Tx) error {
+	fingerprint, err := (&SetupState{DB: h.DB}).ModsFingerprint(ctx, instanceID)
+	if err != nil {
+		fingerprint = ""
+	}
+	return func(ctx context.Context, tx *sql.Tx) error {
+		return store.TxSetWorldMods(ctx, tx, instanceID, fingerprint)
 	}
 }
 

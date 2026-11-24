@@ -3,6 +3,7 @@
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { formatBytes } from '#lib/format.js';
+	import { backupAge } from '#lib/backup-points.js';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { actions, instances, type Instance } from '#lib/api/instances.js';
@@ -79,7 +80,10 @@
 	let jobId = $state<string | null>(null);
 	let jobRunning = $state(false);
 	let jobAction = $state<'save' | 'rollback' | 'delete' | null>(null);
-	let restoreWorld = $state(false);
+	/** The world backup the rollback restores, '' to keep the current world. */
+	let rollbackWorldId = $state('');
+	/** Whether the rollback lists every world backup rather than the newest few. */
+	let allWorlds = $state(false);
 	let startAfter = $state(true);
 	let restoreSettings = $state(true);
 	let jobTarget = $state('');
@@ -87,22 +91,30 @@
 	let previewRequest = 0;
 
 	const selected = $derived(list.find((setup) => setup.id === selectedId) ?? null);
-	const linkedBackups = $derived(availableBackups.filter((backup) => backup.consistent));
-	/** The linked world backup, when the rollback can restore it. */
-	const worldBackup = $derived(
-		preview?.setup.world_backup && preview.setup.world_backup.available !== false
-			? preview.setup.world_backup
-			: null
+	/** Backups a setup can keep: consistent ones taken with the mods installed now, or that
+	 * recorded no mods. */
+	const linkedBackups = $derived(
+		availableBackups.filter((backup) => backup.consistent && backup.mods_match_current !== false)
+	);
+	/** How many world backups the rollback lists before "Show more". */
+	const worldsShown = 5;
+	/** The backups the rollback can restore: taken with the setup's mods, and the linked one. */
+	const worldBackups = $derived(preview?.setup.world_backups ?? []);
+	const shownWorlds = $derived(allWorlds ? worldBackups : worldBackups.slice(0, worldsShown));
+	/** The chosen world backup, when the rollback can restore it. */
+	const chosenWorld = $derived(
+		worldBackups.find((backup) => backup.id === rollbackWorldId && backup.available !== false) ??
+			null
 	);
 	const running = $derived(instance?.state === 'running');
-	/** Whether the rollback restores the linked world backup too. */
-	const withWorld = $derived(restoreWorld && worldBackup !== null && canRestoreWorld);
+	/** Whether the rollback restores a world backup too. */
+	const withWorld = $derived(chosenWorld !== null && canRestoreWorld);
 	const rollbackDescription = $derived(
 		"This replaces the server's managed mods and configuration files" +
 			(canManage && restoreSettings ? ', and its launch and backup settings,' : '') +
 			' with the saved setup, after saving the current setup as an automatic one, so the rollback can be undone.' +
-			(withWorld
-				? ' It also replaces the current world with the linked backup, after archiving it. Everything played since that backup is lost.'
+			(withWorld && chosenWorld
+				? ` It also replaces the current world with the backup taken ${when(chosenWorld.created_at)}, after archiving it. Everything played since then is lost.`
 				: ' World files are unchanged.') +
 			(running ? ' The server is stopped first.' : '') +
 			' Valmin rolls the setup back if it fails to apply.'
@@ -139,6 +151,8 @@
 			if (linked && !linkedOpened) {
 				linkedOpened = true;
 				compare(linked);
+				rollbackWorldId = page.url.searchParams.get('world') ?? '';
+				allWorlds = rollbackWorldId !== '';
 			}
 			if (selectedId && !saved.items.some((setup) => setup.id === selectedId)) {
 				selectedId = '';
@@ -186,7 +200,8 @@
 
 	function compare(setup: SavedSetup) {
 		if (setup.id !== selectedId) {
-			restoreWorld = false;
+			rollbackWorldId = '';
+			allWorlds = false;
 			compareWith = '';
 			other = null;
 			otherFailure = null;
@@ -299,9 +314,10 @@
 		const current = preview;
 		if (!current || !current.ready || !canSave || jobRunning) return;
 		const start = startAfter && canStart && running;
+		const world = withWorld ? chosenWorld?.id : undefined;
 		void run('rollback', current.setup.id, () =>
 			setups.rollback(id, current.setup.id, {
-				world: withWorld,
+				worldBackupId: world,
 				start,
 				modsOnly: !(canManage && restoreSettings),
 				etag: stopped ? current.etag : undefined
@@ -321,7 +337,7 @@
 			selectedId = '';
 			preview = null;
 		}
-		if (jobAction === 'rollback') restoreWorld = false;
+		if (jobAction === 'rollback') rollbackWorldId = '';
 		if (jobAction === 'rollback' && jobTarget && jobTarget === selectedId)
 			void loadPreview(jobTarget);
 		void load(id);
@@ -336,8 +352,8 @@
 	<PageHeader title="Saved setups" level={2}>
 		Save exact mod versions and every configuration file, then compare and roll back to them later.
 		Rolling back, and each mod install, removal and update unless an administrator turned it off,
-		saves the current setup first, so the change can be undone. A rollback can restore the world
-		backup a setup links in the same step.
+		saves the current setup first, so the change can be undone. A rollback can also restore, in the
+		same step, any world backup taken with the setup's mods.
 	</PageHeader>
 
 	{#if !canSee}
@@ -363,7 +379,7 @@
 							<Input id="setup-name" bind:value={name} required />
 						</div>
 						<div class="grid max-w-lg gap-2">
-							<Label for="setup-backup">Associated world backup</Label>
+							<Label for="setup-backup">World backup to keep with this setup</Label>
 							<NativeSelect id="setup-backup" bind:value={worldBackupId}>
 								<option value={linkNext}>The backup the next mod update takes</option>
 								{#if canBackUp && stopped}
@@ -377,9 +393,10 @@
 							<p class="text-xs text-muted-foreground">
 								{worldChoice === linkNext
 									? 'The world backup the next mod update takes is linked, if the mods are still the same then. Installing a new mod, removing one or disabling one before then leaves the setup without one.'
-									: 'Only consistent backups from this server can be linked.'}
-								A linked backup is kept until the setup is deleted, outside the backup retention counts,
-								so each one adds to disk use. Linking does not restore the world.
+									: 'Only consistent backups of this server taken with the mods installed now are listed.'}
+								A rollback can restore any backup taken with the setup's mods; the one kept here is never
+								removed by retention until the setup is deleted, so it adds to disk use. Keeping a backup
+								does not restore the world.
 							</p>
 							<Problem error={backupFailure} />
 							{#if backupCursor}
@@ -463,12 +480,20 @@
 												World backup: from the next mod update, if the mods are still the same
 											</span>
 										{/if}
-										{#if setup.world_backup}
-											<span class="text-sm">
-												{setup.world_backup.available === false
-													? 'Linked world backup unavailable'
-													: `World backup linked: ${when(setup.world_backup.created_at)} · ${setup.world_backup.world_name}${setup.world_backup.size_bytes ? ` · ${formatBytes(setup.world_backup.size_bytes)}` : ''}`}
+										{#if setup.world_backups_count && setup.world_backups_newest_at}
+											<span class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+												<span data-testid="setup-worlds"
+													>{`Worlds: ${setup.world_backups_count} ${setup.world_backups_count === 1 ? 'backup' : 'backups'} with these mods · newest ${backupAge(setup.world_backups_newest_at, Date.now())}`}</span
+												>
+												{#if setup.world_backup && setup.world_backup.available !== false}
+													<Badge variant="outline">World kept</Badge>
+												{/if}
 											</span>
+										{/if}
+										{#if setup.world_backup?.available === false}
+											<span class="text-sm text-muted-foreground"
+												>Kept world backup unavailable</span
+											>
 										{/if}
 									</div>
 									<Button
@@ -536,39 +561,101 @@
 									Rolling back applies the saved mods and configuration files, and launch and backup
 									settings if chosen, after saving the current setup as an automatic one. A running
 									server is stopped first. It does not change the game build, selected world or
-									credentials. World files change only if you restore the linked world backup below.
+									credentials. World files change only if you choose a world backup below.
 								</Card.Description>
 							</Card.Header>
 							<Card.Content class="grid gap-4">
-								{#if preview.setup.world_backup}
-									{#if preview.setup.world_backup.available === false}
-										<p class="text-sm text-destructive">The linked world backup is unavailable.</p>
-									{:else}
-										<p class="text-sm">
-											<Badge variant="outline">World backup linked</Badge>
-											{when(preview.setup.world_backup.created_at)} · {preview.setup.world_backup
-												.world_name}. You can also restore it from
-											<a class="underline" href={resolve('/instances/[id]/backups', { id })}
-												>Backups</a
-											>.
-										</p>
-										{#if canRestoreWorld}
-											<div class="flex items-start gap-2">
-												<Switch id="rollback-world" bind:checked={restoreWorld} />
-												<Label for="rollback-world" class="grid gap-1 font-normal">
-													Also restore the linked world backup
-													<span class="text-xs text-muted-foreground">
-														Replaces the current world with that backup, which is archived first.
-														Everything played since it was taken is lost.
-													</span>
-												</Label>
-											</div>
-										{/if}
-									{/if}
-								{:else}
+								{#if preview.setup.world_backup?.available === false}
+									<p class="text-sm text-destructive">The kept world backup is unavailable.</p>
+								{/if}
+								{#if worldBackups.length === 0}
 									<p class="text-sm text-muted-foreground">
-										No world backup is linked to this setup.
+										No backup on disk was taken with exactly these mods, so the world stays as it
+										is.
 									</p>
+								{:else if !canRestoreWorld}
+									<p class="text-sm text-muted-foreground">
+										{worldBackups.length}
+										{worldBackups.length === 1 ? 'backup was' : 'backups were'} taken with these mods.
+										Restoring one needs the right to restore backups.
+									</p>
+								{:else}
+									<fieldset class="grid gap-2" data-testid="rollback-world">
+										<legend class="mb-1 text-sm font-medium">World</legend>
+										<label class="flex items-start gap-3 rounded-md border p-3 text-sm">
+											<input
+												type="radio"
+												name="rollback-world"
+												value=""
+												class="mt-0.5"
+												bind:group={rollbackWorldId}
+											/>
+											<span class="grid gap-0.5">
+												<span>Keep the current world</span>
+												<span class="text-xs text-muted-foreground"
+													>World files are not touched.</span
+												>
+											</span>
+										</label>
+										{#each shownWorlds as world (world.id)}
+											<label
+												class={[
+													'flex items-start gap-3 rounded-md border p-3 text-sm',
+													world.available === false && 'opacity-60'
+												]}
+											>
+												<input
+													type="radio"
+													name="rollback-world"
+													value={world.id}
+													class="mt-0.5"
+													disabled={world.available === false}
+													bind:group={rollbackWorldId}
+												/>
+												<span class="grid gap-1">
+													<span
+														>Restore the backup from {when(world.created_at)}
+														<span class="text-muted-foreground"
+															>· {backupAge(world.created_at, Date.now())}</span
+														></span
+													>
+													<span
+														class="flex flex-wrap items-center gap-1 text-xs text-muted-foreground"
+													>
+														{#if world.trigger}{world.trigger.replaceAll('_', ' ')} ·{/if}
+														{world.world_name}{#if world.size_bytes}
+															· {formatBytes(world.size_bytes)}{/if}
+														{#if world.linked}<Badge variant="outline">Kept with this setup</Badge
+															>{/if}
+														{#if !world.consistent}<Badge variant="secondary">Best-effort</Badge
+															>{/if}
+														{#if world.available === false}<Badge variant="destructive"
+																>Unavailable</Badge
+															>{/if}
+													</span>
+												</span>
+											</label>
+										{/each}
+										{#if worldBackups.length > shownWorlds.length}
+											<Button
+												variant="ghost"
+												size="sm"
+												class="justify-self-start"
+												onclick={() => (allWorlds = true)}
+												>Show {worldBackups.length - shownWorlds.length} more</Button
+											>
+										{/if}
+										<p class="text-xs text-muted-foreground">
+											{chosenWorld
+												? `Play after ${when(chosenWorld.created_at)} is lost. The current world is archived first.`
+												: 'Only backups taken with exactly these mods are listed. Others are on the'}
+											{#if !chosenWorld}
+												<a class="underline" href={resolve('/instances/[id]/backups', { id })}
+													>Backups</a
+												> page.
+											{/if}
+										</p>
+									</fieldset>
 								{/if}
 								{#if preview.problems.length > 0}
 									<div role="alert" class="rounded-md border border-destructive p-3 text-sm">

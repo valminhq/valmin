@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -21,6 +22,8 @@ import (
 type Worlds struct {
 	DataRoot string
 	Runtime  runtime.Runtime
+	// DB reads the installed mods each archive records.
+	DB *store.DB
 }
 
 // Snapshot archives an instance's worlds/ under trigger and returns the OnFinish that
@@ -70,17 +73,36 @@ func (h *Worlds) snapshotRow(ctx context.Context, inst *store.Instance, trigger 
 		SizeBytes: res.SizeBytes, SHA256: res.SHA256, WorldName: inst.WorldName,
 		Trigger: trigger,
 		// ArchiveStoppedWorlds saw the server down on both sides of the copy.
-		Consistent: true,
+		Consistent:      true,
+		ModsFingerprint: modsFingerprintOf(ctx, h.DB, inst),
 	}, nil
 }
 
-// recordSnapshot is the finish step that catalogues a snapshot row.
+// modsFingerprintOf is the fingerprint an archive of inst's world records: the mods the world was
+// last played with, or the installed mods when that is unknown. It is empty when neither can be
+// read: an archive is never refused for it.
+func modsFingerprintOf(ctx context.Context, db *store.DB, inst *store.Instance) string {
+	fingerprint, err := db.WorldModsFingerprint(ctx, inst.ID)
+	if err == nil && fingerprint == "" {
+		fingerprint, err = (&SetupState{DB: db}).ModsFingerprint(ctx, inst.ID)
+	}
+	if err != nil {
+		slog.WarnContext(ctx, "the archive records no mods: could not read them",
+			slog.String("instance_id", inst.ID), slog.Any("error", err))
+		return ""
+	}
+	return fingerprint
+}
+
+// recordSnapshot is the finish step that catalogues a snapshot row. The row's mods become those
+// the world was last played with when those are unknown, so archives taken after the change that
+// follows the snapshot still record the mods the world was played with.
 func recordSnapshot(row *store.Backup) func(context.Context, *sql.Tx) error {
 	return func(ctx context.Context, tx *sql.Tx) error {
 		if err := store.TxCreateBackup(ctx, tx, row); err != nil {
 			return fmt.Errorf("record the %s backup: %w", row.Trigger, err)
 		}
-		return nil
+		return store.TxSetUnknownWorldMods(ctx, tx, row.InstanceID, row.ModsFingerprint)
 	}
 }
 

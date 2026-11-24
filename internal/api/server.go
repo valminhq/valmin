@@ -93,6 +93,14 @@ func (s *Server) Recover(ctx context.Context) error {
 	if err := s.supervisor.Recover(ctx); err != nil {
 		return fmt.Errorf("recover instances: %w", err)
 	}
+	if err := control.BackfillSetupFingerprints(ctx, s.instances.DB); err != nil {
+		slog.WarnContext(ctx, "saved setups without a mods fingerprint match no world backups",
+			slog.Any("error", err))
+	}
+	if err := control.BackfillWorldMods(ctx, s.instances.DB); err != nil {
+		slog.WarnContext(ctx, "archives fall back to the installed mods for worlds whose mods are unknown",
+			slog.Any("error", err))
+	}
 	return nil
 }
 
@@ -184,7 +192,7 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	}
 	hub = w.hub(external, streams, grants)
 
-	worlds := &control.Worlds{DataRoot: w.cfg.Data.Root, Runtime: w.runtime}
+	worlds := &control.Worlds{DataRoot: w.cfg.Data.Root, Runtime: w.runtime, DB: w.db}
 	mods := w.mods()
 	// Outside the API chain and outside the API subtree, on a thin chain of its own: it is the
 	// only route a stranger can reach, and it authorizes on a column rather than a session. Its
