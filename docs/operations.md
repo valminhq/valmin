@@ -18,7 +18,10 @@ Each archive in the history shows when it was made, the world, whether it is
 pre restore or pre import), and its size. An archive that retention will remove at the next
 prune is marked **Pending deletion**, and one a saved setup links is marked **Kept for setup**,
 with the setup's name for those who may manage setups; it cannot be deleted until that setup
-is. Below the archive size is the size of the world inside it, and an archive whose world needs
+is. A line under the reason says which mods the archive's world was played with: **Mods: same
+as now**, **Mods: as in** a saved setup holding them (for those who may see setups), or **Mods:
+differ from now**; an archive from before Valmin recorded mods has none.
+Below the archive size is the size of the world inside it, and an archive whose world needs
 a look carries an **Attention required** box (see [World check](#world-check)). **Download** saves an archive to your computer,
 and **Delete** removes it after you type the server's name. With
 [off-host copies](remote-backups.md) configured, **Upload now** sends an existing
@@ -134,6 +137,12 @@ built, explored or destroyed.
 To restore, stop the server, select an archive, and confirm the world name. Restore
 replaces the server's entire `worlds_local` directory and leaves the server stopped.
 Start it after checking the job result.
+
+When the archive's world was played with other mods than are installed, the confirmation warns
+that the world would start with mods it was not played with. If a saved setup holds the archive's
+mods and you may see setups, **Roll back to** that setup **with this world instead** opens it on
+**Saved setups** with the archive chosen under **World**, so the mods and the world go back
+together.
 
 To put a world from one server's backup on another server, or from a deleted server's
 leftover archive, use [import a world](usage.md#import-a-world) on the target instead.

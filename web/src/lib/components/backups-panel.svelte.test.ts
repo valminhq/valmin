@@ -414,6 +414,52 @@ describe('the backups panel', () => {
 		expect(daemon.requests('POST', '/instances/inst-a/backups/newest/restore')).toHaveLength(0);
 	});
 
+	it('says which mods each archive was played with', async () => {
+		await open([actions.backupsList], {
+			archives: [
+				backup({ id: 'same', mods_match_current: true }),
+				backup({
+					id: 'setup',
+					mods_match_current: false,
+					matching_setups: [{ id: 'setup-1', name: 'Before updating Ns-A' }]
+				}),
+				backup({ id: 'other', mods_match_current: false }),
+				backup({ id: 'unrecorded', mods_match_current: null })
+			]
+		});
+		expect(screen.getAllByTestId('backup-mods').map((line) => line.textContent)).toEqual([
+			'Mods: same as now',
+			'Mods: as in Before updating Ns-A',
+			'Mods: differ from now'
+		]);
+	});
+
+	it('warns before restoring a world played with other mods and offers the matching setup', async () => {
+		await open([actions.backupsList, actions.backupsRestore], {
+			archives: [
+				backup({ id: 'same', mods_match_current: true }),
+				backup({
+					id: 'older',
+					mods_match_current: false,
+					matching_setups: [{ id: 'setup-1', name: 'Before updating Ns-A' }]
+				})
+			]
+		});
+
+		await click(screen.getAllByRole('button', { name: 'Restore' })[0]);
+		expect(
+			within(await screen.findByRole('dialog')).queryByTestId('restore-mods-warning')
+		).toBeNull();
+		await click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+
+		await click(screen.getAllByRole('button', { name: 'Restore' })[1]);
+		const warning = within(await screen.findByRole('dialog')).getByTestId('restore-mods-warning');
+		const link = within(warning).getByRole('link', {
+			name: 'Roll back to Before updating Ns-A with this world instead'
+		});
+		expect(link.getAttribute('href')).toBe('/instances/inst-a/setups?setup=setup-1&world=older');
+	});
+
 	it('says what a restore replaces and what it leaves alone, on the page and in the confirmation', async () => {
 		await open([actions.backupsList, actions.backupsRestore]);
 		const replaces = /entire world-save directory \(worlds_local\)/;
