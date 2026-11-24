@@ -43,6 +43,19 @@ const saved: SetupDetail = {
 		created_at: '2026-09-28T11:00:00Z',
 		consistent: true
 	},
+	world_backups_count: 1,
+	world_backups_newest_at: '2026-09-28T11:00:00Z',
+	world_backups: [
+		{
+			id: 'bk-1',
+			world_name: 'OldWorld',
+			created_at: '2026-09-28T11:00:00Z',
+			consistent: true,
+			available: true,
+			trigger: 'manual',
+			linked: true
+		}
+	],
 	instance: launch({ world_name: 'OldWorld', backup_keep_cold: 5 }),
 	mods: [
 		{
@@ -105,7 +118,11 @@ function serve({
 	daemon.on('GET', '/instances/inst-a/setups', () => Response.json({ items: [saved] }));
 	daemon.on('GET', '/instances/inst-a/backups', () =>
 		Response.json({
-			items: [backup(), backup({ id: 'bk-hot', consistent: false })],
+			items: [
+				backup(),
+				backup({ id: 'bk-hot', consistent: false }),
+				backup({ id: 'bk-other-mods', mods_match_current: false })
+			],
 			next_cursor: null
 		})
 	);
@@ -268,7 +285,9 @@ describe('Saved setups', () => {
 		daemon.on('POST', '/instances/inst-a/setups', () => Response.json(job()));
 		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
 		await open();
-		const selector = screen.getByLabelText('Associated world backup') as HTMLSelectElement;
+		const selector = screen.getByLabelText(
+			'World backup to keep with this setup'
+		) as HTMLSelectElement;
 		await vi.waitFor(() => expect(selector.options).toHaveLength(3));
 		expect([...selector.options].map((option) => option.value)).toEqual(['next', '', 'bk-1']);
 		expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Working before update');
@@ -289,7 +308,9 @@ describe('Saved setups', () => {
 		daemon.on('POST', '/instances/inst-a/setups', () => Response.json(job()));
 		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
 		await open();
-		const selector = screen.getByLabelText('Associated world backup') as HTMLSelectElement;
+		const selector = screen.getByLabelText(
+			'World backup to keep with this setup'
+		) as HTMLSelectElement;
 		await vi.waitFor(() => expect(selector.options).toHaveLength(4));
 		await fireEvent.change(selector, { target: { value: 'now' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Save setup' }));
@@ -329,7 +350,9 @@ describe('Saved setups', () => {
 		daemon.on('POST', '/instances/inst-a/setups', () => Response.json(job()));
 		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
 		await open();
-		const selector = screen.getByLabelText('Associated world backup') as HTMLSelectElement;
+		const selector = screen.getByLabelText(
+			'World backup to keep with this setup'
+		) as HTMLSelectElement;
 		await vi.waitFor(() => expect(selector.options).toHaveLength(3));
 		expect([...selector.options].map((option) => option.value)).not.toContain('now');
 		await fireEvent.click(screen.getByRole('button', { name: 'Save setup' }));
@@ -476,9 +499,7 @@ describe('Saved setups', () => {
 		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
 		await screen.findByRole('heading', { name: 'Rollback preview' });
 		expect(screen.getByText(/so it is stopped first and players are disconnected/)).toBeTruthy();
-		await fireEvent.click(
-			screen.getByRole('switch', { name: /Also restore the linked world backup/ })
-		);
+		await fireEvent.click(screen.getByRole('radio', { name: /Restore the backup from/ }));
 		await fireEvent.click(screen.getByRole('button', { name: 'Roll back to this setup' }));
 		const dialog = screen.getByRole('dialog');
 		await fireEvent.input(within(dialog).getByLabelText(/Type Live to confirm/), {
@@ -489,7 +510,7 @@ describe('Saved setups', () => {
 			expect(daemon.requests('POST', '/instances/inst-a/setups/setup-1/rollback')).toHaveLength(1)
 		);
 		const request = daemon.requests('POST', '/instances/inst-a/setups/setup-1/rollback')[0];
-		expect(request.body).toEqual({ world: true, start: true });
+		expect(request.body).toEqual({ world_backup_id: 'bk-1', start: true });
 		expect(request.headers['If-Match']).toBeUndefined();
 	});
 
@@ -510,6 +531,60 @@ describe('Saved setups', () => {
 		expect(daemon.requests('POST', '/instances/inst-a/setups/setup-1/rollback')[0].body).toEqual(
 			{}
 		);
+	});
+
+	it('keeps the current world unless a backup taken with the setup mods is chosen', async () => {
+		session.permissions = permissions('inst-a', [actions.setupsManage, actions.backupsRestore]);
+		const worlds = Array.from({ length: 7 }, (_, i) => ({
+			id: `bk-${i}`,
+			world_name: 'OldWorld',
+			created_at: `2026-09-2${8 - i}T11:00:00Z`,
+			consistent: i !== 1,
+			available: true,
+			trigger: 'scheduled',
+			linked: i === 3
+		}));
+		serve({ result: preview({ setup: { ...saved, world_backups: worlds } }) });
+		await open();
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
+		await screen.findByRole('heading', { name: 'Rollback preview' });
+		const group = screen.getByTestId('rollback-world');
+		expect(
+			(within(group).getByRole('radio', { name: /Keep the current world/ }) as HTMLInputElement)
+				.checked
+		).toBe(true);
+		expect(within(group).getAllByRole('radio')).toHaveLength(6);
+		expect(within(group).getByText('Best-effort')).toBeTruthy();
+		expect(within(group).getByText('Kept with this setup')).toBeTruthy();
+		await fireEvent.click(within(group).getByRole('button', { name: 'Show 2 more' }));
+		const radios = within(group).getAllByRole('radio');
+		expect(radios).toHaveLength(8);
+		await fireEvent.click(radios[2]);
+		expect(within(group).getByText(/Play after .* is lost/)).toBeTruthy();
+	});
+
+	it('opens the setup and world backup a link names', async () => {
+		session.permissions = permissions('inst-a', [actions.setupsManage, actions.backupsRestore]);
+		app.page.url = new URL('http://localhost/instances/inst-a/setups?setup=setup-1&world=bk-1');
+		try {
+			serve();
+			await open();
+			await screen.findByRole('heading', { name: 'Rollback preview' });
+			expect(
+				(screen.getByRole('radio', { name: /Restore the backup from/ }) as HTMLInputElement).checked
+			).toBe(true);
+		} finally {
+			app.page.url = new URL('http://localhost/instances/inst-a/setups');
+		}
+	});
+
+	it('says how many world backups fit each setup', async () => {
+		serve();
+		await open();
+		expect(screen.getByTestId('setup-worlds').textContent).toMatch(
+			/Worlds: 1 backup with these mods · newest/
+		);
+		expect(screen.getByText('World kept')).toBeTruthy();
 	});
 
 	it('keeps rollback unavailable while the server is starting', async () => {
@@ -569,7 +644,7 @@ describe('Saved setups', () => {
 		});
 		await open();
 		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
-		await screen.findByText('The linked world backup is unavailable.');
+		await screen.findByText('The kept world backup is unavailable.');
 		expect(
 			screen.getByRole('button', { name: 'Roll back to this setup' }).hasAttribute('disabled')
 		).toBe(false);

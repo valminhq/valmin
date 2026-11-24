@@ -114,6 +114,116 @@ func TestRollbackRestoresTheSetupAndItsWorld(t *testing.T) {
 	}
 }
 
+// TestRollbackRestoresAChosenWorldBackup asserts a setup's world backups are the backups taken
+// under its mods, that a rollback restores the one it names, and that it refuses one taken under
+// other mods.
+func TestRollbackRestoresAChosenWorldBackup(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := rollbackWorld(t, "stopped")
+	seedWorldOnDisk(t, db)
+	marker := filepath.Join(worldsDirOfID(t, db, "inst-a"), "worlds_local", "marker.txt")
+	taken := make([]string, 0, 2)
+	for _, content := range []string{"older", "newer"} {
+		if err := os.WriteFile(marker, []byte(content), 0o664); err != nil {
+			t.Fatal(err)
+		}
+		if job := waitJob(t, rt, admin, postBackup(t, rt, admin, "").JobID); job.Status != "succeeded" {
+			t.Fatalf("backup job = %+v", job)
+		}
+		taken = append(taken, newestBackupID(t, db))
+	}
+	if err := db.CreateBackup(t.Context(), &store.Backup{
+		ID: "other-mods", InstanceID: "inst-a", Path: marker, SHA256: "hash", WorldName: "World",
+		Trigger: store.TriggerManual, Consistent: true, ModsFingerprint: "other",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saved := setupTestSave(t, rt, db, admin, "no world linked")
+	if saved.WorldBackups != 2 {
+		t.Errorf("listed world backups = %d, want 2", saved.WorldBackups)
+	}
+	preview := setupTestPreview(t, rt, admin, saved.ID)
+	if len(preview.Setup.WorldBackups) != 2 || preview.Setup.WorldBackups[0].ID != taken[1] ||
+		preview.Setup.WorldBackups[1].ID != taken[0] || !preview.Setup.WorldBackups[1].Available {
+		t.Fatalf("world backups = %+v, want %v newest first and available", preview.Setup.WorldBackups, taken)
+	}
+	rec := rollback(t, rt, admin, saved.ID, "", map[string]any{"world_backup_id": "other-mods"})
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("rollback to a backup of other mods = %d %s, want 422", rec.Code, rec.Body)
+	}
+	removeSetupMod(t, db, dataDir)
+
+	job := rollbackJob(t, rt, admin, saved.ID, map[string]any{"world_backup_id": taken[0]})
+
+	if job.Status != "succeeded" {
+		t.Fatalf("rollback job = %+v, want succeeded", job)
+	}
+	if got, err := os.ReadFile(marker); err != nil || string(got) != "older" {
+		t.Errorf("world marker = %q, %v, want the older backup's", got, err)
+	}
+	var replaced string
+	if err := db.Reader.QueryRowContext(t.Context(), `SELECT mods_fingerprint FROM backups
+		WHERE instance_id = 'inst-a' AND trigger = ?`, store.TriggerPreRestore).Scan(&replaced); err != nil {
+		t.Fatal(err)
+	}
+	if replaced != control.ModsFingerprint(nil) {
+		t.Errorf("the replaced world records mods %q, want those it was played with, none (%q)",
+			replaced, control.ModsFingerprint(nil))
+	}
+	if got, err := db.WorldModsFingerprint(t.Context(), "inst-a"); err != nil || got != saved.ModsFingerprint {
+		t.Errorf(
+			"world mods after the rollback = %q, %v, want the restored backup's %q",
+			got,
+			err,
+			saved.ModsFingerprint,
+		)
+	}
+}
+
+// TestABackupRecordsTheModsTheWorldWasPlayedWith asserts a backup taken after a mod change made
+// while the server was stopped records the mods the server last ran with, not the installed ones.
+func TestABackupRecordsTheModsTheWorldWasPlayedWith(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := rollbackWorld(t, "stopped")
+	seedWorldOnDisk(t, db)
+	played, err := rt.instances.ctl.SetupState.ModsFingerprint(t.Context(), "inst-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"start", "stop"} {
+		rec := as(rt, admin, httptest.NewRequest(http.MethodPost, "/api/v1/instances/inst-a/"+action, http.NoBody))
+		var accepted jobView
+		decodeInto(t, rec, &accepted)
+		if job := waitJob(t, rt, admin, accepted.JobID); job.Status != "succeeded" {
+			t.Fatalf("%s job = %+v, want succeeded", action, job)
+		}
+	}
+	removeSetupMod(t, db, dataDir)
+
+	if job := waitJob(t, rt, admin, postBackup(t, rt, admin, "").JobID); job.Status != "succeeded" {
+		t.Fatalf("backup job = %+v", job)
+	}
+
+	b, err := db.BackupByID(t.Context(), "inst-a", newestBackupID(t, db))
+	if err != nil || b == nil {
+		t.Fatalf("BackupByID = %+v, %v", b, err)
+	}
+	if b.ModsFingerprint != played || played == control.ModsFingerprint(nil) {
+		t.Errorf("backup records mods %q, want those the server ran with, %q", b.ModsFingerprint, played)
+	}
+}
+
+// newestBackupID is the ID of inst-a's newest backup.
+func newestBackupID(t *testing.T, db *store.DB) string {
+	t.Helper()
+	var id string
+	if err := db.Reader.QueryRowContext(t.Context(), `SELECT id FROM backups WHERE instance_id = 'inst-a'
+		ORDER BY created_at DESC, id DESC LIMIT 1`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
 // TestRollbackStopsARunningServerAndStartsItAgain asserts a rollback of a running server stops
 // it, restores the setup and starts it again when asked.
 func TestRollbackStopsARunningServerAndStartsItAgain(t *testing.T) {
@@ -130,6 +240,9 @@ func TestRollbackStopsARunningServerAndStartsItAgain(t *testing.T) {
 	setupTestFile(t, serverPath(dataDir, "BepInEx/plugins/Ns-One.dll"), "one")
 	if got := instAState(t, db); got != "running" {
 		t.Errorf("state = %q, want running", got)
+	}
+	if got, err := db.WorldModsFingerprint(t.Context(), "inst-a"); err != nil || got != saved.ModsFingerprint {
+		t.Errorf("world mods after the start = %q, %v, want the restored setup's %q", got, err, saved.ModsFingerprint)
 	}
 	var stops int
 	err := db.Reader.QueryRowContext(t.Context(),

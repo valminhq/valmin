@@ -221,7 +221,7 @@ func (b *Backupper) archiveAndVerify(
 	row := &store.Backup{
 		ID: backupID, InstanceID: inst.ID, Path: res.Path,
 		SizeBytes: res.SizeBytes, SHA256: res.SHA256, WorldName: inst.WorldName,
-		Trigger: trigger, Consistent: consistent,
+		Trigger: trigger, Consistent: consistent, ModsFingerprint: modsFingerprintOf(ctx, b.DB, inst),
 	}
 	// A snapshot is the copy taken of the world about to be changed. A world worth going back to
 	// is often one that would fail verification, so a snapshot is kept as it was copied.

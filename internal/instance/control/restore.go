@@ -133,7 +133,7 @@ func (r *Restorer) Run(inst *store.Instance, b *store.Backup) jobs.Runner {
 		jh.Progress(ctx, 100, "world restored")
 		return jobs.Outcome{
 			Status:   jobs.StatusSucceeded,
-			OnFinish: chainFinish(snapshot, finishRestore(inst.ID)),
+			OnFinish: chainFinish(snapshot, finishRestore(inst.ID, r.restoredWorldMods(ctx, inst, b))),
 		}
 	}
 }
@@ -163,10 +163,24 @@ func stageRestore(b *store.Backup, staged string) error {
 	return nil
 }
 
-// finishRestore is the successful exit: `restoring` back to `stopped`. The server is not
-// started, on this path or any other — the operator restarts it once they have looked at the
+// restoredWorldMods is the fingerprint of the mods b's world was played with, or of inst's
+// installed mods, which it will be played with, when b recorded none.
+func (r *Restorer) restoredWorldMods(ctx context.Context, inst *store.Instance, b *store.Backup) string {
+	if b.ModsFingerprint != "" {
+		return b.ModsFingerprint
+	}
+	fingerprint, err := (&SetupState{DB: r.Worlds.DB}).ModsFingerprint(ctx, inst.ID)
+	if err != nil {
+		return ""
+	}
+	return fingerprint
+}
+
+// finishRestore is the successful exit: `restoring` back to `stopped`, recording worldMods, the
+// restored archive's mods fingerprint, as the mods the world was last played with. The server is
+// not started, on this path or any other — the operator restarts it once they have looked at the
 // world that came back (12 §9.3).
-func finishRestore(instanceID string) func(context.Context, *sql.Tx) error {
+func finishRestore(instanceID, worldMods string) func(context.Context, *sql.Tx) error {
 	return func(ctx context.Context, tx *sql.Tx) error {
 		ok, err := instance.SetStateTx(ctx, tx, instanceID, instance.StateRestoring, instance.StateStopped)
 		if err != nil {
@@ -175,7 +189,7 @@ func finishRestore(instanceID string) func(context.Context, *sql.Tx) error {
 		if !ok {
 			return fmt.Errorf("finish restore for instance %s: not in restoring state", instanceID)
 		}
-		return nil
+		return store.TxSetWorldMods(ctx, tx, instanceID, worldMods)
 	}
 }
 

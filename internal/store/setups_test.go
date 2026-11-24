@@ -374,3 +374,63 @@ func TestARestoreWithoutSettingsKeepsThem(t *testing.T) {
 		t.Errorf("InstanceMods = %+v, %v, want the restored one", got, err)
 	}
 }
+
+// TestSetupWorldBackupsFitTheSetupsMods asserts a setup's world backups are its instance's
+// backups taken under the same mods, consistent or not, plus the one it links, newest first; and
+// that the setup list counts them and the backup list names the setup.
+func TestSetupWorldBackupsFitTheSetupsMods(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	seedInstance(t, db, "server-a", 28000)
+	seedInstance(t, db, "server-b", 28010)
+	for i, b := range []Backup{
+		{ID: "linked", InstanceID: "server-a", ModsFingerprint: "other", Consistent: true},
+		{ID: "same-cold", InstanceID: "server-a", ModsFingerprint: "mods"},
+		{ID: "same-hot", InstanceID: "server-a", ModsFingerprint: "mods"},
+		{ID: "different", InstanceID: "server-a", ModsFingerprint: "other"},
+		{ID: "unrecorded", InstanceID: "server-a"},
+		{ID: "foreign", InstanceID: "server-b", ModsFingerprint: "mods"},
+	} {
+		b.Path, b.SHA256, b.WorldName, b.Trigger = "/tmp/"+b.ID, "hash", "World", TriggerManual
+		b.Consistent = b.Consistent || b.ID == "same-cold"
+		if err := db.CreateBackup(t.Context(), &b); err != nil {
+			t.Fatalf("CreateBackup(%s): %v", b.ID, err)
+		}
+		exec(t, db.Writer, `UPDATE backups SET created_at = ? WHERE id = ?`,
+			FormatTime(time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC)), b.ID)
+	}
+	setup := &SavedSetup{
+		ID: "setup", InstanceID: "server-a", Name: "setup", SnapshotJSON: "{}",
+		BackupID: "linked", ModsFingerprint: "mods",
+	}
+	if err := db.SaveSetup(t.Context(), setup, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := db.SetupWorldBackups(t.Context(), setup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(got))
+	for _, b := range got {
+		ids = append(ids, b.ID)
+	}
+	if want := []string{"same-hot", "same-cold", "linked"}; !reflect.DeepEqual(ids, want) {
+		t.Errorf("SetupWorldBackups = %v, want %v", ids, want)
+	}
+	list, err := db.ListSetups(t.Context(), "server-a")
+	if err != nil || len(list) != 1 {
+		t.Fatalf("ListSetups = %+v, %v", list, err)
+	}
+	if list[0].WorldBackups != 3 || !list[0].WorldBackupsNewest.Equal(got[0].CreatedAt) {
+		t.Errorf("listed world backups = %d, newest %v, want 3, newest %v",
+			list[0].WorldBackups, list[0].WorldBackupsNewest, got[0].CreatedAt)
+	}
+	matches, err := db.BackupSetupMatches(t.Context(), "server-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 2 || len(matches["same-cold"]) != 1 || matches["same-cold"][0].ID != "setup" {
+		t.Errorf("BackupSetupMatches = %+v, want the setup for same-cold and same-hot only", matches)
+	}
+}

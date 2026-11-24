@@ -26,3 +26,32 @@ func TestLaunchOfRefusesUndecodableModifiers(t *testing.T) {
 		})
 	}
 }
+
+// TestModsFingerprint asserts the fingerprint ignores mod order, registry, side and lock, and
+// changes with a mod's version, enabled state, or a mod added.
+func TestModsFingerprint(t *testing.T) {
+	t.Parallel()
+	a := SetupMod{FullName: "Ns-A", Source: "thunderstore", Version: "1.0.0", Enabled: true}
+	b := SetupMod{FullName: "Ns-B", Source: "thunderstore", Version: "2.0.0", Enabled: true}
+	base := ModsFingerprint([]SetupMod{a, b})
+	moved := a
+	moved.Source, moved.Side, moved.Locked = "hexium", "client_required", true
+	newer, disabled := a, a
+	newer.Version = "1.1.0"
+	disabled.Enabled = false
+	for _, tc := range []struct {
+		name string
+		mods []SetupMod
+		same bool
+	}{
+		{"reordered", []SetupMod{b, a}, true},
+		{"registry, side and lock", []SetupMod{moved, b}, true},
+		{"version", []SetupMod{newer, b}, false},
+		{"disabled", []SetupMod{disabled, b}, false},
+		{"removed", []SetupMod{b}, false},
+	} {
+		if got := ModsFingerprint(tc.mods) == base; got != tc.same {
+			t.Errorf("%s: same fingerprint = %v, want %v", tc.name, got, tc.same)
+		}
+	}
+}

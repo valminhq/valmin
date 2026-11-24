@@ -28,8 +28,11 @@ type RollbackPayload struct {
 	// ETag is the fingerprint of the stopped server's state the caller previewed the restore
 	// against; empty, the restore checks the server as it is once stopped.
 	ETag string `json:"etag,omitempty"`
-	// World restores the world backup the setup links after the setup.
+	// World restores a world backup after the setup: WorldBackupID, or the one the setup links
+	// when that is empty.
 	World bool `json:"world,omitempty"`
+	// WorldBackupID is the backup World restores, one taken under the setup's mods.
+	WorldBackupID string `json:"world_backup_id,omitempty"`
 	// Start starts the server once everything is restored.
 	Start bool `json:"start,omitempty"`
 	// ModsOnly keeps the current launch and backup settings.
@@ -67,6 +70,9 @@ func (r *SetupRollback) run(id string, p *RollbackPayload, requestedBy string) j
 		inst, err := r.Chainer.fresh(ctx, id)
 		if err != nil {
 			return jobs.Failed(errcode.Internal, err)
+		}
+		if out, ok := r.chosenWorldGone(ctx, id, p); ok {
+			return out
 		}
 		chain := trialChain(inst, requestedBy)
 		chainStep := func(typ string) func(context.Context, *jobs.Handle) error {
@@ -106,6 +112,23 @@ func (r *SetupRollback) run(id string, p *RollbackPayload, requestedBy string) j
 	}
 }
 
+// chosenWorldGone returns the failed outcome, and true, when the world backup p names is no
+// longer in instance id's catalogue: retention may have removed it since the request, and the
+// rollback then changes nothing.
+func (r *SetupRollback) chosenWorldGone(ctx context.Context, id string, p *RollbackPayload) (jobs.Outcome, bool) {
+	if p.WorldBackupID == "" {
+		return jobs.Outcome{}, false
+	}
+	b, err := r.Setups.DB.BackupByID(ctx, id, p.WorldBackupID)
+	if err != nil {
+		return jobs.Failed(errcode.Internal, err), true
+	}
+	if b == nil {
+		return jobs.Failed(errcode.InvalidState, errors.New("the chosen world backup no longer exists")), true
+	}
+	return jobs.Outcome{}, false
+}
+
 // restoreSetup runs the setup restore of p on the stopped instance id as its own job.
 func (r *SetupRollback) restoreSetup(
 	ctx context.Context, jh *jobs.Handle, id string, p *RollbackPayload, requestedBy string,
@@ -138,8 +161,8 @@ func (r *SetupRollback) restoreSetup(
 	return r.Chainer.waitChild(ctx, jh, job)
 }
 
-// restoreWorld runs the restore of the world backup p's setup links on the stopped instance id as
-// its own job.
+// restoreWorld runs the restore of p's world backup, or the one p's setup links when p names
+// none, on the stopped instance id as its own job.
 func (r *SetupRollback) restoreWorld(
 	ctx context.Context, jh *jobs.Handle, id string, p *RollbackPayload, requestedBy string,
 ) error {
@@ -151,15 +174,19 @@ func (r *SetupRollback) restoreWorld(
 	if err != nil {
 		return err
 	}
-	if row == nil || row.BackupID == "" {
+	backupID := p.WorldBackupID
+	if backupID == "" && row != nil {
+		backupID = row.BackupID
+	}
+	if backupID == "" {
 		return errors.New("the setup links no world backup")
 	}
-	b, err := r.Setups.DB.BackupByID(ctx, id, row.BackupID)
+	b, err := r.Setups.DB.BackupByID(ctx, id, backupID)
 	if err != nil {
 		return err
 	}
 	if b == nil {
-		return errors.New("the linked world backup no longer exists")
+		return errors.New("the chosen world backup no longer exists")
 	}
 	job, err := submitStep(ctx, jh, func() (*store.Job, error) {
 		return r.Restorer.Submit(ctx, inst, b, requestedBy, nil)

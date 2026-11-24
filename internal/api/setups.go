@@ -57,6 +57,9 @@ type setupBackupView struct {
 	Consistent bool      `json:"consistent"`
 	Available  bool      `json:"available"`
 	SizeBytes  int64     `json:"size_bytes"`
+	Trigger    string    `json:"trigger,omitempty"`
+	// Linked marks, in world_backups, the backup the setup links.
+	Linked bool `json:"linked,omitempty"`
 }
 
 type setupDetailView struct {
@@ -75,6 +78,12 @@ type setupDetailView struct {
 	// told apart by their config files without listing them.
 	ConfigsDigest string           `json:"configs_digest"`
 	WorldBackup   *setupBackupView `json:"world_backup,omitempty"`
+	// WorldBackupsCount counts the backups a rollback to the setup can restore: those taken
+	// under its mods, and the linked one. WorldBackupsNewestAt is the newest one's time.
+	WorldBackupsCount    int        `json:"world_backups_count"`
+	WorldBackupsNewestAt *time.Time `json:"world_backups_newest_at"`
+	// WorldBackups lists those backups newest first. The setup list leaves it out.
+	WorldBackups []setupBackupView `json:"world_backups,omitempty"`
 	// ConfigTree is false for a setup saved before setups held the whole config tree, which
 	// restores only top-level .cfg files.
 	ConfigTree bool `json:"config_tree"`
@@ -224,7 +233,7 @@ func (h *Instances) getSetup(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
-	view, err := h.setupDetail(r.Context(), row, &snap)
+	view, err := h.setupDetailWithWorlds(r.Context(), row, &snap)
 	if err != nil {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
@@ -315,7 +324,10 @@ func (h *Instances) setupDetail(
 		ConfigsDigest: configsDigest(snap),
 		ConfigTree:    snap.ConfigTree, ConfigsTruncated: snap.ConfigsTruncated, Automatic: row.Automatic,
 		WorldPending: row.WorldPending,
-		Light:        snap.Light,
+		Light:        snap.Light, WorldBackupsCount: row.WorldBackups,
+	}
+	if !row.WorldBackupsNewest.IsZero() {
+		view.WorldBackupsNewestAt = &row.WorldBackupsNewest
 	}
 	if row.BackupID == "" {
 		return view, nil
@@ -331,12 +343,46 @@ func (h *Instances) setupDetail(
 	available, err := setupBackupAvailable(h.Cfg.Data.Root, b.Path)
 	view.WorldBackup = &setupBackupView{
 		ID: b.ID, WorldName: b.WorldName, CreatedAt: b.CreatedAt,
-		Consistent: b.Consistent, Available: available, SizeBytes: b.SizeBytes,
+		Consistent: b.Consistent, Available: available, SizeBytes: b.SizeBytes, Trigger: b.Trigger,
 	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return view, fmt.Errorf("inspect linked backup %s: %w", b.ID, err)
 	}
 	return view, nil
+}
+
+// setupDetailWithWorlds is setupDetail with the backups a rollback to row can restore.
+func (h *Instances) setupDetailWithWorlds(
+	ctx context.Context, row *store.SavedSetup, snap *control.SetupSnapshot,
+) (setupDetailView, error) {
+	view, err := h.setupDetail(ctx, row, snap)
+	if err != nil {
+		return view, err
+	}
+	view.WorldBackups, err = h.setupWorldBackups(ctx, row)
+	return view, err
+}
+
+// setupWorldBackups lists the backups a rollback to row can restore, newest first: those taken
+// under its mods, and the one it links.
+func (h *Instances) setupWorldBackups(ctx context.Context, row *store.SavedSetup) ([]setupBackupView, error) {
+	rows, err := h.DB.SetupWorldBackups(ctx, row)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]setupBackupView, 0, len(rows))
+	for i := range rows {
+		b := &rows[i]
+		available, err := setupBackupAvailable(h.Cfg.Data.Root, b.Path)
+		if err != nil {
+			return nil, fmt.Errorf("inspect backup %s: %w", b.ID, err)
+		}
+		out = append(out, setupBackupView{
+			ID: b.ID, WorldName: b.WorldName, CreatedAt: b.CreatedAt, Consistent: b.Consistent,
+			Available: available, SizeBytes: b.SizeBytes, Trigger: b.Trigger, Linked: b.ID == row.BackupID,
+		})
+	}
+	return out, nil
 }
 
 func setupBackupAvailable(dataRoot, path string) (bool, error) {
@@ -414,7 +460,7 @@ func (h *Instances) setupPreview(
 	if err != nil {
 		return setupPreviewView{}, err
 	}
-	detail, err := h.setupDetail(ctx, row, &snap)
+	detail, err := h.setupDetailWithWorlds(ctx, row, &snap)
 	if err != nil {
 		return setupPreviewView{}, err
 	}

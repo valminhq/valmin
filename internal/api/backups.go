@@ -44,6 +44,12 @@ type backupView struct {
 	KeptForSetup bool `json:"kept_for_setup"`
 	// LinkedSetups names those setups, for a caller who may manage setups; omitted otherwise.
 	LinkedSetups []setupLinkView `json:"linked_setups,omitempty"`
+	// ModsMatchCurrent reports whether the archive was taken under the mods installed now, null
+	// when it recorded no mods.
+	ModsMatchCurrent *bool `json:"mods_match_current"`
+	// MatchingSetups names the saved setups holding the mods the archive was taken under, newest
+	// first, for a caller who may see setups; omitted otherwise.
+	MatchingSetups []setupLinkView `json:"matching_setups,omitempty"`
 }
 
 // setupLinkView names one saved setup that links a backup.
@@ -151,10 +157,18 @@ func (h *Instances) backupList(
 	for _, a := range retention.Now {
 		doomed[a.ID] = true
 	}
+	current, err := h.ctl.SetupState.ModsFingerprint(ctx, inst.ID)
+	if err != nil {
+		return nil, fmt.Errorf("mods of instance %s: %w", inst.ID, err)
+	}
 	views := make([]backupView, 0, len(rows))
 	for i := range rows {
 		v := toBackupView(&rows[i])
 		v.PrunesNext = doomed[v.ID]
+		if rows[i].ModsFingerprint != "" {
+			match := rows[i].ModsFingerprint == current
+			v.ModsMatchCurrent = &match
+		}
 		views = append(views, v)
 	}
 	consistent, err := h.removals(ctx, inst.ID, retention.AfterConsistent)
@@ -172,25 +186,40 @@ func (h *Instances) backupList(
 	}, nil
 }
 
-// markSetupLinks marks each archive in views that a saved setup links, naming the setups only
-// for a caller who may see them.
+// markSetupLinks marks each archive in views that a saved setup links and, for a caller who may
+// see setups, names those setups and the ones holding the mods it was taken under.
 func (h *Instances) markSetupLinks(ctx context.Context, u *store.User, instanceID string, views []backupView) error {
 	links, err := h.DB.BackupSetupLinks(ctx, instanceID)
 	if err != nil {
 		return err
 	}
-	names := h.canSeeSetups(ctx, u, instanceID)
 	for i := range views {
-		setups := links[views[i].ID]
-		views[i].KeptForSetup = len(setups) > 0
-		if !names {
-			continue
-		}
-		for _, s := range setups {
-			views[i].LinkedSetups = append(views[i].LinkedSetups, setupLinkView{ID: s.ID, Name: s.Name})
-		}
+		views[i].KeptForSetup = len(links[views[i].ID]) > 0
+	}
+	if !h.canSeeSetups(ctx, u, instanceID) {
+		return nil
+	}
+	matches, err := h.DB.BackupSetupMatches(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	for i := range views {
+		views[i].LinkedSetups = setupLinkViews(links[views[i].ID])
+		views[i].MatchingSetups = setupLinkViews(matches[views[i].ID])
 	}
 	return nil
+}
+
+// setupLinkViews renders setups as setupLinkViews, nil for none.
+func setupLinkViews(setups []store.SetupLink) []setupLinkView {
+	if len(setups) == 0 {
+		return nil
+	}
+	out := make([]setupLinkView, 0, len(setups))
+	for _, s := range setups {
+		out = append(out, setupLinkView{ID: s.ID, Name: s.Name})
+	}
+	return out
 }
 
 // removals names each archive retention would remove, with the time it was taken, newest
