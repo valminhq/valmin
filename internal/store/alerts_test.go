@@ -375,8 +375,8 @@ func TestAWebhookNameIsUniquePerServer(t *testing.T) {
 
 	exec(t, db.Writer, `INSERT INTO webhooks (id, name, kind, url, enabled, created_at, updated_at)
 		VALUES ('legacy', 'legacy', 'generic', 'sealed', TRUE, ?, ?)`, Now(), Now())
-	if w, err := db.WebhookByID(t.Context(), "legacy"); err != nil || !w.CatchAll || w.InstanceID != nil {
-		t.Errorf("legacy webhook = %+v, %v; want a shared catch-all", w, err)
+	if w, err := db.WebhookByID(t.Context(), "legacy"); err != nil || w.InstanceID != nil {
+		t.Errorf("legacy webhook = %+v, %v; want a shared one", w, err)
 	}
 
 	exec(t, db.Writer, `DELETE FROM instances WHERE id = ?`, a)

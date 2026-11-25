@@ -8,15 +8,14 @@ interface Page<T> {
 
 /** A notification destination. The URL is never returned: it is a bearer credential, so the
  * panel takes one and reports only what it is called. `instance_id` is the server it belongs to,
- * null when it is shared with every server. `catch_all` is whether the alerts no rule routes
- * reach it: an unexpected stop, a failed backup and a new game build. */
+ * null when it is shared with every server. A destination receives what the rules naming it
+ * send. */
 export interface Webhook {
 	id: string;
 	name: string;
 	kind: 'discord' | 'generic';
 	enabled: boolean;
 	instance_id: string | null;
-	catch_all: boolean;
 	created_at: string;
 	updated_at: string;
 }
@@ -31,7 +30,6 @@ export interface UpdateWebhook {
 	name?: string;
 	url?: string;
 	enabled?: boolean;
-	catch_all?: boolean;
 }
 
 export type DeliveryStatus = 'pending' | 'delivered' | 'failed';
@@ -85,6 +83,8 @@ export type RuleKind =
 	| 'instance_down'
 	| 'game_updated'
 	| 'update_test_finished'
+	| 'backup_failed'
+	| 'new_game_build'
 	| GameKind;
 
 /** Which destinations hear about one kind of event, on one server or on every server, with the

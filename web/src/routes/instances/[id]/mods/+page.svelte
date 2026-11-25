@@ -2,6 +2,7 @@
 	import EmptyState from '#lib/components/empty-state.svelte';
 	import PageHeader from '#lib/components/page-header.svelte';
 	import { formatInstant } from '#lib/api/schedules.js';
+	import LastModChange from '#lib/components/last-mod-change.svelte';
 	import { Tabs } from 'bits-ui';
 	import { modOffer, catalogueStatus, installedUpdateTarget } from '#lib/mod-catalogue.js';
 	import { goto } from '$app/navigation';
@@ -39,6 +40,7 @@
 	import { session } from '#lib/state/session.svelte.js';
 	import { socket } from '#lib/socket/index.svelte.js';
 	import { latestCall } from '#lib/latest.js';
+	import { preUpdateNotice } from '#lib/pre-update.js';
 	import { topics, type ServerMessage } from '#lib/socket/messages.js';
 	import { Badge } from '#lib/components/ui/badge/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
@@ -125,6 +127,7 @@
 		kept: KeptMember[];
 		conflicts: ModConflict[];
 		backup: boolean;
+		setup: boolean;
 	} | null>(null);
 	let confirmOpen = $state(false);
 	let confirmFailure = $state<unknown>(null);
@@ -375,7 +378,8 @@
 			removals: closure.removals,
 			kept: closure.kept,
 			conflicts: closure.conflicts,
-			backup: closure.backup
+			backup: closure.backup,
+			setup: closure.setup
 		};
 	}
 
@@ -410,7 +414,8 @@
 				removals: [],
 				kept: [],
 				conflicts: [],
-				backup: false
+				backup: false,
+				setup: false
 			};
 			confirmFailure = err;
 		} finally {
@@ -847,6 +852,9 @@
 						{/if}
 					</div>
 				</div>
+				{#if canManage && !loading && !failure && instance?.id === id}
+					<LastModChange instanceId={id} {installed} />
+				{/if}
 				{#if canManage && installed.length > 0}
 					<p class="text-sm text-muted-foreground">
 						Disable a mod to rule it out while you look for the one causing a problem. Its files
@@ -1549,12 +1557,9 @@
 					now.
 				</p>
 			{/if}
-			{#if pending.backup}
-				<p class="text-sm text-muted-foreground">
-					The world is backed up first. The backup is kept even if the {updating
-						? 'update'
-						: 'install'} fails.
-				</p>
+			{@const saves = preUpdateNotice(pending, updating ? 'update' : 'install')}
+			{#if saves}
+				<p class="text-sm text-muted-foreground">{saves}</p>
 			{/if}
 			<Dialog.Footer>
 				<Button variant="outline" onclick={() => (confirmOpen = false)}>Cancel</Button>
@@ -1652,9 +1657,8 @@
 				</p>
 			{/if}
 			<p class="text-sm text-muted-foreground">
-				{pending.backup
-					? 'The world is backed up first. The backup is kept even if the update fails.'
-					: 'This server has no world yet, so there is nothing to back up.'}
+				{preUpdateNotice(pending, 'update') ??
+					'This server has no world yet, so there is nothing to back up.'}
 			</p>
 			<Dialog.Footer>
 				<Button variant="outline" onclick={() => (updateAllOpen = false)}>Cancel</Button>
@@ -1750,6 +1754,11 @@
 					</span>
 				</Label>
 			</div>
+			{#if instance && instance.setup_before_update !== 'off'}
+				<p class="text-sm text-muted-foreground">
+					{preUpdateNotice({ backup: false, setup: true }, 'removal')}
+				</p>
+			{/if}
 			<Dialog.Footer>
 				<Button variant="outline" onclick={() => (removeOpen = false)}>Cancel</Button>
 				<Button variant="destructive" onclick={removeConfirmed}>Remove mod</Button>

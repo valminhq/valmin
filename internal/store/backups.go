@@ -29,6 +29,9 @@ type Backup struct {
 	// WorldAttention is what the world check asked the operator to look at. Empty when the world
 	// passed, was acknowledged, or was never checked.
 	WorldAttention []backup.Attention `json:"world_attention"`
+	// ModsFingerprint hashes the managed mods the archived world was last played with. Empty when
+	// they were never recorded.
+	ModsFingerprint string `json:"-"`
 }
 
 // Backup trigger values, matching the CHECK constraint in migration 0001.
@@ -54,8 +57,8 @@ const snapshotTriggers = `('pre_update','pre_restore','pre_import')`
 
 const insertBackup = `
 	INSERT INTO backups (id, instance_id, path, size_bytes, sha256, world_name, trigger, consistent,
-		world_bytes, world_attention, created_at)
-	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		world_bytes, world_attention, mods_fingerprint, created_at)
+	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 // CreateBackup records a finished archive.
 func (db *DB) CreateBackup(ctx context.Context, b *Backup) error {
@@ -87,7 +90,7 @@ func createBackup(ctx context.Context, ex execer, b *Backup) error {
 	}
 	if _, err := ex.ExecContext(ctx, insertBackup,
 		b.ID, b.InstanceID, b.Path, b.SizeBytes, b.SHA256, b.WorldName, b.Trigger, b.Consistent,
-		b.WorldBytes, attention, Now(),
+		b.WorldBytes, attention, nullIfEmpty(b.ModsFingerprint), Now(),
 	); err != nil {
 		return fmt.Errorf("record backup for instance %s: %w", b.InstanceID, err)
 	}
@@ -96,18 +99,20 @@ func createBackup(ctx context.Context, ex execer, b *Backup) error {
 
 // backupColumns is the row, in the order scanBackup reads it.
 const backupColumns = `id, instance_id, path, size_bytes, sha256, world_name, trigger,
-	consistent, created_at, world_bytes, world_attention`
+	consistent, created_at, world_bytes, world_attention, mods_fingerprint`
 
 // scanBackup reads one row in backupColumns order.
 func scanBackup(s scanner) (Backup, error) {
 	var b Backup
 	var createdAt string
 	var worldBytes sql.NullInt64
-	var attention sql.NullString
+	var attention, fingerprint sql.NullString
 	if err := s.Scan(&b.ID, &b.InstanceID, &b.Path, &b.SizeBytes, &b.SHA256,
-		&b.WorldName, &b.Trigger, &b.Consistent, &createdAt, &worldBytes, &attention); err != nil {
+		&b.WorldName, &b.Trigger, &b.Consistent, &createdAt, &worldBytes, &attention,
+		&fingerprint); err != nil {
 		return Backup{}, fmt.Errorf("scan backup row: %w", err)
 	}
+	b.ModsFingerprint = fingerprint.String
 	var err error
 	if b.CreatedAt, err = ParseTime(createdAt); err != nil {
 		return Backup{}, fmt.Errorf("backup created_at: %w", err)
@@ -133,6 +138,72 @@ func encodeAttention(found []backup.Attention) (any, error) {
 		return nil, fmt.Errorf("encode world attention: %w", err)
 	}
 	return string(raw), nil
+}
+
+// WorldModsFingerprint is the fingerprint of the mods instanceID's world was last played with,
+// empty when unknown.
+func (db *DB) WorldModsFingerprint(ctx context.Context, instanceID string) (string, error) {
+	var fingerprint sql.NullString
+	err := db.Reader.QueryRowContext(ctx,
+		`SELECT world_mods_fingerprint FROM instances WHERE id = ?`, instanceID).Scan(&fingerprint)
+	if err != nil {
+		return "", fmt.Errorf("read the world mods of instance %s: %w", instanceID, err)
+	}
+	return fingerprint.String, nil
+}
+
+// TxSetWorldMods records fingerprint as the mods instanceID's world was last played with; empty
+// records them as unknown.
+func TxSetWorldMods(ctx context.Context, tx *sql.Tx, instanceID, fingerprint string) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE instances SET world_mods_fingerprint = ? WHERE id = ?`,
+		nullIfEmpty(fingerprint), instanceID); err != nil {
+		return fmt.Errorf("record the world mods of instance %s: %w", instanceID, err)
+	}
+	return nil
+}
+
+// TxSetUnknownWorldMods records fingerprint as the mods instanceID's world was last played with
+// when they are unknown, and leaves them as they are otherwise.
+func TxSetUnknownWorldMods(ctx context.Context, tx *sql.Tx, instanceID, fingerprint string) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE instances SET world_mods_fingerprint = ?
+		WHERE id = ? AND world_mods_fingerprint IS NULL`, nullIfEmpty(fingerprint), instanceID); err != nil {
+		return fmt.Errorf("record the world mods of instance %s: %w", instanceID, err)
+	}
+	return nil
+}
+
+// InstancesWithoutWorldMods returns the IDs of the instances whose world's mods are unknown.
+func (db *DB) InstancesWithoutWorldMods(ctx context.Context) ([]string, error) {
+	rows, err := db.Reader.QueryContext(ctx, `SELECT id FROM instances WHERE world_mods_fingerprint IS NULL`)
+	if err != nil {
+		return nil, fmt.Errorf("list instances whose world mods are unknown: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan an instance whose world mods are unknown: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list instances whose world mods are unknown: %w", err)
+	}
+	return ids, nil
+}
+
+// SetUnknownWorldMods records, for each instance ID in fingerprints whose world's mods are
+// unknown, its fingerprint as those mods.
+func (db *DB) SetUnknownWorldMods(ctx context.Context, fingerprints map[string]string) error {
+	return db.inTx(ctx, "record world mods", func(tx *sql.Tx) error {
+		for id, fingerprint := range fingerprints {
+			if err := TxSetUnknownWorldMods(ctx, tx, id, fingerprint); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // WorldBaseline is the archive a new one's world size is compared against: the newest of

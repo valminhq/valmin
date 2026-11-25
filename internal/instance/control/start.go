@@ -58,6 +58,10 @@ func (s *Starter) startAndAwaitReady(
 		}
 	}
 	settleConfigs(ctx, s.DB, jh, instanceID)
+	worldMods, err := (&SetupState{DB: s.DB}).ModsFingerprint(ctx, instanceID)
+	if err != nil {
+		jh.Log("the world's mods go unrecorded: " + err.Error())
+	}
 	if err := s.Runtime.Start(ctx, containerID); err != nil {
 		return jobs.Outcome{
 			Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(),
@@ -70,10 +74,14 @@ func (s *Starter) startAndAwaitReady(
 		if tail, tailErr := instance.LogTail(ctx, s.Runtime, containerID, lifecycleLogTailLines); tailErr == nil {
 			jh.Log(tail)
 		}
+		// The game may have loaded the world before it failed, so its mods are recorded too.
 		return jobs.Outcome{
 			Status: jobs.StatusFailed, ErrorCode: errcode.Internal.String(),
-			Error:    fmt.Sprintf("the server did not become ready: %v", err),
-			OnFinish: finishToError(instanceID, instance.StateStarting),
+			Error: fmt.Sprintf("the server did not become ready: %v", err),
+			OnFinish: chainFinish(finishToError(instanceID, instance.StateStarting),
+				func(ctx context.Context, tx *sql.Tx) error {
+					return store.TxSetWorldMods(ctx, tx, instanceID, worldMods)
+				}),
 		}
 	}
 	msg := "running"
@@ -87,7 +95,16 @@ func (s *Starter) startAndAwaitReady(
 	return jobs.Outcome{
 		Status: jobs.StatusSucceeded,
 		OnFinish: func(ctx context.Context, tx *sql.Tx) error {
-			return instance.FinishStartTx(ctx, tx, instanceID, instance.StateStarting, instance.StateRunning)
+			if err := instance.FinishStartTx(
+				ctx,
+				tx,
+				instanceID,
+				instance.StateStarting,
+				instance.StateRunning,
+			); err != nil {
+				return err
+			}
+			return store.TxSetWorldMods(ctx, tx, instanceID, worldMods)
 		},
 		AfterFinish: s.AfterStart,
 	}

@@ -312,7 +312,7 @@ func TestSetupPreviewRejectsMissingOrCorruptArtifact(t *testing.T) {
 	}
 }
 
-func TestSetupActionsRequireAdministratorAndStoppedServer(t *testing.T) {
+func TestSetupActionsRequireAnAdministratorAndRestoreAStoppedServer(t *testing.T) {
 	t.Parallel()
 	rt, db, admin, member, dataDir := setupTestWorld(t)
 	setupTestMod(t, db, dataDir, "Ns-One", source.Thunderstore,
@@ -341,15 +341,86 @@ func TestSetupActionsRequireAdministratorAndStoppedServer(t *testing.T) {
 		}
 	}
 	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
-	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL,
-		jsonBody(t, map[string]string{"name": "running"})))
-	if rec.Code != http.StatusConflict || errCode(t, rec) != "instance_must_be_stopped" {
-		t.Errorf("save while running = %d %s", rec.Code, rec.Body.String())
-	}
-	rec = as(rt, admin, httptest.NewRequest(http.MethodPost,
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost,
 		setupsURL+"/"+saved.ID+"/restore", http.NoBody))
 	if rec.Code != http.StatusConflict || errCode(t, rec) != "instance_must_be_stopped" {
 		t.Errorf("restore while running = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestSetupSaveReadsARunningServer asserts a setup saves from a running server, that taking a
+// world backup then is refused, that a server between states cannot save one, and that the
+// next-backup link excludes the other two ways to link a world backup.
+func TestSetupSaveReadsARunningServer(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	setupTestMod(t, db, dataDir, "Ns-One", source.Thunderstore,
+		"1.0.0", "one", false, true, false, "unknown")
+	seed(t, db, `UPDATE instances SET state = 'running' WHERE id = 'inst-a'`)
+	saved := setupTestSave(t, rt, db, admin, "while running")
+	if _, refs, err := db.SetupByID(t.Context(), "inst-a", saved.ID); err != nil || len(refs) != 1 {
+		t.Errorf("setup saved while running holds %+v, %v, want the installed package", refs, err)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		body  map[string]any
+		field string
+	}{
+		{"back up while running", map[string]any{"name": "x", "back_up_world": true}, "back_up_world"},
+		{
+			"next and now",
+			map[string]any{"name": "x", "link_next_world_backup": true, "back_up_world": true},
+			"link_next_world_backup",
+		},
+		{
+			"next and existing",
+			map[string]any{"name": "x", "link_next_world_backup": true, "world_backup_id": "b"},
+			"link_next_world_backup",
+		},
+	} {
+		rec := as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL, jsonBody(t, tc.body)))
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), tc.field) {
+			t.Errorf("%s = %d %s, want 422 naming %s", tc.name, rec.Code, rec.Body.String(), tc.field)
+		}
+	}
+
+	seed(t, db, `UPDATE instances SET state = 'starting' WHERE id = 'inst-a'`)
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL,
+		jsonBody(t, map[string]string{"name": "starting"})))
+	if rec.Code != http.StatusConflict || errCode(t, rec) != "invalid_state" {
+		t.Errorf("save while starting = %d %s, want 409 invalid_state", rec.Code, rec.Body.String())
+	}
+}
+
+// TestAConfigOnlyRestoreKeepsSetupsWaiting asserts a restore that changes config files but no
+// mods leaves the setups waiting for a world backup still waiting.
+func TestAConfigOnlyRestoreKeepsSetupsWaiting(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	setupTestMod(t, db, dataDir, "Ns-One", source.Thunderstore,
+		"1.0.0", "one", false, true, false, "unknown")
+	writeServerFile(t, dataDir, "BepInEx/config/one.cfg", "a = 1\n")
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL,
+		jsonBody(t, map[string]any{"name": "waiting", "link_next_world_backup": true})))
+	var accepted jobView
+	decodeInto(t, rec, &accepted)
+	if job := waitJob(t, rt, admin, accepted.JobID); job.Status != "succeeded" {
+		t.Fatalf("save job = %+v, want succeeded", job)
+	}
+	rows, err := db.ListSetups(t.Context(), "inst-a")
+	if err != nil || len(rows) != 1 || !rows[0].WorldPending {
+		t.Fatalf("setups = %+v, %v, want one waiting", rows, err)
+	}
+	writeServerFile(t, dataDir, "BepInEx/config/one.cfg", "a = 2\n")
+
+	preview := setupTestPreview(t, rt, admin, rows[0].ID)
+	if job := setupTestRestore(t, rt, admin, rows[0].ID, preview.ETag); job.Status != "succeeded" {
+		t.Fatalf("restore job = %+v, want succeeded", job)
+	}
+	setupTestFile(t, serverPath(dataDir, "BepInEx/config/one.cfg"), "a = 1\n")
+	if row, _, err := db.SetupByID(t.Context(), "inst-a", rows[0].ID); err != nil || !row.WorldPending {
+		t.Errorf("setup after a config-only restore = %+v, %v, want still waiting", row, err)
 	}
 }
 
@@ -456,6 +527,61 @@ func TestSetupSavePinsAReproducibleCachedArchive(t *testing.T) {
 	}
 }
 
+// TestSetupSaveReusesTheNewestSetupsPackages asserts a save keeps the newest setup's payload for
+// a package whose files are unchanged, without the cached archive, and captures afresh once the
+// files change or that payload no longer verifies.
+func TestSetupSaveReusesTheNewestSetupsPackages(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	setupTestMod(t, db, dataDir, "Ns-One", source.Thunderstore,
+		"1.0.0", "one", false, true, false, "unknown")
+	archive := filepath.Join(rt.instances.Cfg.Data.Root, "cache", "thunderstore", "Ns-One-1.0.0.zip")
+	if err := os.MkdirAll(filepath.Dir(archive), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archive, modZip(t, map[string]string{"plugins/Ns-One.dll": "one"}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ref := func(name string) store.SetupArtifactRef {
+		t.Helper()
+		saved := setupTestSave(t, rt, db, admin, name)
+		_, refs, err := db.SetupByID(t.Context(), "inst-a", saved.ID)
+		if err != nil || len(refs) != 1 {
+			t.Fatalf("refs of %s = %+v: %v", name, refs, err)
+		}
+		return refs[0]
+	}
+
+	first := ref("first")
+	if first.Kind != "zip" {
+		t.Fatalf("first payload kind = %q, want zip", first.Kind)
+	}
+	if err := os.Remove(archive); err != nil {
+		t.Fatal(err)
+	}
+	if second := ref("unchanged"); second != first {
+		t.Errorf("payload of an unchanged package = %+v, want the newest setup's %+v", second, first)
+	}
+
+	blob := filepath.Join(setupblob.Dir(rt.instances.Cfg.Data.Root), first.SHA256)
+	if err := os.Chmod(blob, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(blob, []byte("damaged"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if third := ref("damaged"); third.SHA256 == first.SHA256 || third.Kind != "files" {
+		t.Errorf("payload after the kept one was damaged = %+v, want a fresh files payload", third)
+	}
+
+	writeServerFile(t, dataDir, "BepInEx/plugins/Ns-One.dll", "one edited")
+	before := ref("before edit")
+	writeServerFile(t, dataDir, "BepInEx/plugins/Ns-One.dll", "one edited again")
+	if edited := ref("edited"); edited.SHA256 == before.SHA256 {
+		t.Errorf("payload after the files changed = %+v, want a fresh capture", edited)
+	}
+}
+
 func TestSetupRestoreRollsBackAfterFileWriteFailure(t *testing.T) {
 	t.Parallel()
 	rt, db, admin, _, dataDir := setupTestWorld(t)
@@ -503,5 +629,370 @@ func TestSetupRestoreRollsBackAfterFileWriteFailure(t *testing.T) {
 	}
 	if inst.State != "stopped" || inst.ServerName != "Current Server" {
 		t.Errorf("settings after failed restore = %+v, want original stopped settings", inst)
+	}
+}
+
+// TestLegacySetupRestoreLeavesSubfolderConfigs asserts a setup saved before setups held the
+// whole config tree restores only its top-level .cfg files and leaves every other config file
+// as it is.
+func TestLegacySetupRestoreLeavesSubfolderConfigs(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	writeServerFile(t, dataDir, "BepInEx/config/Mod.cfg", "saved config")
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/a.yaml", "saved yaml")
+	saved := setupTestSave(t, rt, db, admin, "legacy")
+	var snap map[string]any
+	if err := json.Unmarshal([]byte(saved.SnapshotJSON), &snap); err != nil {
+		t.Fatal(err)
+	}
+	delete(snap, "config_tree")
+	snap["configs"] = []map[string]string{{"file": "Mod.cfg", "content": "saved config"}}
+	legacy, err := json.Marshal(snap)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed(t, db, `DELETE FROM saved_setup_configs WHERE setup_id = ?`, saved.ID)
+	seed(t, db, `UPDATE saved_setups SET snapshot_json = ? WHERE id = ?`, string(legacy), saved.ID)
+
+	writeServerFile(t, dataDir, "BepInEx/config/Mod.cfg", "changed config")
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/a.yaml", "changed yaml")
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/new.yaml", "new yaml")
+	preview := setupTestPreview(t, rt, admin, saved.ID)
+	if !preview.Ready {
+		t.Fatalf("preview = %+v, want ready", preview)
+	}
+	for _, c := range preview.Current.Configs {
+		if c.File != "Mod.cfg" {
+			t.Errorf("legacy comparison lists current %s, want top-level .cfg files only", c.File)
+		}
+	}
+	if job := setupTestRestore(t, rt, admin, saved.ID, preview.ETag); job.Status != "succeeded" {
+		t.Fatalf("restore job = %+v, want succeeded", job)
+	}
+	setupTestFile(t, serverPath(dataDir, "BepInEx/config/Mod.cfg"), "saved config")
+	setupTestFile(t, serverPath(dataDir, "BepInEx/config/EWD/a.yaml"), "changed yaml")
+	setupTestFile(t, serverPath(dataDir, "BepInEx/config/EWD/new.yaml"), "new yaml")
+}
+
+// TestSetupRestoresTheWholeConfigTree asserts a setup holds every config file the editor lists
+// apart from the RCON file, stores their bytes as blobs rather than in its snapshot, restores
+// them, removes config files created after it, and leaves an automatic setup that undoes the
+// restore.
+func TestSetupRestoresTheWholeConfigTree(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	writeServerFile(t, dataDir, "BepInEx/config/Mod.cfg", "saved config")
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/a.yaml", "saved yaml")
+	writeServerFile(t, dataDir, "BepInEx/config/EpicLoot/patches/b.json", "{}")
+	writeServerFile(t, dataDir, "BepInEx/config/"+command.ConfigFile, "secret")
+	saved := setupTestSave(t, rt, db, admin, "tree")
+	if strings.Contains(saved.SnapshotJSON, "saved yaml") {
+		t.Error("snapshot holds config bytes, want them stored as blobs")
+	}
+	row, _, err := db.SetupByID(t.Context(), "inst-a", saved.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := make([]string, 0, len(row.Configs))
+	for _, c := range row.Configs {
+		files = append(files, c.File)
+	}
+	if want := []string{"EWD/a.yaml", "EpicLoot/patches/b.json", "Mod.cfg"}; !slices.Equal(files, want) {
+		t.Errorf("saved config files = %v, want %v", files, want)
+	}
+
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/a.yaml", "changed yaml")
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/a.yaml.pending", "pending edit")
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/new.yaml", "new yaml")
+	preview := setupTestPreview(t, rt, admin, saved.ID)
+	if !preview.Ready {
+		t.Fatalf("preview = %+v, want ready", preview)
+	}
+	if job := setupTestRestore(t, rt, admin, saved.ID, preview.ETag); job.Status != "succeeded" {
+		t.Fatalf("restore job = %+v, want succeeded", job)
+	}
+	setupTestFile(t, serverPath(dataDir, "BepInEx/config/EWD/a.yaml"), "saved yaml")
+	setupTestFile(t, serverPath(dataDir, "BepInEx/config/EpicLoot/patches/b.json"), "{}")
+	setupTestFile(t, serverPath(dataDir, "BepInEx/config/"+command.ConfigFile), "secret")
+	for _, path := range []string{"BepInEx/config/EWD/new.yaml", "BepInEx/config/EWD/a.yaml.pending"} {
+		if _, err := os.Stat(serverPath(dataDir, path)); !os.IsNotExist(err) {
+			t.Errorf("%s after restore: %v, want absent", path, err)
+		}
+	}
+	for file, want := range map[string][]string{
+		"EWD/a.yaml":   {"setup", "found"},
+		"EWD/new.yaml": {"found"},
+	} {
+		revs, err := db.ConfigRevisions(t.Context(), "inst-a", file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for i := range revs {
+			got = append(got, string(revs[i].Source))
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("%s history = %v, want %v", file, got, want)
+		}
+	}
+
+	rows, err := db.ListSetups(t.Context(), "inst-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || !rows[0].Automatic || rows[0].Name != "Before restoring tree" {
+		t.Fatalf("setups after restore = %+v, want an automatic one first", rows)
+	}
+	undo := setupTestPreview(t, rt, admin, rows[0].ID)
+	if job := setupTestRestore(t, rt, admin, rows[0].ID, undo.ETag); job.Status != "succeeded" {
+		t.Fatalf("undo job = %+v, want succeeded", job)
+	}
+	setupTestFile(t, serverPath(dataDir, "BepInEx/config/EWD/a.yaml"), "changed yaml")
+	setupTestFile(t, serverPath(dataDir, "BepInEx/config/EWD/new.yaml"), "new yaml")
+}
+
+// TestSetupSavesShareUnchangedConfigBlobs asserts a second setup stores only the config files
+// that changed since the first.
+func TestSetupSavesShareUnchangedConfigBlobs(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/a.yaml", "a")
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/b.yaml", "b")
+	blobs := func() int {
+		entries, err := os.ReadDir(setupblob.Dir(rt.instances.Cfg.Data.Root))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(entries)
+	}
+	setupTestSave(t, rt, db, admin, "first")
+	first := blobs()
+	rec := as(rt, admin, httptest.NewRequest(http.MethodGet, setupsURL, http.NoBody))
+	var list struct{ Items []setupDetailView }
+	decodeInto(t, rec, &list)
+	if len(list.Items) != 1 || deref(list.Items[0].CreatedBy) != admin.Username {
+		t.Errorf("listed setups = %+v, want one created by %s", list.Items, admin.Username)
+	}
+	writeServerFile(t, dataDir, "BepInEx/config/EWD/b.yaml", "b changed")
+	setupTestSave(t, rt, db, admin, "second")
+	if got := blobs(); got != first+1 {
+		t.Errorf("blobs after a second save = %d, want %d", got, first+1)
+	}
+	setupTestSave(t, rt, db, admin, "third")
+	rec = as(rt, admin, httptest.NewRequest(http.MethodGet, setupsURL, http.NoBody))
+	decodeInto(t, rec, &list)
+	if len(list.Items) != 3 {
+		t.Fatalf("listed setups = %d, want 3", len(list.Items))
+	}
+	third, second, firstSetup := list.Items[0], list.Items[1], list.Items[2]
+	if third.ConfigsDigest != second.ConfigsDigest || second.ConfigsDigest == firstSetup.ConfigsDigest {
+		t.Errorf("configs digests = %q, %q, %q, want the last two equal and the first different",
+			firstSetup.ConfigsDigest, second.ConfigsDigest, third.ConfigsDigest)
+	}
+}
+
+// TestLightSetupRestoresPackagesFromTheCache asserts a light setup keeps no payload for a
+// package its cached registry archive reproduces, restores that package from the cache, and
+// reports it once neither the cache nor the registry has it.
+func TestLightSetupRestoresPackagesFromTheCache(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	setupTestMod(t, db, dataDir, "Ns-One", source.Thunderstore,
+		"1.0.0", "one", false, true, false, "unknown")
+	cacheDir := filepath.Join(rt.instances.Cfg.Data.Root, "cache", "thunderstore")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(cacheDir, "Ns-One-1.0.0.zip")
+	if err := os.WriteFile(archive, modZip(t, map[string]string{"plugins/Ns-One.dll": "one"}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL,
+		jsonBody(t, map[string]any{"name": "light", "light": true})))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("save = %d %s, want 202", rec.Code, rec.Body.String())
+	}
+	var accepted jobView
+	decodeInto(t, rec, &accepted)
+	if job := waitJob(t, rt, admin, accepted.JobID); job.Status != "succeeded" {
+		t.Fatalf("save job = %+v, want succeeded", job)
+	}
+	rows, err := db.ListSetups(t.Context(), "inst-a")
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("setups = %+v, %v", rows, err)
+	}
+	saved := rows[0]
+	if _, refs, err := db.SetupByID(t.Context(), "inst-a", saved.ID); err != nil || len(refs) != 0 {
+		t.Fatalf("light setup payloads = %+v, %v, want none", refs, err)
+	}
+
+	seed(t, db, `DELETE FROM instance_mods WHERE instance_id = 'inst-a'`)
+	if err := os.Remove(serverPath(dataDir, "BepInEx/plugins/Ns-One.dll")); err != nil {
+		t.Fatal(err)
+	}
+	setupTestMod(t, db, dataDir, "Ns-Two", source.Hexium,
+		"2.0.0", "two", false, true, false, "unknown")
+	preview := setupTestPreview(t, rt, admin, saved.ID)
+	if !preview.Ready || !preview.Setup.Light {
+		t.Fatalf("preview = %+v, want a ready light setup", preview)
+	}
+	if job := setupTestRestore(t, rt, admin, saved.ID, preview.ETag); job.Status != "succeeded" {
+		t.Fatalf("restore job = %+v, want succeeded", job)
+	}
+	setupTestFile(t, serverPath(dataDir, "BepInEx/plugins/Ns-One.dll"), "one")
+
+	if err := os.Remove(archive); err != nil {
+		t.Fatal(err)
+	}
+	preview = setupTestPreview(t, rt, admin, saved.ID)
+	if preview.Ready ||
+		!strings.Contains(strings.Join(preview.Problems, " "), "Ns-One 1.0.0 is not in the download cache") {
+		t.Errorf("preview without the archive = %+v, want it reported", preview)
+	}
+}
+
+// TestSetupSaveBacksUpTheWorldAndLinksIt asserts a save with back_up_world takes a verified world
+// backup and links it, that the backup list marks it for everyone but names the setup only to those who
+// may manage setups, and that naming an existing backup as well is refused.
+func TestSetupSaveBacksUpTheWorldAndLinksIt(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, member, _ := setupTestWorld(t)
+	seedWorldOnDisk(t, db)
+
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL,
+		jsonBody(t, map[string]any{"name": "both", "back_up_world": true, "world_backup_id": "bk"})))
+	if rec.Code != http.StatusUnprocessableEntity || errCode(t, rec) != "validation_failed" {
+		t.Fatalf("save naming two backups = %d %s, want 422", rec.Code, rec.Body.String())
+	}
+	rec = as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL,
+		jsonBody(t, map[string]any{"name": "with world", "back_up_world": true})))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("save = %d %s, want 202", rec.Code, rec.Body.String())
+	}
+	var accepted jobView
+	decodeInto(t, rec, &accepted)
+	if job := waitJob(t, rt, admin, accepted.JobID); job.Status != "succeeded" {
+		t.Fatalf("save job = %+v, want succeeded", job)
+	}
+	rows, err := db.ListSetups(t.Context(), "inst-a")
+	if err != nil || len(rows) != 1 || rows[0].BackupID == "" {
+		t.Fatalf("setups = %+v, %v, want one linked to a backup", rows, err)
+	}
+	b, err := db.BackupByID(t.Context(), "inst-a", rows[0].BackupID)
+	if err != nil || b == nil || !b.Consistent || b.Trigger != store.TriggerManual || b.WorldBytes == nil {
+		t.Fatalf("linked backup = %+v, %v, want a consistent manual backup the world check measured", b, err)
+	}
+
+	for _, tc := range []struct {
+		user  *store.User
+		names []setupLinkView
+	}{
+		{admin, []setupLinkView{{ID: rows[0].ID, Name: "with world"}}},
+		{member, nil},
+	} {
+		rec := as(rt, tc.user, httptest.NewRequest(http.MethodGet, backupsPath, http.NoBody))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list as %s = %d %s", tc.user.Username, rec.Code, rec.Body.String())
+		}
+		var list backupList
+		decodeInto(t, rec, &list)
+		if len(list.Items) != 1 || !list.Items[0].KeptForSetup ||
+			!slices.Equal(list.Items[0].LinkedSetups, tc.names) {
+			t.Errorf("backups as %s = %+v, want kept for setup with names %v",
+				tc.user.Username, list.Items, tc.names)
+		}
+	}
+}
+
+// TestSetupSaveFailsOnAWorldBackupThatDoesNotVerify asserts a save whose world backup fails its
+// check, here a world with no .fwl, fails as a manual backup does, publishes no setup and leaves
+// no archive behind.
+func TestSetupSaveFailsOnAWorldBackupThatDoesNotVerify(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	world := filepath.Join(instance.WorldsDir(dataDir), "worlds_local", "World.db")
+	if err := os.MkdirAll(filepath.Dir(world), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(world, []byte("not a world"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL,
+		jsonBody(t, map[string]any{"name": "bad world", "back_up_world": true})))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("save = %d %s, want 202", rec.Code, rec.Body.String())
+	}
+	var accepted jobView
+	decodeInto(t, rec, &accepted)
+	job := waitJob(t, rt, admin, accepted.JobID)
+	if job.Status != "failed" || job.ErrorCode == nil || *job.ErrorCode != "backup_unverifiable" {
+		t.Fatalf("save job = %+v, want failed as backup_unverifiable", job)
+	}
+	if rows, err := db.ListSetups(t.Context(), "inst-a"); err != nil || len(rows) != 0 {
+		t.Errorf("setups = %+v, %v, want none", rows, err)
+	}
+	archives, err := filepath.Glob(filepath.Join(instance.BackupsDir(rt.instances.Cfg.Data.Root), "inst-a", "*"))
+	if err != nil || len(archives) != 0 {
+		t.Errorf("archives left = %v, %v, want none", archives, err)
+	}
+}
+
+// TestSetupSaveWithoutASavedWorldLinksNoBackup asserts a server whose world was never saved, but
+// which holds a player list, saves its setup unlinked.
+func TestSetupSaveWithoutASavedWorldLinksNoBackup(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	list := filepath.Join(instance.WorldsDir(dataDir), "adminlist.txt")
+	if err := os.MkdirAll(filepath.Dir(list), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(list, []byte("player-id\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := as(rt, admin, httptest.NewRequest(http.MethodPost, setupsURL,
+		jsonBody(t, map[string]any{"name": "no world", "back_up_world": true})))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("save = %d %s, want 202", rec.Code, rec.Body.String())
+	}
+	var accepted jobView
+	decodeInto(t, rec, &accepted)
+	if job := waitJob(t, rt, admin, accepted.JobID); job.Status != "succeeded" {
+		t.Fatalf("save job = %+v, want succeeded", job)
+	}
+	rows, err := db.ListSetups(t.Context(), "inst-a")
+	if err != nil || len(rows) != 1 || rows[0].BackupID != "" {
+		t.Errorf("setups = %+v, %v, want one with no backup", rows, err)
+	}
+}
+
+// TestSetupRestoreLinksTheWorldItBacksUp asserts a restore that changes mods links the
+// automatic setup it saves to the world backup it takes first, so undoing it brings both back.
+func TestSetupRestoreLinksTheWorldItBacksUp(t *testing.T) {
+	t.Parallel()
+	rt, db, admin, _, dataDir := setupTestWorld(t)
+	setupTestMod(t, db, dataDir, "Ns-One", source.Thunderstore,
+		"1.0.0", "one", false, true, false, "unknown")
+	giveWorld(t, dataDir)
+	saved := setupTestSave(t, rt, db, admin, "one")
+
+	seed(t, db, `DELETE FROM instance_mods WHERE instance_id = 'inst-a'`)
+	if err := os.Remove(serverPath(dataDir, "BepInEx/plugins/Ns-One.dll")); err != nil {
+		t.Fatal(err)
+	}
+	setupTestMod(t, db, dataDir, "Ns-Two", source.Thunderstore,
+		"2.0.0", "two", false, true, false, "unknown")
+	preview := setupTestPreview(t, rt, admin, saved.ID)
+	if job := setupTestRestore(t, rt, admin, saved.ID, preview.ETag); job.Status != "succeeded" {
+		t.Fatalf("restore job = %+v, want succeeded", job)
+	}
+
+	backups := preUpdateBackupIDs(t, db)
+	setups := automaticSetups(t, db)
+	if len(backups) != 1 || len(setups) != 1 {
+		t.Fatalf("pre_update backups = %v, automatic setups = %+v, want one of each", backups, setups)
+	}
+	if setups[0].Name != "Before restoring one" || setups[0].BackupID != backups[0] {
+		t.Errorf("automatic setup = %q linked to %q, want \"Before restoring one\" linked to %q",
+			setups[0].Name, setups[0].BackupID, backups[0])
 	}
 }

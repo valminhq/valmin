@@ -37,13 +37,17 @@ const (
 
 // Installer owns mod install submissions, staging, placement, and rollback.
 type Installer struct {
-	DB            *store.DB
-	Engine        *jobs.Engine
-	Commands      *command.Manager
-	Clients       map[source.Source]*thunderstore.Client
-	Caches        map[source.Source]*cache.Cache
-	DataRoot      string
-	ArchiveWorlds ArchiveWorlds
+	DB       *store.DB
+	Engine   *jobs.Engine
+	Commands *command.Manager
+	Clients  map[source.Source]*thunderstore.Client
+	Caches   map[source.Source]*cache.Cache
+	DataRoot string
+	// Checkpoint saves the world and setup before an update; nil refuses updates.
+	Checkpoint Checkpoint
+	// Version saves the setup before an install or uninstall that archives no world, apart from
+	// the installs that create a server; nil saves none.
+	Version Version
 }
 
 func (i *Installer) enabledSources() []source.Source {
@@ -127,7 +131,7 @@ func (i *Installer) Submit(ctx context.Context, sub *InstallSubmission) (*store.
 			}
 			return nil
 		},
-	}, i.runModInstallThen(inst, payload, sub.AfterFinish))
+	}, i.runModInstallThen(sub))
 	if err != nil {
 		// Not wrapped: writeJobSubmitError reads the typed conflicts out with errors.As.
 		return nil, err
@@ -140,10 +144,9 @@ func (i *Installer) Submit(ctx context.Context, sub *InstallSubmission) (*store.
 // install's own configuration of what it placed. Starting the server after a failed install
 // would create the world unmodded, which is the outcome installing before first boot exists to
 // prevent.
-func (i *Installer) runModInstallThen(
-	inst *store.Instance, payload *InstallPayload, afterFinish func(context.Context),
-) jobs.Runner {
-	run := i.runModInstall(inst, payload)
+func (i *Installer) runModInstallThen(sub *InstallSubmission) jobs.Runner {
+	run := i.runModInstall(sub.Instance, sub.Payload, sub.RequestedBy)
+	afterFinish := sub.AfterFinish
 	if afterFinish == nil {
 		return run
 	}
@@ -208,10 +211,11 @@ func writePrevRows(stagingDir string, pkgs []*stagedPackage) error {
 	return nil
 }
 
-// runModInstall is the mod_install Runner. The phase order is load-bearing: resolve,
-// download, stage, write the manifest, then move files. Every failure at or after the
-// manifest is undone from the manifest, the only exact record of what moved.
-func (i *Installer) runModInstall(inst *store.Instance, payload *InstallPayload) jobs.Runner {
+// runModInstall is the mod_install Runner for requestedBy. The phase order is load-bearing:
+// resolve, download, stage, save the world and setup, write the manifest, then move files. Every
+// failure at or after the manifest is undone from the manifest, the only exact record of what
+// moved.
+func (i *Installer) runModInstall(inst *store.Instance, payload *InstallPayload, requestedBy string) jobs.Runner {
 	return func(ctx context.Context, h *jobs.Handle) jobs.Outcome {
 		defer func() { _ = os.RemoveAll(payload.StagingDir) }()
 
@@ -229,17 +233,25 @@ func (i *Installer) runModInstall(inst *store.Instance, payload *InstallPayload)
 		// The archive comes after everything that can still be abandoned for free and before
 		// the first file moves: a download that fails leaves no archive nobody needed, and the
 		// world is saved before anything could change what it needs.
-		var archived func(context.Context, *sql.Tx) error
-		if payload.Backup || replacesInstalled(pkgs) {
-			if h.CancelRequested(ctx) {
-				return jobs.Outcome{Status: jobs.StatusCancelled}
-			}
+		if h.CancelRequested(ctx) {
+			return jobs.Outcome{Status: jobs.StatusCancelled}
+		}
+		var archived, version func(context.Context, *sql.Tx) error
+		switch {
+		case payload.Backup || replacesInstalled(pkgs):
 			var err error
-			if archived, err = archiveBeforeUpdate(ctx, h, inst, i.ArchiveWorlds); err != nil {
+			archived, err = checkpointBeforeUpdate(ctx, h, inst, i.Checkpoint, pkgs, requestedBy, payload.StagingDir)
+			if err != nil {
 				return jobs.Failed(i.failureCode(err), err)
 			}
+		case !payload.Minimum:
+			version = versionBefore(ctx, h, inst, i.Version, 64, checkpointName(pkgs), requestedBy, payload.StagingDir)
 		}
-		return i.commitInstall(ctx, h, inst, payload, pkgs).PrependFinish(archived)
+		out := i.commitInstall(ctx, h, inst, payload, pkgs)
+		if out.Status == jobs.StatusSucceeded {
+			out = out.PrependFinish(version)
+		}
+		return out.PrependFinish(archived)
 	}
 }
 

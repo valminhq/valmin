@@ -104,6 +104,16 @@ func (c *Cache) path(ident string) (string, error) {
 	return filepath.Join(c.root, ident+".zip"), nil
 }
 
+// Has reports whether ident's zip is cached.
+func (c *Cache) Has(ident string) bool {
+	path, err := c.path(ident)
+	if err != nil {
+		return false
+	}
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
 // Get returns the local path to ident's zip, downloading from downloadURL if not already
 // cached. declaredSize is mod_versions.file_size, a cross-check against the completed download
 // rather than the size limit; pass 0 if unknown.
@@ -137,11 +147,15 @@ func (c *Cache) get(
 	if err != nil {
 		return "", false, err
 	}
-	if _, err := os.Stat(final); err == nil {
+
+	// A hit is checked and touched under the lock Prune holds, so a zip handed out here is
+	// never one a concurrent prune already judged unused.
+	c.mu.Lock()
+	if info, err := os.Stat(final); err == nil {
+		touch(final, info)
+		c.mu.Unlock()
 		return final, false, nil
 	}
-
-	c.mu.Lock()
 	if f, ok := c.byIdent[ident]; ok {
 		c.mu.Unlock()
 		select {
@@ -150,14 +164,6 @@ func (c *Cache) get(
 		case <-ctx.Done():
 			return "", false, fmt.Errorf("wait for %s: %w", ident, ctx.Err())
 		}
-	}
-	// Stat again under the lock. A download publishes by rename and only then drops its
-	// inflight entry, so a caller that missed the file above and arrived here after that
-	// rename would otherwise find no entry either, and download bytes that are already on
-	// disk.
-	if _, err := os.Stat(final); err == nil {
-		c.mu.Unlock()
-		return final, false, nil
 	}
 	f := &inflight{done: make(chan struct{})}
 	c.byIdent[ident] = f
@@ -251,6 +257,94 @@ func (c *Cache) download(
 	published = true
 
 	return final, nil
+}
+
+// touchInterval bounds how often a cache hit refreshes a zip's times. Half the panel's one-hour
+// prune grace period, it leaves a zip at least half an hour of protection after any hit while
+// sparing an inode write on most installs.
+const touchInterval = 30 * time.Minute
+
+// touch marks a cached zip as just used, so a prune's grace period covers whoever was handed it.
+// A failure only costs that protection, never the hit.
+func touch(path string, info os.FileInfo) {
+	if time.Since(info.ModTime()) < touchInterval {
+		return
+	}
+	now := time.Now()
+	_ = os.Chtimes(path, now, now)
+}
+
+// Entry is one file under the cache root: a published zip, or the leftover of a download.
+type Entry struct {
+	Ident   string
+	Partial bool
+	fsutil.Usage
+}
+
+// Entries lists the zips and partial downloads under the cache root in name order. A missing
+// root is an empty cache.
+func (c *Cache) Entries() ([]Entry, error) {
+	dirents, err := os.ReadDir(c.root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list cache %s: %w", c.root, err)
+	}
+	var entries []Entry
+	for _, d := range dirents {
+		ident, partial, ok := parseName(d.Name())
+		if !ok || !d.Type().IsRegular() {
+			continue
+		}
+		info, err := d.Info()
+		if err != nil {
+			continue
+		}
+		entries = append(entries, Entry{Ident: ident, Partial: partial, Usage: fsutil.StatUsage(info)})
+	}
+	return entries, nil
+}
+
+// parseName splits a cache filename into its ident and whether it is a partial download.
+func parseName(name string) (ident string, partial, ok bool) {
+	if ident, found := strings.CutSuffix(name, ".zip.part"); found {
+		return ident, true, ident != ""
+	}
+	if ident, found := strings.CutSuffix(name, ".zip"); found {
+		return ident, false, ident != ""
+	}
+	return "", false, false
+}
+
+// Prune removes the entries remove selects and returns them. It holds the cache lock
+// throughout, so no Get reuses or publishes a zip between the listing and the removal, and it
+// never touches the files of a download in flight.
+func (c *Cache) Prune(remove func(Entry) bool) ([]Entry, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entries, err := c.Entries()
+	if err != nil {
+		return nil, err
+	}
+	var removed []Entry
+	for _, e := range entries {
+		if _, downloading := c.byIdent[e.Ident]; downloading || !remove(e) {
+			continue
+		}
+		name := e.Ident + ".zip"
+		if e.Partial {
+			name += ".part"
+		}
+		if err := os.Remove(filepath.Join(c.root, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return removed, fmt.Errorf("remove cached %s: %w", name, err)
+		}
+		removed = append(removed, e)
+	}
+	if len(removed) == 0 {
+		return nil, nil
+	}
+	return removed, fsutil.SyncDir(c.root)
 }
 
 // Sweep removes every *.part file under root, unconditionally: a panel killed mid-download

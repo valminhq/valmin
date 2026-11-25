@@ -16,6 +16,7 @@ export const adminPageActions: Record<string, string> = {
 	discord: actions.panelSettings,
 	diagnostics: actions.panelSettings,
 	export: actions.panelSettings,
+	cache: actions.panelSettings,
 	keys: actions.panelSettings
 };
 

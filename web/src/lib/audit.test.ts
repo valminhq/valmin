@@ -83,6 +83,7 @@ describe('summaries of recorded actions', () => {
 			'Alex blocked sign-ins to bea after repeated failures'
 		],
 		['deep checks', 'panel.settings', { operation: 'deep_checks' }, 'Alex ran the deep checks'],
+		['cache prune', 'panel.settings', { operation: 'cache_prune' }, 'Alex pruned the unused cache'],
 		[
 			'create from scratch',
 			'instances.create',
@@ -120,6 +121,12 @@ describe('summaries of recorded actions', () => {
 			'instances.setups.restore',
 			{ name: 'Working before update' },
 			'Alex restored setup Working before update on Viking World'
+		],
+		[
+			'setup rollback',
+			'instances.setups.rollback',
+			{ name: 'Working before update', world: true },
+			'Alex rolled back to setup Working before update and its world on Viking World'
 		],
 		[
 			'setup delete',

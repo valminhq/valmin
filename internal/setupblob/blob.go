@@ -1,9 +1,11 @@
-// Package setupblob stores immutable package archives by SHA-256 for saved setups.
+// Package setupblob stores the immutable package archives and config files of saved setups by
+// SHA-256.
 package setupblob
 
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -12,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 )
@@ -64,9 +67,76 @@ func (s *Store) PutFileContext(ctx context.Context, path string) (string, error)
 	return s.Put(ctx, f)
 }
 
-// PutBytes retains a small in-memory payload, such as a generated fallback archive.
-func (s *Store) PutBytes(data []byte) (string, error) {
-	return s.Put(context.Background(), bytes.NewReader(data))
+// PutLink retains a regular file as a blob by hard-linking it, so the blob costs no space while
+// the file exists. Bytes the store already holds intact are not linked again. Where a link
+// cannot be made, such as across file systems, the file is copied. The file must never change
+// in place afterwards, since the blob shares its bytes. Safe for concurrent use.
+func (s *Store) PutLink(ctx context.Context, path string) (string, error) {
+	if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
+		return s.PutFileContext(ctx, path)
+	}
+	digest, err := s.hashFile(ctx, path)
+	if err != nil {
+		return "", err
+	}
+	if s.reuse(digest) {
+		return digest, nil
+	}
+	if err := os.MkdirAll(s.root, 0o750); err != nil {
+		return "", fmt.Errorf("create setup blob directory: %w", err)
+	}
+	// Each call links under its own name, so jobs retaining the same bytes at once don't collide.
+	tmp := filepath.Join(s.root, ".link-"+digest+"-"+rand.Text())
+	if err := os.Link(path, tmp); err != nil {
+		return s.PutFileContext(ctx, path)
+	}
+	err = os.Rename(tmp, filepath.Join(s.root, digest))
+	// A rename onto another link of the same file succeeds without moving it, leaving tmp.
+	_ = os.Remove(tmp)
+	if err != nil {
+		return "", fmt.Errorf("publish setup blob: %w", err)
+	}
+	if err := fsutil.SyncDir(s.root); err != nil {
+		return "", fmt.Errorf("sync setup blob directory: %w", err)
+	}
+	return digest, nil
+}
+
+// hashFile is the SHA-256 of the regular file at path, refusing one larger than a blob may be.
+func (s *Store) hashFile(ctx context.Context, path string) (string, error) {
+	// #nosec G304 -- The caller selects a server-owned package archive.
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open setup payload: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return "", fmt.Errorf("stat setup payload: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", errors.New("setup payload is not a regular file")
+	}
+	if info.Size() > s.maxBytes {
+		return "", ErrTooLarge
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, contextReader{ctx: ctx, reader: f}); err != nil {
+		return "", fmt.Errorf("hash setup payload: %w", err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// PutBytes retains a small in-memory payload, such as a config file or a generated fallback
+// archive. Bytes the store already holds intact are not written again; a damaged copy is
+// replaced.
+func (s *Store) PutBytes(ctx context.Context, data []byte) (string, error) {
+	sum := sha256.Sum256(data)
+	digest := hex.EncodeToString(sum[:])
+	if s.reuse(digest) {
+		return digest, nil
+	}
+	return s.Put(ctx, bytes.NewReader(data))
 }
 
 // Put streams a payload to a temporary file, hashes its bytes, then publishes it under
@@ -87,14 +157,12 @@ func (s *Store) Put(ctx context.Context, src io.Reader) (string, error) {
 		return "", fmt.Errorf("chmod setup blob temp file: %w", err)
 	}
 	h := sha256.New()
-	n, copyErr := io.CopyN(io.MultiWriter(tmp, h), contextReader{ctx: ctx, reader: src}, s.maxBytes+1)
+	_, copyErr := io.CopyN(io.MultiWriter(tmp, h), contextReader{ctx: ctx, reader: src}, s.maxBytes+1)
 	switch {
 	case copyErr == nil:
 		return "", ErrTooLarge
 	case !errors.Is(copyErr, io.EOF):
 		return "", fmt.Errorf("copy setup payload: %w", copyErr)
-	case n == 0:
-		return "", errors.New("setup payload is empty")
 	}
 	if err := tmp.Sync(); err != nil {
 		return "", fmt.Errorf("sync setup blob: %w", err)
@@ -142,26 +210,80 @@ func (s *Store) Verify(digest string) (string, error) {
 	return path, nil
 }
 
-// GC removes unreferenced blobs. Call only while setup save jobs are idle, since a blob
-// written by an unfinished save has not yet acquired its database reference.
-func (s *Store) GC(referenced map[string]bool) error {
-	entries, err := os.ReadDir(s.root)
+// Entry is one file in the store: a blob named by its digest, or the temporary file of an
+// interrupted write.
+type Entry struct {
+	Name    string
+	Partial bool
+	fsutil.Usage
+}
+
+// Entries lists the blobs and temporary files in the store in name order. A missing directory
+// is an empty store.
+func (s *Store) Entries() ([]Entry, error) {
+	dirents, err := os.ReadDir(s.root)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return fmt.Errorf("list setup blobs: %w", err)
+		return nil, fmt.Errorf("list setup blobs: %w", err)
 	}
-	for _, entry := range entries {
-		name := entry.Name()
-		if !validDigest(name) || referenced[name] {
+	var entries []Entry
+	for _, d := range dirents {
+		name := d.Name()
+		partial := strings.HasPrefix(name, ".part-") || strings.HasPrefix(name, ".link-")
+		if !partial && !validDigest(name) {
 			continue
 		}
-		if err := os.Remove(filepath.Join(s.root, name)); err != nil {
-			return fmt.Errorf("remove orphan setup blob %s: %w", name, err)
+		info, err := d.Info()
+		if err != nil {
+			continue
 		}
+		entries = append(entries, Entry{Name: name, Partial: partial, Usage: fsutil.StatUsage(info)})
 	}
-	return fsutil.SyncDir(s.root)
+	return entries, nil
+}
+
+// GC removes unreferenced blobs and the temporary files of interrupted writes whose inode last
+// changed before cutoff, and returns what it removed. A blob a save is writing or reusing has
+// not yet acquired its database reference, so call it only while setup saves are idle, or with
+// a cutoff that leaves the files they touched alone.
+func (s *Store) GC(referenced map[string]bool, cutoff time.Time) ([]Entry, error) {
+	entries, err := s.Entries()
+	if err != nil {
+		return nil, err
+	}
+	var removed []Entry
+	for _, e := range entries {
+		if (!e.Partial && referenced[e.Name]) || e.Changed.After(cutoff) {
+			continue
+		}
+		path := filepath.Join(s.root, e.Name)
+		// A save may have reused the blob since the listing; its touch moved the ctime.
+		if info, err := os.Lstat(path); err != nil || fsutil.StatUsage(info).Changed.After(cutoff) {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return removed, fmt.Errorf("remove orphan setup blob %s: %w", e.Name, err)
+		}
+		removed = append(removed, e)
+	}
+	if len(removed) == 0 {
+		return nil, nil
+	}
+	return removed, fsutil.SyncDir(s.root)
+}
+
+// reuse reports whether the store already holds digest intact, and marks it as just used so a
+// GC cutoff spares it until the caller's setup references it.
+func (s *Store) reuse(digest string) bool {
+	path, err := s.Verify(digest)
+	if err != nil {
+		return false
+	}
+	now := time.Now()
+	_ = os.Chtimes(path, now, now)
+	return true
 }
 
 func validDigest(digest string) bool {

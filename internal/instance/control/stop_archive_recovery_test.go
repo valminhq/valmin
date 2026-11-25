@@ -12,7 +12,8 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// stopArchivePayload is the payload a stop or restart job holds once an archive is planned.
+// stopArchivePayload is the payload a stop, restart or setup save job holds once an archive is
+// planned.
 func stopArchivePayload(t *testing.T, id, path string) string {
 	t.Helper()
 	raw, err := json.Marshal(ArchivePlan{ArchiveID: id, ArchivePath: path})
@@ -39,11 +40,11 @@ func exists(path string) bool {
 	return err == nil
 }
 
-// TestTheSweepCleansWhatAnInterruptedStopArchiveLeft asserts that when the panel died during the
-// archive a stop or restart job was writing, the next start removes the partial file, and the
-// published file when no catalogue row names it, and nothing else.
-func TestTheSweepCleansWhatAnInterruptedStopArchiveLeft(t *testing.T) {
-	for _, kind := range []jobs.Kind{jobs.KindStop, jobs.KindRestart} {
+// TestTheSweepCleansWhatAnInterruptedPlannedArchiveLeft asserts that when the panel died during
+// the archive a stop, restart or setup save job was writing, the next start removes the partial
+// file, and the published file when no catalogue row names it, and nothing else.
+func TestTheSweepCleansWhatAnInterruptedPlannedArchiveLeft(t *testing.T) {
+	for _, kind := range []jobs.Kind{jobs.KindStop, jobs.KindRestart, jobs.KindSetupSave} {
 		t.Run(kind.String(), func(t *testing.T) {
 			w, db, _, _ := supervisorWorld(t)
 			seedInstance(t, w, "stopping")

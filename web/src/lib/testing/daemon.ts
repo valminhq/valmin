@@ -91,6 +91,9 @@ export function instance(overrides: Partial<Instance> = {}): Instance {
 		backup_on_restart: false,
 		auto_stop_minutes: 0,
 		watchdog: 'off',
+		setup_before_update: 'full',
+		setup_versions_kept: 10,
+		setup_worlds_kept: 3,
 		game_branch: 'public',
 		game_backups: 4,
 		status_published: false,
@@ -176,6 +179,7 @@ export function backup(overrides: Partial<Backup> = {}): Backup {
 		prunes_next: false,
 		world_bytes: 2 * 1024 * 1024,
 		world_attention: [],
+		kept_for_setup: false,
 		...overrides
 	};
 }

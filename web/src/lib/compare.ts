@@ -1,5 +1,6 @@
 import type { ManifestConfig, ManifestLaunch } from '#lib/api/manifest.js';
 import type { InstalledMod } from '#lib/api/mods.js';
+import type { SetupConfig } from '#lib/api/setups.js';
 
 /** How one item on the first server relates to the same item on the second. */
 export type Change = 'same' | 'changed' | 'only-a' | 'only-b';
@@ -134,6 +135,16 @@ export function compareConfigs(a: ManifestConfig[], b: ManifestConfig[]): Row<Ma
 	);
 }
 
+/** A setup's config files by path; a file differs when its hash does. */
+export function compareSetupConfigs(a: SetupConfig[], b: SetupConfig[]): Row<SetupConfig>[] {
+	return pair(
+		a,
+		b,
+		(config) => config.file,
+		(x, y) => x.sha256 === y.sha256
+	);
+}
+
 /** What differs about one mod row, worded with the two server names. */
 export function modChanges(row: Row<ModState>, aName: string, bName: string): string[] {
 	if (!row.b) return [`Only on ${aName}`];
@@ -148,4 +159,33 @@ export function modChanges(row: Row<ModState>, aName: string, bName: string): st
 	if (row.a.side !== row.b.side) out.push('Different client tag');
 	if (row.a.installed_as !== row.b.installed_as) out.push('Different install reason');
 	return out;
+}
+
+/** Most packages a change summary names before it counts the rest. */
+const summaryNames = 3;
+
+/** The mod changes going from `before` to `after`, worded for one line: version moves, added
+ * and removed packages, registry moves, and packages disabled or enabled, followed by "config files changed"
+ * when `configsChanged`. Empty when nothing changed. */
+export function changeSummary(
+	before: ModState[],
+	after: ModState[],
+	configsChanged = false
+): string {
+	const parts: string[] = [];
+	for (const row of compareMods(before, after)) {
+		if (!row.a) parts.push(`added ${row.key}`);
+		else if (!row.b) parts.push(`removed ${row.key}`);
+		else if (row.a.version !== row.b.version)
+			parts.push(`${row.key} ${row.a.version} → ${row.b.version}`);
+		else if (row.a.source !== row.b.source) parts.push(`${row.key} from another registry`);
+		else if (row.a.enabled !== row.b.enabled)
+			parts.push(`${row.b.enabled ? 'enabled' : 'disabled'} ${row.key}`);
+	}
+	const shown =
+		parts.length > summaryNames
+			? [...parts.slice(0, summaryNames), `${parts.length - summaryNames} more`]
+			: parts;
+	if (configsChanged) shown.push('config files changed');
+	return shown.join(', ');
 }

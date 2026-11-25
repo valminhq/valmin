@@ -84,85 +84,61 @@ func deref(s *string) string {
 }
 
 // OnJobFinished is the job engine's second finish hook. It hands a start or stop that succeeded
-// to the lifecycle announcements, and owes a notification for a backup that failed, writing the
-// delivery intents in the same transaction that makes the job terminal, so a notification is
-// owed exactly when the failure it reports commits.
+// to the lifecycle announcements, and owes the backup_failed rules a notification for a backup
+// that failed, writing the delivery intents in the same transaction that makes the job terminal,
+// so a notification is owed exactly when the failure it reports commits.
 //
-// The destinations are read through the reader pool rather than the caller's transaction: the
-// write is what has to be atomic with the job's outcome, not the lookup of who to tell.
+// The rules and destinations are read through the reader pool rather than the caller's
+// transaction: the write is what has to be atomic with the job's outcome, not the lookup of who
+// to tell.
 func (n *Notifier) OnJobFinished(ctx context.Context, tx *sql.Tx, fin *jobs.FinishedJob) error {
 	n.announceLifecycle(ctx, fin)
 	if fin.Kind != jobs.KindBackup || fin.Status != jobs.StatusFailed {
 		return nil
 	}
-	event := &notify.Event{
-		ID:         store.NewID(),
-		Kind:       notify.KindBackupFailed,
-		OccurredAt: time.Now().UTC(),
-		InstanceID: deref(fin.InstanceID),
-		// Named from the job's own submission, so nothing here reads a row inside the
-		// finish transaction.
-		InstanceName: fin.InstanceName,
-		Detail: []notify.Field{
-			{Name: "Reason", Value: failureReason(fin.Error)},
-			{
-				Name:  "What to do",
-				Value: "Open Operations on the server's overview for the full log, then run the backup again.",
-			},
-			{Name: "Job ID", Value: fin.ID},
-		},
-	}
-	owned := n.ruleOwned(ctx, &alerts.Snapshot{LatestTerminalJobs: []store.Job{{
-		ID: fin.ID, Kind: fin.Kind.String(), Status: jobs.StatusFailed, InstanceID: fin.InstanceID,
-	}}}, alerts.KindJobFailed)
-	deliveries, err := n.prepareExcept(ctx, event, owned)
-	if err != nil {
-		slog.ErrorContext(ctx, "prepare backup-failed notification", slog.Any("error", err))
-		return nil
-	}
-	if err := Record(ctx, tx, deliveries); err != nil {
-		slog.ErrorContext(ctx, "record backup-failed notification", slog.Any("error", err))
-	}
+	reason := failureReason(fin.Error)
+	n.record(ctx, tx, n.prepareByRules(ctx, alerts.KindBackupFailed, deref(fin.InstanceID),
+		func(p *alerts.ParamsWire) *notify.Event {
+			return &notify.Event{
+				Kind:       notify.KindBackupFailed,
+				InstanceID: deref(fin.InstanceID),
+				// Named from the job's own submission, so nothing here reads a row inside the
+				// finish transaction.
+				InstanceName: fin.InstanceName,
+				Detail: append(shown(p, []shownField{{alerts.FieldReason, "Reason", reason}}),
+					notify.Field{
+						Key:  "what_to_do",
+						Name: "What to do",
+						Value: "Open Operations on the server's overview for the full log, " +
+							"then run the backup again.",
+					},
+					notify.Field{Key: "job_id", Name: "Job ID", Value: fin.ID},
+				),
+			}
+		}))
 	return nil
 }
 
+// record writes the deliveries of prepared in tx, logging a failure: a notification never
+// changes the outcome it reports.
+func (n *Notifier) record(ctx context.Context, tx *sql.Tx, prepared []ruleEvent) {
+	for _, p := range prepared {
+		if err := Record(ctx, tx, p.deliveries); err != nil {
+			slog.ErrorContext(ctx, "record notification",
+				slog.String("event_kind", p.event.Kind.String()), slog.Any("error", err))
+		}
+	}
+}
+
 // NotifyUnexpectedStop is what the observer calls when it finds a server that left `running`
-// with no job holding its lock (C14). An operator's own stop holds that lock, so an expected
-// stop never reaches here — the quiet is structural rather than a flag this has to read.
-//
-// The instance_down rules covering the server send their own message, and the built-in one goes
-// to every other catch-all destination.
+// with no job holding its lock. An operator's own stop holds that lock, so an expected stop never
+// reaches here. It sends to the destinations of the instance_down rules covering the server.
 //
 // The state write has already committed. A crash in the gap costs this one notification, which
 // is the trade for keeping the observer's write path free of a notification's transaction.
 func (n *Notifier) NotifyUnexpectedStop(ctx context.Context, inst *store.Instance, to, reason string) {
 	now := time.Now().UTC()
-	// The row as the observer is about to leave it, which is what instance_error reads.
-	after := *inst
-	after.State = to
-	snap := &alerts.Snapshot{Instances: []store.Instance{after}, Now: now}
-	// The incident is already recorded, so a crash loop this stop completes is visible here.
-	incidents, err := n.DB.RecentIncidents(ctx, now.Add(-alerts.IncidentRetention))
-	if err != nil {
-		slog.WarnContext(ctx, "read recent incidents", slog.Any("error", err))
-	}
-	snap.Incidents = incidents
-	owned := n.ruleOwned(ctx, snap, alerts.KindCrashLoop, alerts.KindInstanceError)
-	rules := n.rulesFor(ctx, alerts.KindInstanceDown, inst.ID)
-	owned = claimRules(owned, rules)
-
 	detail := downDetail(to, reason, inst.MemLimitMB)
-	n.emitExcept(ctx, &notify.Event{
-		ID:           store.NewID(),
-		Kind:         notify.KindInstanceDown,
-		OccurredAt:   now,
-		InstanceID:   inst.ID,
-		InstanceName: inst.Name,
-		Detail:       detail,
-	}, owned)
-	if len(rules) == 0 {
-		return
-	}
 	n.emitByRules(ctx, alerts.KindInstanceDown, inst.ID, func(p *alerts.ParamsWire) *notify.Event {
 		fields := shown(p, []shownField{
 			{alerts.FieldStatus, "Status", detail[0].Value},
@@ -174,22 +150,6 @@ func (n *Notifier) NotifyUnexpectedStop(ctx context.Context, inst *store.Instanc
 			Detail: append(fields, detail[2]),
 		}
 	})
-}
-
-// claimRules adds to owned every destination rules send to themselves.
-func claimRules(owned map[string]bool, rules []store.AlertRule) map[string]bool {
-	if len(rules) == 0 {
-		return owned
-	}
-	if owned == nil {
-		owned = map[string]bool{}
-	}
-	for i := range rules {
-		for _, id := range rules[i].WebhookIDs {
-			owned[id] = true
-		}
-	}
-	return owned
 }
 
 // NotifyPowerCutSoon reports a planned power cut at powerOff, before which the servers named in
@@ -222,43 +182,33 @@ func (n *Notifier) NotifySignInsBlocked(ctx context.Context, username, address s
 	})
 }
 
-// NotifyPublicBuild owes a notification when the observed public build is one the panel has
-// not seen before. An unchanged observation is the common case — the check runs hourly — and
-// says nothing, so a receiver is told about a new build once rather than every hour until
-// someone updates (05 M6).
+// NotifyPublicBuild owes the new_game_build rules a notification when the observed public build
+// is one the panel has not seen before. An unchanged observation is the common case, since the
+// check runs hourly, and says nothing, so a receiver is told about a new build once rather than
+// every hour until someone updates. It returns the finish step that records the deliveries, nil
+// when nothing is owed.
 func (n *Notifier) NotifyPublicBuild(
 	ctx context.Context, previous, observed string,
 ) func(context.Context, *sql.Tx) error {
 	if observed == "" || observed == previous {
 		return nil
 	}
-	event := &notify.Event{
-		ID:         store.NewID(),
-		Kind:       notify.KindUpdateAvailable,
-		OccurredAt: time.Now().UTC(),
-		Detail: []notify.Field{
-			{Name: "Available build", Value: observed},
-			{Name: "What to do", Value: "Stop each server, then update it from its page in Valmin."},
-		},
-	}
-	var owned map[string]bool
-	if instances, err := n.DB.ListInstances(ctx, nil); err != nil {
-		slog.WarnContext(ctx, "read instances for update-available routing", slog.Any("error", err))
-	} else {
-		owned = n.ruleOwned(ctx, &alerts.Snapshot{
-			Instances: instances, InstalledBuilds: instance.InstalledBuilds(instances),
-			BranchBuilds: map[string]string{instance.PublicBranch: observed},
-		}, alerts.KindUpdateAvailable)
-	}
-	deliveries, err := n.prepareExcept(ctx, event, owned)
-	if err != nil {
-		slog.ErrorContext(ctx, "prepare update-available notification", slog.Any("error", err))
+	prepared := n.prepareByRules(ctx, alerts.KindNewGameBuild, "", func(p *alerts.ParamsWire) *notify.Event {
+		return &notify.Event{
+			Kind: notify.KindUpdateAvailable,
+			Detail: append(shown(p, []shownField{{alerts.FieldBuild, "Available build", observed}}),
+				notify.Field{
+					Key:   "what_to_do",
+					Name:  "What to do",
+					Value: "Stop each server, then update it from its page in Valmin.",
+				}),
+		}
+	})
+	if len(prepared) == 0 {
 		return nil
 	}
 	return func(ctx context.Context, tx *sql.Tx) error {
-		if err := Record(ctx, tx, deliveries); err != nil {
-			slog.ErrorContext(ctx, "record update-available notification", slog.Any("error", err))
-		}
+		n.record(ctx, tx, prepared)
 		return nil
 	}
 }

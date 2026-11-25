@@ -71,6 +71,13 @@ export interface TemplateConfig {
 	settings: TemplateSetting[];
 }
 
+/** The config files a template file carries, those the panel changed, and the changed ones
+ * templates leave out, with the daemon's reason. */
+export interface TemplateFiles {
+	carried: { file: string; size_bytes: number }[];
+	left_out: { file: string; reason: string }[];
+}
+
 /** A server as a template code, with what the code leaves out. */
 export interface TemplateCode {
 	code: string;
@@ -126,6 +133,8 @@ export const manifest = {
 		]).toString();
 		return api.get<TemplateCode>(`/instances/${id}/manifest/code${query ? `?${query}` : ''}`);
 	},
+	/** The same capabilities as `export`. */
+	files: (id: string) => api.get<TemplateFiles>(`/instances/${id}/manifest/files`),
 	preview: (from: ManifestSource) => api.post<ManifestPreview>('/instances/manifest/preview', from),
 	/** Returns a job, never the instance (ADR-028). Name and password are supplied here, never
 	 * read from the file. */

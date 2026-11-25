@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Dialog from '#lib/components/ui/dialog/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
@@ -11,7 +12,8 @@
 		description,
 		confirmLabel = 'Delete',
 		cancelLabel = 'Cancel',
-		onconfirm
+		onconfirm,
+		children
 	}: {
 		open?: boolean;
 		/** The thing being destroyed, to be typed back exactly. Leave it out for an action
@@ -22,6 +24,8 @@
 		confirmLabel?: string;
 		cancelLabel?: string;
 		onconfirm: () => void;
+		/** More to say under the description, such as a warning or a way out. */
+		children?: Snippet;
 	} = $props();
 
 	let typed = $state('');
@@ -42,6 +46,7 @@
 			<Dialog.Title>{title}</Dialog.Title>
 			<Dialog.Description>{description}</Dialog.Description>
 		</Dialog.Header>
+		{@render children?.()}
 		{#if name !== undefined}
 			<div class="grid gap-2">
 				<Label for="confirm-name"

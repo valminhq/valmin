@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { actions } from '#lib/api/instances.js';
 import type { Job, JobChange } from '#lib/api/types.js';
 import {
 	ago,
@@ -159,11 +160,18 @@ describe('what to do after a failure', () => {
 		['restore', 'backups'],
 		['setup_save', 'setups'],
 		['setup_restore', 'setups'],
+		['setup_rollback', 'setups'],
 		['setup_delete', 'setups'],
 		['game_update', 'update']
 	];
 	it.each(cases)('points a failed %s at %s', (kind, section) => {
 		expect(nextAction({ kind, status: 'failed' })?.section).toBe(section);
+	});
+
+	it('offers a failed rollback to those who manage mods', () => {
+		expect(nextAction({ kind: 'setup_rollback', status: 'failed' })?.requires).toBe(
+			actions.modsManage
+		);
 	});
 
 	it('points nowhere for a job that did not fail, or a kind with no screen', () => {

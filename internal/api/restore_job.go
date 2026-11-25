@@ -1,9 +1,6 @@
 package api
 
 import (
-	"context"
-	"database/sql"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -12,7 +9,6 @@ import (
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
-	"github.com/valminhq/valmin/internal/jobs"
 )
 
 // restoreBackup is POST /instances/{id}/backups/{bid}/restore (04 §3, 12 §3.1).
@@ -49,22 +45,8 @@ func (h *Instances) restoreBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	job, err := h.Engine.Submit(r.Context(), &jobs.Spec{
-		Kind: jobs.KindRestore, LockKey: jobs.InstanceLockKey(id),
-		InstanceID: &id, InstanceName: inst.Name, RequestedBy: u.ID,
-		Payload: control.RestorePayload{BackupID: b.ID},
-		Audit:   jobAudit(r.Context(), u.ID, id, "instances.backups.restore", control.RestorePayload{BackupID: b.ID}),
-		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
-			ok, err := instance.SetStateTx(ctx, tx, id, instance.StateStopped, instance.StateRestoring)
-			if err != nil {
-				return fmt.Errorf("claim restore for instance %s: %w", id, err)
-			}
-			if !ok {
-				return fmt.Errorf("instance %s is no longer stopped", id)
-			}
-			return nil
-		},
-	}, h.ctl.Restorer.Run(inst, b))
+	job, err := h.ctl.Restorer.Submit(r.Context(), inst, b, u.ID,
+		jobAudit(r.Context(), u.ID, id, "instances.backups.restore", control.RestorePayload{BackupID: b.ID}))
 	if err != nil {
 		writeJobSubmitError(w, r, err)
 		return

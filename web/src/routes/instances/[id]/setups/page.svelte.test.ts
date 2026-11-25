@@ -34,6 +34,7 @@ const saved: SetupDetail = {
 	id: 'setup-1',
 	name: 'Working before update',
 	created_at: '2026-09-28T12:00:00Z',
+	created_by: 'sam',
 	game_build_id: '100',
 	world_name: 'OldWorld',
 	world_backup: {
@@ -42,6 +43,19 @@ const saved: SetupDetail = {
 		created_at: '2026-09-28T11:00:00Z',
 		consistent: true
 	},
+	world_backups_count: 1,
+	world_backups_newest_at: '2026-09-28T11:00:00Z',
+	world_backups: [
+		{
+			id: 'bk-1',
+			world_name: 'OldWorld',
+			created_at: '2026-09-28T11:00:00Z',
+			consistent: true,
+			available: true,
+			trigger: 'manual',
+			linked: true
+		}
+	],
 	instance: launch({ world_name: 'OldWorld', backup_keep_cold: 5 }),
 	mods: [
 		{
@@ -54,13 +68,20 @@ const saved: SetupDetail = {
 			installed_as: 'explicit'
 		}
 	],
-	configs: [{ file: 'plugin.cfg', content: 'enabled = false\n' }]
+	configs: [{ file: 'plugin.cfg', content: 'enabled = false\n', sha256: 'saved', size_bytes: 16 }],
+	config_tree: true,
+	configs_truncated: false,
+	automatic: false,
+	light: false,
+	world_pending: false,
+	configs_digest: 'digest-1'
 };
 
 function preview(overrides: Partial<SetupPreview> = {}): SetupPreview {
 	return {
 		etag: '"preview-fingerprint"',
 		ready: true,
+		stop_required: false,
 		problems: [],
 		current: {
 			build: '200',
@@ -76,7 +97,9 @@ function preview(overrides: Partial<SetupPreview> = {}): SetupPreview {
 					installed_as: 'explicit'
 				}
 			],
-			configs: [{ file: 'plugin.cfg', content: 'enabled = true\n' }]
+			configs: [
+				{ file: 'plugin.cfg', content: 'enabled = true\n', sha256: 'current', size_bytes: 15 }
+			]
 		},
 		setup: saved,
 		...overrides
@@ -95,11 +118,20 @@ function serve({
 	daemon.on('GET', '/instances/inst-a/setups', () => Response.json({ items: [saved] }));
 	daemon.on('GET', '/instances/inst-a/backups', () =>
 		Response.json({
-			items: [backup(), backup({ id: 'bk-hot', consistent: false })],
+			items: [
+				backup(),
+				backup({ id: 'bk-hot', consistent: false }),
+				backup({ id: 'bk-other-mods', mods_match_current: false })
+			],
 			next_cursor: null
 		})
 	);
 	daemon.on('GET', '/instances/inst-a/setups/setup-1/preview', () => Response.json(result));
+}
+
+/** The card under the title text. */
+function card(title: string): HTMLElement {
+	return screen.getByText(title).closest('[data-slot="card"]') as HTMLElement;
 }
 
 async function open() {
@@ -110,7 +142,7 @@ async function open() {
 beforeEach(() => {
 	daemon = new FakeDaemon();
 	daemon.install();
-	session.permissions = permissions('inst-a', [actions.setupsManage]);
+	session.permissions = permissions('inst-a', [actions.setupsManage, actions.configRaw]);
 });
 
 afterEach(() => {
@@ -120,11 +152,132 @@ afterEach(() => {
 });
 
 describe('Saved setups', () => {
-	it('does not load setup data without the administrator action', async () => {
+	it('does not load setup data without the right to manage setups or mods', async () => {
 		session.permissions = permissions('inst-a', [actions.view]);
 		render(Page);
-		expect(screen.getByText("You don't have permission to manage saved setups.")).toBeTruthy();
+		expect(screen.getByText("You don't have permission to see saved setups.")).toBeTruthy();
 		expect(daemon.requests('GET', '/instances/inst-a/setups')).toHaveLength(0);
+	});
+
+	it('lets an administrator keep the settings, checking the preview for that', async () => {
+		serve({
+			result: preview({ ready: false, problems: ['Saved resource limits are no longer valid'] })
+		});
+		daemon.on('POST', '/instances/inst-a/setups/setup-1/rollback', () => Response.json(job()));
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
+		await open();
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
+		await screen.findByText('Saved resource limits are no longer valid');
+		daemon.on('GET', '/instances/inst-a/setups/setup-1/preview', () => Response.json(preview()));
+		await fireEvent.click(
+			screen.getByRole('switch', { name: /Also restore launch and backup settings/ })
+		);
+		await vi.waitFor(() =>
+			expect(
+				daemon
+					.requests('GET', '/instances/inst-a/setups/setup-1/preview')
+					.at(-1)
+					?.query.get('mods_only')
+			).toBe('true')
+		);
+		await vi.waitFor(() =>
+			expect(
+				screen.getByRole('button', { name: 'Roll back to this setup' }).hasAttribute('disabled')
+			).toBe(false)
+		);
+		await fireEvent.click(screen.getByRole('button', { name: 'Roll back to this setup' }));
+		await fireEvent.click(
+			within(screen.getByRole('dialog')).getByRole('button', { name: 'Roll back' })
+		);
+		await vi.waitFor(() =>
+			expect(daemon.requests('POST', '/instances/inst-a/setups/setup-1/rollback')).toHaveLength(1)
+		);
+		expect(daemon.requests('POST', '/instances/inst-a/setups/setup-1/rollback')[0].body).toEqual({
+			mods_only: true
+		});
+	});
+
+	it('lets a member who manages mods roll back mods and config files only', async () => {
+		session.permissions = permissions('inst-a', [actions.modsManage]);
+		serve();
+		daemon.on('POST', '/instances/inst-a/setups/setup-1/rollback', () => Response.json(job()));
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
+		await open();
+		expect(screen.queryByRole('heading', { name: 'Save current setup' })).toBeNull();
+		expect(screen.queryByText('Before mod changes')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
+		await screen.findByRole('heading', { name: 'Rollback preview' });
+		expect(screen.queryByRole('button', { name: 'Delete setup' })).toBeNull();
+		expect(
+			screen.queryByRole('switch', { name: /Also restore launch and backup settings/ })
+		).toBeNull();
+		expect(screen.getByText(/launch and backup settings stay as they are/)).toBeTruthy();
+		expect(
+			screen.getByText('For comparison only: this rollback keeps the current settings.')
+		).toBeTruthy();
+		expect(document.querySelector('details')).toBeNull();
+		await fireEvent.click(screen.getByRole('button', { name: 'Roll back to this setup' }));
+		await fireEvent.click(
+			within(screen.getByRole('dialog')).getByRole('button', { name: 'Roll back' })
+		);
+		await vi.waitFor(() =>
+			expect(daemon.requests('POST', '/instances/inst-a/setups/setup-1/rollback')).toHaveLength(1)
+		);
+		expect(daemon.requests('POST', '/instances/inst-a/setups/setup-1/rollback')[0].body).toEqual({
+			mods_only: true
+		});
+	});
+
+	it('says what changed after each setup', async () => {
+		serve();
+		const older = {
+			...saved,
+			id: 'setup-0',
+			name: 'Older',
+			mods: [{ ...saved.mods[0], version: '0.9.0' }],
+			configs_digest: 'digest-0'
+		};
+		daemon.on('GET', '/instances/inst-a/setups', () => Response.json({ items: [saved, older] }));
+		daemon.on('GET', '/instances/inst-a/mods', () =>
+			Response.json({ mods: [{ ...saved.mods[0], version: '2.0.0' }], plugin_load: null })
+		);
+		await open();
+		const lines = await screen.findAllByTestId('setup-then');
+		expect(lines.map((line) => line.textContent?.trim())).toEqual([
+			'Then: Author-Plugin 1.0.0 → 2.0.0',
+			'Then: Author-Plugin 0.9.0 → 1.0.0, config files changed'
+		]);
+	});
+
+	it('compares the selected setup with another one', async () => {
+		serve();
+		const older: SetupDetail = {
+			...saved,
+			id: 'setup-0',
+			name: 'Older',
+			mods: [{ ...saved.mods[0], version: '0.9.0' }]
+		};
+		daemon.on('GET', '/instances/inst-a/setups', () => Response.json({ items: [saved, older] }));
+		daemon.on('GET', '/instances/inst-a/setups/setup-0', () => Response.json(older));
+		await open();
+		await fireEvent.click(screen.getAllByRole('button', { name: 'Compare and preview' })[0]);
+		await screen.findByRole('heading', { name: 'Rollback preview' });
+		await fireEvent.change(screen.getByLabelText('Compare with'), { target: { value: 'setup-0' } });
+		await screen.findByRole('columnheader', { name: /^Older/ });
+		expect(screen.getByRole('columnheader', { name: 'Saved setup' })).toBeTruthy();
+		expect(screen.getByText('0.9.0')).toBeTruthy();
+	});
+
+	it('opens the setup a link names', async () => {
+		app.page.url = new URL('http://localhost/instances/inst-a/setups?setup=setup-1');
+		try {
+			serve();
+			await open();
+			await screen.findByRole('heading', { name: 'Rollback preview' });
+			expect(daemon.requests('GET', '/instances/inst-a/setups/setup-1/preview')).toHaveLength(1);
+		} finally {
+			app.page.url = new URL('http://localhost/instances/inst-a/setups');
+		}
 	});
 
 	it('saves a named setup with only a consistent selected world backup', async () => {
@@ -133,10 +286,10 @@ describe('Saved setups', () => {
 		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
 		await open();
 		const selector = screen.getByLabelText(
-			'Associated world backup (optional)'
+			'World backup to keep with this setup'
 		) as HTMLSelectElement;
-		await vi.waitFor(() => expect(selector.options).toHaveLength(2));
-		expect([...selector.options].map((option) => option.value)).toEqual(['', 'bk-1']);
+		await vi.waitFor(() => expect(selector.options).toHaveLength(3));
+		expect([...selector.options].map((option) => option.value)).toEqual(['next', '', 'bk-1']);
 		expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Working before update');
 		await fireEvent.change(selector, { target: { value: 'bk-1' } });
 		await fireEvent.click(screen.getByRole('button', { name: 'Save setup' }));
@@ -149,56 +302,321 @@ describe('Saved setups', () => {
 		});
 	});
 
-	it('lists the config files a saved setup does not carry', async () => {
+	it('backs up the world now and links it when chosen', async () => {
+		session.permissions = permissions('inst-a', [actions.setupsManage, actions.backupsCreate]);
 		serve();
-		daemon.on('GET', '/instances/inst-a/configs', () =>
+		daemon.on('POST', '/instances/inst-a/setups', () => Response.json(job()));
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
+		await open();
+		const selector = screen.getByLabelText(
+			'World backup to keep with this setup'
+		) as HTMLSelectElement;
+		await vi.waitFor(() => expect(selector.options).toHaveLength(4));
+		await fireEvent.change(selector, { target: { value: 'now' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Save setup' }));
+		await vi.waitFor(() =>
+			expect(daemon.requests('POST', '/instances/inst-a/setups')).toHaveLength(1)
+		);
+		expect(daemon.requests('POST', '/instances/inst-a/setups')[0].body).toEqual({
+			name: 'Working before update',
+			back_up_world: true
+		});
+	});
+
+	it('saves a light setup when package files are not kept', async () => {
+		serve();
+		daemon.on('POST', '/instances/inst-a/setups', () => Response.json(job()));
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
+		await open();
+		const saveCard = card('Save current setup');
+		await fireEvent.click(within(saveCard).getByRole('switch', { name: /Keep package files/ }));
+		expect(
+			within(saveCard).getByText(/It fails for a version the registry has removed/)
+		).toBeTruthy();
+		await fireEvent.click(screen.getByRole('button', { name: 'Save setup' }));
+		await vi.waitFor(() =>
+			expect(daemon.requests('POST', '/instances/inst-a/setups')).toHaveLength(1)
+		);
+		expect(daemon.requests('POST', '/instances/inst-a/setups')[0].body).toEqual({
+			name: 'Working before update',
+			link_next_world_backup: true,
+			light: true
+		});
+	});
+
+	it('saves while running, waiting for the next update to link a world backup', async () => {
+		session.permissions = permissions('inst-a', [actions.setupsManage, actions.backupsCreate]);
+		serve({ state: 'running' });
+		daemon.on('POST', '/instances/inst-a/setups', () => Response.json(job()));
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
+		await open();
+		const selector = screen.getByLabelText(
+			'World backup to keep with this setup'
+		) as HTMLSelectElement;
+		await vi.waitFor(() => expect(selector.options).toHaveLength(3));
+		expect([...selector.options].map((option) => option.value)).not.toContain('now');
+		await fireEvent.click(screen.getByRole('button', { name: 'Save setup' }));
+		await vi.waitFor(() =>
+			expect(daemon.requests('POST', '/instances/inst-a/setups')).toHaveLength(1)
+		);
+		expect(daemon.requests('POST', '/instances/inst-a/setups')[0].body).toEqual({
+			name: 'Working before update',
+			link_next_world_backup: true
+		});
+	});
+
+	it('says a setup waits for the next update to link a world backup', async () => {
+		serve();
+		daemon.on('GET', '/instances/inst-a/setups', () =>
+			Response.json({ items: [{ ...saved, world_backup: null, world_pending: true }] })
+		);
+		await open();
+		expect(card('Saved for this server').textContent).toContain(
+			'World backup: from the next mod update, if the mods are still the same'
+		);
+	});
+
+	it('saves what mod changes save first from the two switches', async () => {
+		serve();
+		daemon.on('PATCH', '/instances/inst-a', () =>
+			Response.json(instance({ id: 'inst-a', name: 'Live', setup_before_update: 'light' }))
+		);
+		await open();
+		const before = card('Before mod changes');
+		const save = within(before).getByRole('button', { name: 'Save' }) as HTMLButtonElement;
+		expect(save.disabled).toBe(true);
+
+		await fireEvent.click(within(before).getByRole('switch', { name: /Keep package files/ }));
+		expect(before.textContent).toContain('It fails for a version the registry has removed.');
+		await fireEvent.click(save);
+		await vi.waitFor(() => expect(daemon.requests('PATCH', '/instances/inst-a')).toHaveLength(1));
+		expect(daemon.requests('PATCH', '/instances/inst-a')[0].body).toEqual({
+			setup_before_update: 'light'
+		});
+		await vi.waitFor(() => expect(save.disabled).toBe(true));
+
+		await fireEvent.click(
+			within(before).getByRole('switch', { name: 'Save the setup before mod changes' })
+		);
+		expect(within(before).queryByRole('switch', { name: /Keep package files/ })).toBeNull();
+		await fireEvent.click(save);
+		await vi.waitFor(() => expect(daemon.requests('PATCH', '/instances/inst-a')).toHaveLength(2));
+		expect(daemon.requests('PATCH', '/instances/inst-a')[1].body).toEqual({
+			setup_before_update: 'off'
+		});
+	});
+
+	it('saves how many automatic setups and world backups are kept', async () => {
+		serve();
+		daemon.on('PATCH', '/instances/inst-a', () =>
+			Response.json(instance({ id: 'inst-a', name: 'Live', setup_versions_kept: 5 }))
+		);
+		await open();
+		const before = card('Before mod changes');
+		const save = within(before).getByRole('button', { name: 'Save' }) as HTMLButtonElement;
+		const versions = within(before).getByLabelText('Automatic setups to keep');
+
+		await fireEvent.input(versions, { target: { value: '0' } });
+		expect(before.textContent).toContain('Enter a whole number from 1 to 100.');
+		expect(save.disabled).toBe(true);
+
+		await fireEvent.input(versions, { target: { value: '5' } });
+		await fireEvent.click(save);
+		await vi.waitFor(() => expect(daemon.requests('PATCH', '/instances/inst-a')).toHaveLength(1));
+		expect(daemon.requests('PATCH', '/instances/inst-a')[0].body).toEqual({
+			setup_versions_kept: 5
+		});
+	});
+
+	it('says who saved each setup', async () => {
+		serve();
+		await open();
+		expect(card('Saved for this server').textContent).toContain('by sam');
+	});
+
+	it('marks automatic setups, setups saved before full capture, and left-out files', async () => {
+		serve();
+		daemon.on('GET', '/instances/inst-a/setups', () =>
 			Response.json({
 				items: [
-					{
-						file: 'plugin.cfg',
-						plugin: '',
-						size_bytes: 1,
-						installed_mods: [],
-						dir: 'BepInEx/config',
-						portable: true
-					},
-					{
-						file: 'expand_world/expand_biomes.yaml',
-						plugin: '',
-						size_bytes: 1,
-						installed_mods: [],
-						dir: 'BepInEx/config',
-						portable: false
-					}
+					{ ...saved, id: 'auto', name: 'Before restoring x', automatic: true, light: true },
+					{ ...saved, id: 'old', name: 'Old', config_tree: false, configs_truncated: true }
 				]
 			})
 		);
 		await open();
-
-		expect(await screen.findByText('1 config file is not included')).toBeTruthy();
-		expect(screen.getByText('expand_world/expand_biomes.yaml')).toBeTruthy();
-		expect(screen.queryByText('plugin.cfg')).toBeNull();
+		expect(screen.getByText('Automatic')).toBeTruthy();
+		expect(screen.getByText('Light')).toBeTruthy();
+		expect(screen.getByText('Top-level .cfg only')).toBeTruthy();
+		expect(screen.getByText(/Some config files are not included/)).toBeTruthy();
 	});
 
-	it('keeps save and restore unavailable while the server is running', async () => {
-		serve({ state: 'running' });
-		await open();
-		expect(screen.getByRole('button', { name: 'Save setup' }).hasAttribute('disabled')).toBe(true);
-		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
-		await screen.findByRole('heading', { name: 'Restore preview' });
-		expect(screen.getByRole('button', { name: 'Restore setup' }).hasAttribute('disabled')).toBe(
-			true
+	it('lists removed and added config files and loads a changed file only when opened', async () => {
+		const file = (name: string, sha256: string) => ({ file: name, sha256, size_bytes: 1 });
+		serve({
+			result: preview({
+				current: {
+					...preview().current,
+					configs: [file('EWD/a.yaml', 'now'), file('EWD/new.yaml', 'n')]
+				},
+				setup: { ...saved, configs: [file('EWD/a.yaml', 'then'), file('old.json', 'o')] }
+			})
+		});
+		daemon.on('GET', '/instances/inst-a/configs/EWD%2Fa.yaml/raw', () => new Response('a: 2\n'));
+		daemon.on(
+			'GET',
+			'/instances/inst-a/setups/setup-1/configs/EWD%2Fa.yaml',
+			() => new Response('a: 1\n')
 		);
-		expect(screen.getByText('Stop this server to restore a setup.')).toBeTruthy();
+		await open();
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
+		await screen.findByRole('heading', { name: 'Removed by the restore (1)' });
+		expect(screen.getByText('EWD/new.yaml')).toBeTruthy();
+		expect(screen.getByRole('heading', { name: 'Added by the restore (1)' })).toBeTruthy();
+		expect(screen.getByText('old.json')).toBeTruthy();
+		expect(
+			daemon.requests('GET', '/instances/inst-a/setups/setup-1/configs/EWD%2Fa.yaml')
+		).toHaveLength(0);
+
+		const details = screen.getByText('EWD/a.yaml').closest('details')!;
+		details.open = true;
+		await fireEvent(details, new Event('toggle'));
+		await vi.waitFor(() => expect(within(details).getByText(/a: 1/)).toBeTruthy());
+		expect(within(details).getByText(/a: 2/)).toBeTruthy();
 	});
 
-	it('compares exact mod state, shows comparison-only fields, and restores with the preview fingerprint', async () => {
-		serve();
-		daemon.on('POST', '/instances/inst-a/setups/setup-1/restore', () => Response.json(job()));
+	it('rolls a running server back, stopping it first and starting it again', async () => {
+		session.permissions = permissions('inst-a', [
+			actions.setupsManage,
+			actions.start,
+			actions.stop,
+			actions.backupsRestore
+		]);
+		serve({ state: 'running', result: preview({ stop_required: true }) });
+		daemon.on('POST', '/instances/inst-a/setups/setup-1/rollback', () => Response.json(job()));
 		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
 		await open();
 		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
-		await screen.findByRole('heading', { name: 'Restore preview' });
+		await screen.findByRole('heading', { name: 'Rollback preview' });
+		expect(screen.getByText(/so it is stopped first and players are disconnected/)).toBeTruthy();
+		await fireEvent.click(screen.getByRole('radio', { name: /Restore the backup from/ }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Roll back to this setup' }));
+		const dialog = screen.getByRole('dialog');
+		await fireEvent.input(within(dialog).getByLabelText(/Type Live to confirm/), {
+			target: { value: 'Live' }
+		});
+		await fireEvent.click(within(dialog).getByRole('button', { name: 'Roll back' }));
+		await vi.waitFor(() =>
+			expect(daemon.requests('POST', '/instances/inst-a/setups/setup-1/rollback')).toHaveLength(1)
+		);
+		const request = daemon.requests('POST', '/instances/inst-a/setups/setup-1/rollback')[0];
+		expect(request.body).toEqual({ world_backup_id: 'bk-1', start: true });
+		expect(request.headers['If-Match']).toBeUndefined();
+	});
+
+	it('asks for the server name only when the rollback restores the world', async () => {
+		serve();
+		daemon.on('POST', '/instances/inst-a/setups/setup-1/rollback', () => Response.json(job()));
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
+		await open();
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
+		await screen.findByRole('heading', { name: 'Rollback preview' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Roll back to this setup' }));
+		const dialog = screen.getByRole('dialog');
+		expect(within(dialog).queryByLabelText(/Type Live to confirm/)).toBeNull();
+		await fireEvent.click(within(dialog).getByRole('button', { name: 'Roll back' }));
+		await vi.waitFor(() =>
+			expect(daemon.requests('POST', '/instances/inst-a/setups/setup-1/rollback')).toHaveLength(1)
+		);
+		expect(daemon.requests('POST', '/instances/inst-a/setups/setup-1/rollback')[0].body).toEqual(
+			{}
+		);
+	});
+
+	it('keeps the current world unless a backup taken with the setup mods is chosen', async () => {
+		session.permissions = permissions('inst-a', [actions.setupsManage, actions.backupsRestore]);
+		const worlds = Array.from({ length: 7 }, (_, i) => ({
+			id: `bk-${i}`,
+			world_name: 'OldWorld',
+			created_at: `2026-09-2${8 - i}T11:00:00Z`,
+			consistent: i !== 1,
+			available: true,
+			trigger: 'scheduled',
+			linked: i === 3
+		}));
+		serve({ result: preview({ setup: { ...saved, world_backups: worlds } }) });
+		await open();
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
+		await screen.findByRole('heading', { name: 'Rollback preview' });
+		const group = screen.getByTestId('rollback-world');
+		expect(
+			(within(group).getByRole('radio', { name: /Keep the current world/ }) as HTMLInputElement)
+				.checked
+		).toBe(true);
+		expect(within(group).getAllByRole('radio')).toHaveLength(6);
+		expect(within(group).getByText('Best-effort')).toBeTruthy();
+		expect(within(group).getByText('Kept with this setup')).toBeTruthy();
+		await fireEvent.click(within(group).getByRole('button', { name: 'Show 2 more' }));
+		const radios = within(group).getAllByRole('radio');
+		expect(radios).toHaveLength(8);
+		await fireEvent.click(radios[2]);
+		expect(within(group).getByText(/Play after .* is lost/)).toBeTruthy();
+	});
+
+	it('opens the setup and world backup a link names', async () => {
+		session.permissions = permissions('inst-a', [actions.setupsManage, actions.backupsRestore]);
+		app.page.url = new URL('http://localhost/instances/inst-a/setups?setup=setup-1&world=bk-1');
+		try {
+			serve();
+			await open();
+			await screen.findByRole('heading', { name: 'Rollback preview' });
+			expect(
+				(screen.getByRole('radio', { name: /Restore the backup from/ }) as HTMLInputElement).checked
+			).toBe(true);
+		} finally {
+			app.page.url = new URL('http://localhost/instances/inst-a/setups');
+		}
+	});
+
+	it('says how many world backups fit each setup', async () => {
+		serve();
+		await open();
+		expect(screen.getByTestId('setup-worlds').textContent).toMatch(
+			/Worlds: 1 backup with these mods · newest/
+		);
+		expect(screen.getByText('World kept')).toBeTruthy();
+	});
+
+	it('keeps rollback unavailable while the server is starting', async () => {
+		serve({ state: 'starting' });
+		await open();
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
+		await screen.findByRole('heading', { name: 'Rollback preview' });
+		expect(
+			screen.getByRole('button', { name: 'Roll back to this setup' }).hasAttribute('disabled')
+		).toBe(true);
+		expect(
+			screen.getAllByText('Wait for this server to finish starting or stopping.')
+		).toHaveLength(2);
+	});
+
+	it('says a server in error needs a check before setups can be saved or rolled back', async () => {
+		serve({ state: 'error' });
+		await open();
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
+		await screen.findByRole('heading', { name: 'Rollback preview' });
+		expect(screen.getAllByText('This server needs a check first; open its overview.')).toHaveLength(
+			2
+		);
+	});
+
+	it('compares exact mod state, shows comparison-only fields, and rolls back with the preview fingerprint', async () => {
+		serve();
+		daemon.on('POST', '/instances/inst-a/setups/setup-1/rollback', () => Response.json(job()));
+		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
+		await open();
+		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
+		await screen.findByRole('heading', { name: 'Rollback preview' });
 		const rows = screen.getAllByRole('rowheader');
 		expect(rows.map((row) => row.textContent?.trim())).toContain('Game build Compare only');
 		expect(rows.map((row) => row.textContent?.trim())).toContain('World name Compare only');
@@ -206,18 +624,15 @@ describe('Saved setups', () => {
 		expect(screen.getByText('Different client tag')).toBeTruthy();
 		expect(screen.getByText('Different registry')).toBeTruthy();
 		expect(screen.getByText('plugin.cfg')).toBeTruthy();
-		expect(screen.getByText(/To restore the world too, choose it separately under/)).toBeTruthy();
-		await fireEvent.click(screen.getByRole('button', { name: 'Restore setup' }));
-		const dialog = screen.getByRole('dialog');
-		await fireEvent.input(within(dialog).getByLabelText(/Type Live to confirm/), {
-			target: { value: 'Live' }
-		});
-		await fireEvent.click(within(dialog).getByRole('button', { name: 'Restore setup' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Roll back to this setup' }));
+		await fireEvent.click(
+			within(screen.getByRole('dialog')).getByRole('button', { name: 'Roll back' })
+		);
 		await vi.waitFor(() =>
-			expect(daemon.requests('POST', '/instances/inst-a/setups/setup-1/restore')).toHaveLength(1)
+			expect(daemon.requests('POST', '/instances/inst-a/setups/setup-1/rollback')).toHaveLength(1)
 		);
 		expect(
-			daemon.requests('POST', '/instances/inst-a/setups/setup-1/restore')[0].headers['If-Match']
+			daemon.requests('POST', '/instances/inst-a/setups/setup-1/rollback')[0].headers['If-Match']
 		).toBe('"preview-fingerprint"');
 	});
 
@@ -229,10 +644,10 @@ describe('Saved setups', () => {
 		});
 		await open();
 		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
-		await screen.findByText('The linked world backup is unavailable.');
-		expect(screen.getByRole('button', { name: 'Restore setup' }).hasAttribute('disabled')).toBe(
-			false
-		);
+		await screen.findByText('The kept world backup is unavailable.');
+		expect(
+			screen.getByRole('button', { name: 'Roll back to this setup' }).hasAttribute('disabled')
+		).toBe(false);
 	});
 
 	it('deletes the selected setup through a job after confirmation', async () => {
@@ -241,7 +656,7 @@ describe('Saved setups', () => {
 		daemon.on('GET', '/jobs/job-1', () => Response.json(job()));
 		await open();
 		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
-		await screen.findByRole('heading', { name: 'Restore preview' });
+		await screen.findByRole('heading', { name: 'Rollback preview' });
 		await fireEvent.click(screen.getByRole('button', { name: 'Delete setup' }));
 		const dialog = screen.getByRole('dialog');
 		await fireEvent.input(within(dialog).getByLabelText(/Type Live to confirm/), {
@@ -261,7 +676,7 @@ describe('Saved setups', () => {
 		daemon.on('GET', '/jobs/job-1', () => Response.json(job({ status: 'succeeded' })));
 		await open();
 		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
-		await screen.findByRole('heading', { name: 'Restore preview' });
+		await screen.findByRole('heading', { name: 'Rollback preview' });
 		await fireEvent.click(screen.getByRole('button', { name: 'Delete setup' }));
 		const dialog = screen.getByRole('dialog');
 		await fireEvent.input(within(dialog).getByLabelText(/Type Live to confirm/), {
@@ -282,27 +697,25 @@ describe('Saved setups', () => {
 		await open();
 		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
 		await screen.findByText('Package payload is missing.');
-		expect(screen.getByRole('button', { name: 'Restore setup' }).hasAttribute('disabled')).toBe(
-			true
-		);
+		expect(
+			screen.getByRole('button', { name: 'Roll back to this setup' }).hasAttribute('disabled')
+		).toBe(true);
 	});
 
 	it('invalidates a stale preview instead of retrying a restore', async () => {
 		serve();
-		daemon.on('POST', '/instances/inst-a/setups/setup-1/restore', () =>
+		daemon.on('POST', '/instances/inst-a/setups/setup-1/rollback', () =>
 			envelope(412, 'stale_write', 'The server changed since this preview.')
 		);
 		await open();
 		await fireEvent.click(screen.getByRole('button', { name: 'Compare and preview' }));
-		await screen.findByRole('heading', { name: 'Restore preview' });
-		await fireEvent.click(screen.getByRole('button', { name: 'Restore setup' }));
-		const dialog = screen.getByRole('dialog');
-		await fireEvent.input(within(dialog).getByLabelText(/Type Live to confirm/), {
-			target: { value: 'Live' }
-		});
-		await fireEvent.click(within(dialog).getByRole('button', { name: 'Restore setup' }));
+		await screen.findByRole('heading', { name: 'Rollback preview' });
+		await fireEvent.click(screen.getByRole('button', { name: 'Roll back to this setup' }));
+		await fireEvent.click(
+			within(screen.getByRole('dialog')).getByRole('button', { name: 'Roll back' })
+		);
 		await screen.findByText('The server changed since this preview.');
-		expect(screen.queryByRole('heading', { name: 'Restore preview' })).toBeNull();
-		expect(daemon.requests('POST', '/instances/inst-a/setups/setup-1/restore')).toHaveLength(1);
+		expect(screen.queryByRole('heading', { name: 'Rollback preview' })).toBeNull();
+		expect(daemon.requests('POST', '/instances/inst-a/setups/setup-1/rollback')).toHaveLength(1);
 	});
 });

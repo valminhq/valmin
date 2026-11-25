@@ -93,6 +93,14 @@ func (s *Server) Recover(ctx context.Context) error {
 	if err := s.supervisor.Recover(ctx); err != nil {
 		return fmt.Errorf("recover instances: %w", err)
 	}
+	if err := control.BackfillSetupFingerprints(ctx, s.instances.DB); err != nil {
+		slog.WarnContext(ctx, "saved setups without a mods fingerprint match no world backups",
+			slog.Any("error", err))
+	}
+	if err := control.BackfillWorldMods(ctx, s.instances.DB); err != nil {
+		slog.WarnContext(ctx, "archives fall back to the installed mods for worlds whose mods are unknown",
+			slog.Any("error", err))
+	}
 	return nil
 }
 
@@ -184,8 +192,8 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 	}
 	hub = w.hub(external, streams, grants)
 
-	worlds := &control.Worlds{DataRoot: w.cfg.Data.Root, Runtime: w.runtime}
-	mods := w.mods(worlds)
+	worlds := &control.Worlds{DataRoot: w.cfg.Data.Root, Runtime: w.runtime, DB: w.db}
+	mods := w.mods()
 	// Outside the API chain and outside the API subtree, on a thin chain of its own: it is the
 	// only route a stranger can reach, and it authorizes on a column rather than a session. Its
 	// limiter is its own, so a flood of status reads cannot spend the login route's budget.
@@ -197,13 +205,15 @@ func newServer(d *Dependencies, extraRoutes []routeSpec) (*Server, error) {
 		Worlds: worlds, Installer: mods.install, Notifier: notifier, Commands: w.commands,
 		PublishState: hub.PublishState, PublishMods: hub.PublishMods,
 		ReadMods: func(ctx context.Context, inst *store.Instance) ([]store.InstanceMod, error) {
-			_, installed, err := instanceDefinition(ctx, w.db, inst)
-			return installed, err
+			return w.db.InstanceMods(ctx, inst.ID)
 		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build instance control: %w", err)
 	}
+	// The installer exists before the setup jobs, which fetch light setups' packages through it.
+	mods.install.Checkpoint = ctl.SetupJobs.Checkpoint
+	mods.install.Version = ctl.SetupJobs.SaveVersion
 	instances := &Instances{
 		ctl:    ctl,
 		alerts: w.alertScanner(ctl.Starter, streams, mods, notifier),
@@ -421,7 +431,7 @@ func (w *wiring) hub(external *url.URL, streams *instance.Streams, grants *Grant
 
 // mods builds the mod engine: one client and one zip cache per enabled registry, the planner,
 // the installer and the registry sync. A disabled registry is absent from both maps.
-func (w *wiring) mods(worlds *control.Worlds) *Mods {
+func (w *wiring) mods() *Mods {
 	clients := map[source.Source]*thunderstore.Client{
 		source.Thunderstore: thunderstore.New(w.cfg.Thunderstore.BaseURL),
 	}
@@ -439,7 +449,7 @@ func (w *wiring) mods(worlds *control.Worlds) *Mods {
 	m.plan = &manager.Planner{DB: w.db, Enabled: m.enabledSources()}
 	m.install = &manager.Installer{
 		DB: w.db, Engine: w.engine, Commands: w.commands, Clients: clients, Caches: caches,
-		DataRoot: w.cfg.Data.Root, ArchiveWorlds: worlds.Snapshot,
+		DataRoot: w.cfg.Data.Root,
 	}
 	m.syncer = &manager.Syncer{
 		DB: w.db, Engine: w.engine, Clients: clients, Interval: w.cfg.Thunderstore.SyncInterval.Std(),
@@ -460,7 +470,7 @@ func (w *wiring) profileHosts() profileHosts {
 }
 
 // diagnostics builds the diagnostics endpoints, reusing the enabled registry clients for their
-// live checks.
+// live checks, and the cache endpoints beside them.
 func (w *wiring) diagnostics(instances *Instances, mods *Mods) *Diagnostics {
 	clients := make(map[source.Source]diag.PackageIndex, len(mods.Clients))
 	for src, client := range mods.Clients {
@@ -468,6 +478,7 @@ func (w *wiring) diagnostics(instances *Instances, mods *Mods) *Diagnostics {
 	}
 	d := &Diagnostics{Instances: instances, Clients: clients, StartedAt: time.Now().UTC()}
 	diagnosticRoutes(w.routes, d)
+	cacheRoutes(w.routes, &Caches{Authz: w.az, Pruner: instances.ctl.CachePruner})
 	return d
 }
 

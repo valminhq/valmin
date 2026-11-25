@@ -73,12 +73,12 @@ server the menu is hidden.
 
 The **Administration** menu groups its pages under four headings:
 
-| Heading          | Pages                                                                                                                                                            |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **People**       | [Users](#create-a-user), [Invites](#invite-someone), [Players](#players-across-servers)                                                                          |
-| **Integrations** | [Remote backups](remote-backups.md), [Notifications](#get-notified), [Discord bot](#use-the-discord-bot)                                                         |
-| **System**       | [Audit log](#read-the-audit-log), [Power cuts](operations.md#stop-every-server-before-a-power-cut), [Diagnostics](troubleshooting.md#check-the-diagnostics-page) |
-| **Advanced**     | [Export installation](operations.md#move-to-a-new-host), [Encryption keys](operations.md#rotate-encryption-keys)                                                 |
+| Heading          | Pages                                                                                                                                                                                                        |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **People**       | [Users](#create-a-user), [Invites](#invite-someone), [Players](#players-across-servers)                                                                                                                      |
+| **Integrations** | [Remote backups](remote-backups.md), [Notifications](#get-notified), [Discord bot](#use-the-discord-bot)                                                                                                     |
+| **System**       | [Audit log](#read-the-audit-log), [Power cuts](operations.md#stop-every-server-before-a-power-cut), [Diagnostics](troubleshooting.md#check-the-diagnostics-page), [Cache](operations.md#reclaim-cache-space) |
+| **Advanced**     | [Export installation](operations.md#move-to-a-new-host), [Encryption keys](operations.md#rotate-encryption-keys)                                                                                             |
 
 Each page is shown only to accounts that may use it, and a heading appears only when
 the account can see something under it. Opening one of these pages by its address without
@@ -728,7 +728,8 @@ installed files came from.
 Updating a single mod, or installing one that raises an installed package to a new
 version (a newer BepInEx, for example), shows each changed package's current and new
 version. On a server with a world, the job backs up the world first and keeps the
-backup even if the update fails.
+backup even if the update fails. It also saves the current setup first, so the update can
+be undone (see [Undo a mod update](#undo-a-mod-update)).
 
 The catalogue refreshes when the panel starts and then on a timer. An admin can refresh
 it sooner with the refresh button beside **Catalogue updated** on the **Browse mods**
@@ -749,9 +750,8 @@ downgrade below what that mod needs, Valmin names the mod and will not apply the
 A downgrade puts back the older version's files, including the config files it ships (see
 [Config files a mod ships](#config-files-a-mod-ships)). It does not restore the world or the
 settings a mod writes itself, and a world or setting that a newer version changed may not
-work with the older one. On a
-server with a world, Valmin backs up the world first, so restore that backup if you need
-to go back completely.
+work with the older one. Valmin backs up the world and saves the current setup first, so
+you can go back completely (see [Undo a mod update](#undo-a-mod-update)).
 
 ### Lock a mod version
 
@@ -785,13 +785,14 @@ When any installed mod has a newer version, the **Installed** tab shows
 **Update all mods**. It lists every package that will change in one view: each
 mod's current and new version, plus any new dependencies the updates need. Locked mods,
 modpacks, and the mods a modpack manages are left out. After
-you confirm, one job backs up the world, then updates the whole set. If any
-package fails, the job rolls back every package and keeps the backup. The backup
-appears on the **Backups** page as a pre-update backup.
+you confirm, one job backs up the world and saves the current setup, then updates the
+whole set. If any package fails, the job rolls back every package and keeps the backup. The
+backup appears on the **Backups** page as a pre-update backup, and the setup on **Saved
+setups** as an automatic one (see [Undo a mod update](#undo-a-mod-update)).
 
 On a running server, **Update when stopped** queues the updates instead. Once the server
 stops, or when you restart it, they run as one update the same way: one backup of the
-world, then the whole set. An install queued ahead of them runs first, on its own.
+world and one saved setup, then the whole set. An install queued ahead of them runs first, on its own.
 
 A mod marked **not in the index** is one its registry no longer lists, usually because
 the author or the registry removed it. Valmin cannot offer updates for it and leaves it
@@ -847,9 +848,56 @@ untick those.
 
 The server needs its mod framework, which arrives with the first mod you install from
 **Browse mods**; the framework is never installed from a code. The server must be stopped.
-**Back up and apply** backs up the world, then makes all the
+**Back up and apply** backs up the world and saves the current setup, then makes all the
 changes in one job. If any package fails, the job rolls back every package and keeps the
 backup.
+
+### Undo a mod update
+
+Before any mod file moves, Valmin saves the server's setup as an **Automatic** setup named
+after the change and after who made it:
+
+- Installing a mod saves one named **Before installing Author-Mod**.
+- Removing one saves **Before removing Author-Mod**.
+- Moving installed mods to other versions saves **Before updating Author-Mod and 2 more**, and
+  first backs up the world, linking the setup to that backup. This covers updating or
+  downgrading a mod, **Update all mods**, updates queued with **Update when stopped**,
+  **Update from code**, a modpack update and **Apply to the server**.
+
+An update keeps both even if it fails. Disabling or enabling a mod saves nothing, and neither do
+the installs that create a server from a template or code. A game update on its own changes no
+mods, so it saves no setup either. Nothing is saved either when the newest setup, such as one
+you saved just before the change, already holds the server's setup: an install or a removal
+then needs nothing more, and an update links its world backup to that setup when it was saved
+to wait for one. The dialog before the change says what is saved.
+
+To undo a change, choose **Undo** on the line above the installed mods, which names the newest
+automatic setup, when and by whom it was saved, and what changed in the mods since. A setup you
+saved yourself after it, or without any automatic setup, takes its place when it holds other
+mods than the installed ones. It opens
+**Saved setups** on that setup; choose **Roll back to this setup**. The line is shown to those
+who may manage mods, and only while the mods differ from that setup. You can also open **Saved
+setups** and select any automatic setup. The mods, their configuration files and settings go back as they were (see
+[Save and restore a setup](#save-and-restore-a-setup)). If the update also changed the
+world, choose one of the backups under **World** to put the world back in the same step.
+
+Each server keeps its newest ten automatic setups, counting those a setup restore saves. The
+newest three that link a world backup keep it. A kept backup stays outside the backup retention
+counts until its setup is removed or lets it go, and **Backups** marks it **Kept for setup**
+with the setup's name. Saving the setup adds the time it takes to read every installed mod file
+to each change. Mods unchanged since the newest setup reuse the copy that setup kept.
+
+Under **Before mod changes** on **Saved setups**, an administrator can:
+
+- turn off **Save the setup before mod changes**, so that updates only back up the world;
+- turn off **Keep package files** to save light setups instead, which keep only mods that
+  cannot be downloaded again (package files the download cache holds take no extra space
+  either way);
+- set **Automatic setups to keep** (1 to 100) and **Of those, with their world backup** (0 to
+  100). Lowering a number removes the oldest automatic setups, or lets their backups go, when
+  you save. Setups saved by hand are never removed.
+
+A copy made by **Test an update on a copy** never saves one.
 
 ### Disable a mod without removing it
 
@@ -926,7 +974,7 @@ Adding `?q=` and some text to the page address opens the list already filtered.
 Some mods keep a `.cfg` at the root of the server installation instead, usually to hold a
 secret such as a bot token. The list shows such a file, marked **Server root**, when its
 name starts with an installed mod's name, for example `FiresDiscordIntegration_BotToken.cfg`.
-Shared setups and template codes never include these files.
+Saved setups, template files and template codes never include these files.
 
 If a new mod has no configuration file yet, start the server once so it can generate
 one.
@@ -1134,31 +1182,85 @@ The page address names the other server, so you can share a comparison as a link
 
 A saved setup is a named snapshot of a server's mods, configuration and settings,
 kept on the same panel so you can go back after a change goes wrong.
+Mod installs, removals and updates save one on their own unless turned off; see
+[Undo a mod update](#undo-a-mod-update).
 
-Stop the server, then open **Saved setups**. The name field starts as **Working before
-update**; change it if needed, then choose **Save setup**. You can link one consistent
-world backup from this server. A linked backup stays outside retention and cannot
-be deleted while a setup links to it.
+Open **Saved setups**, on a running or stopped server. The name field starts as **Working
+before update**; change it if needed, then choose **Save setup**. Under **World backup to keep
+with this setup**, choose one of:
+
+- **The backup the next mod update takes**, the default. The world backup the next mod update
+  or setup restore takes is linked to the setup, as long as the mods are still the ones the
+  setup holds: it is the world just before that change, with those mods installed. Installing
+  a new mod, removing one, or disabling and enabling one before then leaves the setup without
+  a backup, since none of them backs up the world. The setup says it is waiting until then.
+- **Back up the world now**, on a stopped server, to take a backup during the save and link it.
+- **None**, or one consistent world backup from this server taken with the mods installed now.
+
+A rollback can restore any backup taken with the setup's mods, not only the one kept with it.
+The kept backup is the one that is sure to be there: it stays outside retention and cannot be deleted while a setup links to it;
+**Backups** marks it **Kept for setup**. Saving a running server reads its config files as they
+are at that moment. If a mod rewrites one while the setup is saved, the save fails and asks
+you to save again. The server is busy while the setup is saved, so a scheduled restart or
+backup that falls in that time is skipped.
 
 A setup keeps launch and backup settings, Valmin-managed mods with their exact
-registries, versions, locks, enabled states, and client labels, plus supported mod
-configuration files: `.cfg` files directly in `BepInEx/config`, up to 1 MiB each. Files in
-subfolders, YAML, JSON and text files, and server-root files are not carried; **Save current
-setup** lists them under *config files are not included*, and a restore leaves them as they
-are. Valmin keeps the
-required package files, so a restore does not need the registry or its download
-cache. Saving fails if a required package cannot be captured. Game build and world
-name appear in the comparison but do not change on restore. The server password and
-world files are excluded.
+registries, versions, locks, enabled states, and client labels, plus every configuration
+file the config editor lists in `BepInEx/config` and its subfolders, YAML, JSON and text
+files included, except the RCON plugin's file. Server-root files are not saved. A file the
+editor leaves out for its limits is not saved either, and the setup says **Some config files
+are not included**. With **Keep package files (restore works offline)** on, the default,
+Valmin keeps the required package files, so a restore does not need the registry or its
+download cache. Turned off, the setup is marked **Light**: it keeps only mods that cannot be
+downloaded again and fetches the rest on restore, which fails for a version the registry has
+removed. Saving fails if a required package cannot be captured. Game
+build and world name appear in the comparison but do not change on restore. The server
+password and world files are excluded.
 
-Select a setup to compare it with the current server. Review the restore preview,
-then restore while the server is stopped. Valmin applies the saved mod set,
-configuration, and settings together. If installation fails, it rolls back the
-changes. The server stays stopped; start it after checking the job result.
+The list shows when each setup was saved and by whom; an automatic setup names who made the
+change it comes before. **Worlds** says how many catalogued backups were taken with exactly the
+setup's mods, counting the kept one, and how old the newest is; **World kept** marks a setup
+with a kept backup. Under each one, **Then** says what changed in the mods after it: up to
+the next newer setup, and whether config files changed too, or for the newest up to the
+installed mods. Select a setup to compare it with the current server, or choose another setup
+under **Compare with** to see what differs between the two. Under **Configuration files**, the
+comparison lists the files the restore removes and adds, and each changed file opens to a
+line-by-line comparison. Review the preview, then choose **Roll back to this setup**, on a
+running or a stopped server. Valmin stops a running server, saves the current setup as an
+**Automatic** one named **Before restoring** and the setup's name, linked to the world backup it
+takes when mods change, then applies the saved mod set, configuration, and settings together.
+Roll back to that automatic setup to undo the rollback. If installation fails, Valmin rolls
+back the changes and does nothing after it. The job is not cancellable.
 
-To recover the world too, restore the linked backup separately on **Backups**. World
-restoration replaces world files, so choose it only when needed. Delete a setup to
-release its package references and its link to the backup. More detail is in
+A member with `mods.manage` sees **Saved setups** and rolls back mods and configuration files
+only; the launch and backup settings stay as they are. Rolling back a running server also needs
+the right to stop it, starting it again the right to start it, and restoring the world
+`backups.restore`. Without `config.raw` the comparison names the changed config files but does
+not show their text. An administrator can turn off **Also restore launch and backup settings**
+for the same mods-only rollback.
+
+Two options come with a rollback:
+
+- **World**, shown when backups were taken with exactly the setup's mods and you may restore
+  backups. **Keep the current world** is chosen at first. Below it are those backups, newest
+  first and five at a time (**Show more** lists the rest), each with its date, age, reason and
+  size: **Kept with this setup** marks the kept one and **Best-effort** one copied while the
+  server ran. Choosing a backup replaces the current world with it after archiving the current
+  one, so everything played since that backup is lost, and asks you to type the server name.
+  Every backup records the mods its world was played with (their names, versions and enabled
+  states), so a world left from before a mods-only rollback is not offered for the restored
+  setup, and backups taken before Valmin recorded mods are not listed unless kept with the
+  setup. The setup is restored first, so a setup that cannot be applied leaves the world alone.
+  If the world restore fails, the setup stays restored and the server shows **This server needs
+  a check**.
+- **Start the server again when done**, on a running server and for those who may start it.
+  A server that was stopped stays stopped.
+
+A setup marked **Top-level .cfg only** was saved before setups held every config file, and
+restoring it changes only the `.cfg` files directly in `BepInEx/config`.
+
+Restoring a world from **Backups** stays available on its own. Delete a setup to release its
+package references and its link to the backup. More detail is in
 [recover a saved setup](operations.md#recover-a-saved-setup).
 
 ## Share a server as a template
@@ -1167,10 +1269,16 @@ A template recreates a server's setup on any Valmin panel. Both forms are under
 **Share as a template** on the server's **Settings** page.
 
 **Download template file** saves the launch settings, the mods at their installed
-versions and the `.cfg` files directly in `BepInEx/config`. It carries no password and no
-world. A mod's config can hold a key or a webhook, so read the file before you share it.
-Neither the file nor the code carries config files in subfolders, YAML, JSON or text files,
-or server-root files; the section lists them under *config files are not included*.
+versions and, whole, every config file changed in the panel's config editor or by a setup
+restore, in `BepInEx/config` and its subfolders. A file still as the panel first found it, or as
+the newest mod install wrote it, is left out, since the mods create it again. The file carries
+no password and no world. A mod's config can hold a key or a webhook, so read the file before
+you share it. Neither the file nor the code carries the RCON plugin's file or server-root files.
+A changed file they leave out, such as one changed only outside the panel or one over 1 MiB, is
+listed under *changed config files are not included* with the reason. A template file holding a
+YAML, JSON or text file, or a file in a subfolder, needs a panel that reads such files. If the
+changed files are more than a panel imports, over 200 files or about 8 MiB, the download says so
+instead.
 
 A template code is a short text that recreates the server's mod setup. Choose **Create
 template code**, then **Copy code**. Codes start with `valmin1:`.
@@ -1182,7 +1290,9 @@ modpack's members, are left out and added again on import. The code excludes the
 world, disabled mods, mods installed outside Valmin, and changes made to config files outside
 the panel. The summary under the code lists what was left out.
 
-Under the code, each config file with changed settings is listed with those settings. A
+Under the code, each config file with changed settings is listed with those settings. A code
+carries only the `.cfg` files directly in `BepInEx/config`; share a template file for changes to
+other config files. A
 setting whose name looks like a password, a token, a key or a webhook is marked **left out**:
 the code skips it unless you turn on **Include secret settings** for its file. A setting
 the code carries is marked **looks secret** when its name or value looks like one, such as a
@@ -1254,7 +1364,7 @@ On each server, a member's grant has a base access and optional extra capabiliti
 
 | Extra capability       | Allows                                                                                            |
 | ---------------------- | ------------------------------------------------------------------------------------------------- |
-| `mods.manage`          | Install, update and remove mods, which means running third-party code.                            |
+| `mods.manage`          | Install, update and remove mods (third-party code), and roll mods and configs back to a setup.    |
 | `config.edit`          | Change mod settings through the settings form.                                                    |
 | `config.raw`           | Write mod configuration files as raw text, and everything `config.edit` allows.                   |
 | `backups.restore`      | Replace the live world from a backup, delete backups, and set how many are kept.                  |
@@ -1263,9 +1373,9 @@ On each server, a member's grant has a base access and optional extra capabiliti
 | `notifications.manage` | Add this server's own channels and choose what the panel posts about it, also to shared channels. |
 
 Some actions are for administrators only and cannot be granted: creating, cloning,
-recovering and deleting servers, resource limits, game updates, saved setups, world tools,
-schedules that cover the whole panel, users, invites, access, panel settings and the
-audit log.
+recovering and deleting servers, resource limits, game updates, saving, deleting and fully
+restoring setups, world tools, schedules that cover the whole panel, users, invites, access,
+panel settings and the audit log.
 
 ### Create a user
 
@@ -1455,12 +1565,15 @@ Under **Channels**, enter a name, choose the receiver and paste the webhook URL,
 panel stores it encrypted and never shows it again. It must be an `https://` address on the
 public internet. Names are unique among the shared channels and among each server's own.
 
-Three alerts are built in and need no rule: a server that stops unexpectedly, a failed
-backup and a new game build. **Also post built-in alerts** on a channel decides whether they
-reach it. A shared channel gets them for every server, a server's own channel for that
-server, and a new game build reaches shared channels only. A channel that a rule already
-sends the same news to gets it once. To style the unexpected-stop alert, add a **Stopped
-unexpectedly** rule: the channels it posts to get its message instead of the built-in one.
+A channel posts only what rules send it; a channel no enabled rule names says **No rule posts
+here yet**. While a page has no rules, **Add starter rules** under **Rules** adds a
+**Stopped unexpectedly** and a **Backup failed** rule, plus **New game build** on the
+Administration page, each posting to all of the page's own channels: the shared channels on
+the Administration page, the server's own channels on its tab. A channel that had **Also post
+built-in alerts** on in an older release was given these rules when the panel was upgraded.
+Each rule sends its own message, so a channel that a **Job failed**, **Update available**,
+**Crash loop** or **Server error** rule also posts to can get two messages about one
+incident: pause whichever you don't want.
 
 The switch on the right pauses a channel. A paused channel receives nothing, including
 messages that were still waiting to be sent when you paused it. Deleting a channel removes
@@ -1475,7 +1588,9 @@ Select **Add rule** and choose the event:
 | Server status          | **Server started**                    | Valmin started or restarted a server and its world loaded.           |
 | Server status          | **Server stopped**                    | Valmin stopped a server: by hand, by auto-stop or for a power cut.   |
 | Server status          | **Stopped unexpectedly**              | A server stopped or restarted on its own: a crash, running out of memory or a host reboot. Also a server the [watchdog](operations.md#restart-a-hung-server) found hung. |
+| Server status          | **Backup failed**                     | A backup failed. Sent for every failure, unlike **Job failed**, which covers every job and posts once until the job succeeds. |
 | Server status          | **Server updated**                    | A game update installed a new build, or applying tested updates updated mods. |
+| Server status          | **New game build**                    | Steam published a game build the panel has not seen before. Sent once per build, unlike **Update available**, which posts for each server that is behind. Administration page only. |
 | Server status          | **Power cut soon**                    | A planned power cut is close: players are being warned. Administration page only. |
 | Server status          | **Sign-ins blocked**                  | An account had too many failed sign-ins from anywhere and the panel is refusing it for a short while. At most once an hour per account, and only for an account that exists. Administration page only. |
 | Problems               | **Crash loop**                        | A server is crashing repeatedly.                                     |

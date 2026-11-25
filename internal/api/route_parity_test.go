@@ -16,6 +16,8 @@ B- POST /api/v1/admin/alert-rules
 B- POST /api/v1/admin/alert-rules/test
 B- DELETE /api/v1/admin/alert-rules/{rid}
 B- PATCH /api/v1/admin/alert-rules/{rid}
+B- GET /api/v1/admin/cache
+B- POST /api/v1/admin/cache/prune
 B- GET /api/v1/admin/diagnostics
 B- GET /api/v1/admin/diagnostics/bundle
 B- POST /api/v1/admin/diagnostics/run
@@ -106,6 +108,7 @@ B- GET /api/v1/instances/{id}/jobs
 B- GET /api/v1/instances/{id}/logs
 B- GET /api/v1/instances/{id}/manifest
 B- GET /api/v1/instances/{id}/manifest/code
+B- GET /api/v1/instances/{id}/manifest/files
 B- GET /api/v1/instances/{id}/mods
 B- POST /api/v1/instances/{id}/mods
 B- POST /api/v1/instances/{id}/mods/code/apply
@@ -141,8 +144,10 @@ B- GET /api/v1/instances/{id}/setups
 B- POST /api/v1/instances/{id}/setups
 B- DELETE /api/v1/instances/{id}/setups/{sid}
 B- GET /api/v1/instances/{id}/setups/{sid}
+B- GET /api/v1/instances/{id}/setups/{sid}/configs/{file}
 B- GET /api/v1/instances/{id}/setups/{sid}/preview
 B- POST /api/v1/instances/{id}/setups/{sid}/restore
+B- POST /api/v1/instances/{id}/setups/{sid}/rollback
 B- POST /api/v1/instances/{id}/start
 B- GET /api/v1/instances/{id}/stats
 B- POST /api/v1/instances/{id}/stop

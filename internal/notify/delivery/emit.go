@@ -1,6 +1,7 @@
 package delivery
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
@@ -25,8 +26,8 @@ func shown(p *alerts.ParamsWire, fields []shownField) []notify.Field {
 	return out
 }
 
-// rulesFor is the enabled rules for kind covering instanceID. A read failure is logged and
-// matches nothing.
+// rulesFor is the enabled rules for kind covering instanceID, the rules naming a server before
+// the rules for every server. A read failure is logged and matches nothing.
 func (n *Notifier) rulesFor(ctx context.Context, kind alerts.Kind, instanceID string) []store.AlertRule {
 	rules, err := n.DB.ListAlertRules(ctx)
 	if err != nil {
@@ -38,17 +39,47 @@ func (n *Notifier) rulesFor(ctx context.Context, kind alerts.Kind, instanceID st
 	if instanceID != "" {
 		condition.InstanceID = &instanceID
 	}
-	return slices.DeleteFunc(rules, func(r store.AlertRule) bool { return !alerts.Matches(&r, condition) })
+	rules = slices.DeleteFunc(rules, func(r store.AlertRule) bool { return !alerts.Matches(&r, condition) })
+	slices.SortStableFunc(rules, func(a, b store.AlertRule) int {
+		return cmp.Compare(boolRank(a.InstanceID == nil), boolRank(b.InstanceID == nil))
+	})
+	return rules
 }
 
-// emitByRules sends the event build makes from each rule's params to the destinations of every
-// enabled rule for kind that covers instanceID and is outside its quiet hours. A destination
-// named by several rules is sent one, rendered for the first such rule.
+// boolRank orders false before true.
+func boolRank(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// emitByRules sends the deliveries prepareByRules makes and records them as it goes.
 func (n *Notifier) emitByRules(
 	ctx context.Context, kind alerts.Kind, instanceID string, build func(*alerts.ParamsWire) *notify.Event,
 ) {
+	for _, d := range n.prepareByRules(ctx, kind, instanceID, build) {
+		n.send(ctx, d.event, d.deliveries)
+	}
+}
+
+// ruleEvent is one rule's rendering of an event and its unrecorded delivery rows.
+type ruleEvent struct {
+	event      *notify.Event
+	deliveries []*store.Delivery
+}
+
+// prepareByRules renders the event build makes from each rule's params for the destinations of
+// every enabled rule for kind that covers instanceID and is outside its quiet hours. Nothing is
+// recorded or sent. A destination named by several rules gets one, rendered for the first such
+// rule, so a server's own rule wins over a rule for every server. A failure to render is logged
+// and costs that rule's deliveries.
+func (n *Notifier) prepareByRules(
+	ctx context.Context, kind alerts.Kind, instanceID string, build func(*alerts.ParamsWire) *notify.Event,
+) []ruleEvent {
 	eventID, now := store.NewID(), time.Now().UTC()
 	sent := map[string]bool{}
+	var out []ruleEvent
 	rules := n.rulesFor(ctx, kind, instanceID)
 	for i := range rules {
 		r := &rules[i]
@@ -69,22 +100,27 @@ func (n *Notifier) emitByRules(
 		event := build(&params)
 		event.ID, event.OccurredAt = eventID, now
 		Compose(event, kind, &params)
-		n.EmitTo(ctx, event, r.ID, targets)
+		deliveries, err := n.ruleDeliveries(ctx, event, r.ID, targets)
+		if err != nil {
+			slog.ErrorContext(ctx, "prepare notification",
+				slog.String("event_kind", event.Kind.String()), slog.String("rule_id", r.ID),
+				slog.Any("error", err))
+			continue
+		}
+		out = append(out, ruleEvent{event: event, deliveries: deliveries})
 	}
+	return out
 }
 
-// Prepare renders one delivery row per enabled catch-all destination that serves the event's
-// server. Nothing is sent by it: the rows are the delivery intent, and the caller writes them
-// with the change that caused the event.
-func (n *Notifier) Prepare(ctx context.Context, event *notify.Event) ([]*store.Delivery, error) {
-	return n.render(ctx, event, func(w *store.Webhook) bool { return w.CatchAll })
-}
-
-// render is one delivery row for event per enabled destination that serves its server and
-// that keep accepts.
-func (n *Notifier) render(
-	ctx context.Context, event *notify.Event, keep func(*store.Webhook) bool,
+// PrepareFor renders one delivery row per named enabled destination that serves the event's
+// server. A named destination that is gone, disabled or another server's is skipped. Nothing is
+// sent by it: the rows are the delivery intent, which the caller records.
+func (n *Notifier) PrepareFor(
+	ctx context.Context, event *notify.Event, webhookIDs []string,
 ) ([]*store.Delivery, error) {
+	if len(webhookIDs) == 0 {
+		return nil, nil
+	}
 	n.link(event)
 	destinations, err := n.DB.EnabledWebhooks(ctx)
 	if err != nil {
@@ -92,7 +128,7 @@ func (n *Notifier) render(
 	}
 	var out []*store.Delivery
 	for i := range destinations {
-		if !keep(&destinations[i]) || !destinations[i].Serves(event.InstanceID) {
+		if !slices.Contains(webhookIDs, destinations[i].ID) || !destinations[i].Serves(event.InstanceID) {
 			continue
 		}
 		delivery, err := Render(&destinations[i], event)
@@ -104,32 +140,9 @@ func (n *Notifier) render(
 	return out, nil
 }
 
-// PrepareFor renders one delivery row per named enabled destination, for an event a rule routes
-// to a subset rather than to everyone. A named destination that is gone, disabled or another
-// server's is skipped.
-func (n *Notifier) PrepareFor(
-	ctx context.Context, event *notify.Event, webhookIDs []string,
-) ([]*store.Delivery, error) {
-	if len(webhookIDs) == 0 {
-		return nil, nil
-	}
-	return n.render(ctx, event, func(w *store.Webhook) bool { return slices.Contains(webhookIDs, w.ID) })
-}
-
-// EmitTo is Emit narrowed to the destinations a rule names.
-func (n *Notifier) EmitTo(ctx context.Context, event *notify.Event, ruleID string, webhookIDs []string) {
-	deliveries, err := n.ruleDeliveries(ctx, event, ruleID, webhookIDs)
-	n.send(ctx, event, deliveries, err)
-}
-
 // send records the deliveries prepared for event and has the dispatcher send them. A failure is
 // logged and nothing else: a notification never changes the outcome it reports.
-func (n *Notifier) send(ctx context.Context, event *notify.Event, deliveries []*store.Delivery, err error) {
-	if err != nil {
-		slog.ErrorContext(ctx, "prepare notification",
-			slog.String("event_kind", event.Kind.String()), slog.Any("error", err))
-		return
-	}
+func (n *Notifier) send(ctx context.Context, event *notify.Event, deliveries []*store.Delivery) {
 	for _, d := range deliveries {
 		if err := n.DB.CreateDelivery(ctx, d); err != nil {
 			slog.ErrorContext(ctx, "record delivery intent",
@@ -154,21 +167,4 @@ func (n *Notifier) editedDelivery(ctx context.Context, eventID, webhookID string
 		return nil
 	}
 	return &d.ID
-}
-
-// emitExcept sends event to every catch-all destination except those an alert rule owns.
-func (n *Notifier) emitExcept(ctx context.Context, event *notify.Event, owned map[string]bool) {
-	deliveries, err := n.prepareExcept(ctx, event, owned)
-	n.send(ctx, event, deliveries, err)
-}
-
-// prepareExcept is Prepare without the destinations a rule owns.
-func (n *Notifier) prepareExcept(
-	ctx context.Context, event *notify.Event, owned map[string]bool,
-) ([]*store.Delivery, error) {
-	deliveries, err := n.Prepare(ctx, event)
-	if err != nil {
-		return nil, err
-	}
-	return slices.DeleteFunc(deliveries, func(d *store.Delivery) bool { return owned[d.WebhookID] }), nil
 }

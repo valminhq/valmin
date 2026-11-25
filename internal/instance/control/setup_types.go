@@ -1,5 +1,7 @@
 package control
 
+import "github.com/valminhq/valmin/internal/store"
+
 // ManifestLaunch is the portable part of an instance definition.
 type ManifestLaunch struct {
 	ServerName      string            `json:"server_name"`
@@ -46,7 +48,18 @@ type SetupMod struct {
 
 // SetupSnapshot is stored as JSON with a saved setup row.
 type SetupSnapshot struct {
-	Instance ManifestLaunch   `json:"instance"`
-	Mods     []SetupMod       `json:"mods"`
-	Configs  []ManifestConfig `json:"configs"`
+	Instance ManifestLaunch `json:"instance"`
+	Mods     []SetupMod     `json:"mods"`
+	// Configs holds, whole, the top-level .cfg files of a setup saved before setups covered
+	// the config tree. It is empty when ConfigTree is set.
+	Configs []ManifestConfig `json:"configs"`
+	// ConfigTree marks a setup holding every file of the config tree as ConfigFiles.
+	ConfigTree bool `json:"config_tree,omitempty"`
+	// ConfigFiles are the config tree's files, stored beside the snapshot rather than in it.
+	ConfigFiles []store.SetupConfigRef `json:"-"`
+	// ConfigsTruncated reports that the tree held files past the listing limits.
+	ConfigsTruncated bool `json:"-"`
+	// Light marks a setup that keeps only the packages its registry archives cannot reproduce
+	// and downloads the rest on restore.
+	Light bool `json:"light,omitempty"`
 }

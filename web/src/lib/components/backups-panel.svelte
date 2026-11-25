@@ -197,6 +197,14 @@
 		}
 	}
 
+	/** What the archive says about the mods its world was played with, '' when it recorded none. */
+	function modsLine(archive: Backup): string {
+		if (archive.mods_match_current === true) return 'Mods: same as now';
+		if (archive.mods_match_current !== false) return '';
+		const setup = archive.matching_setups?.[0];
+		return setup ? `Mods: as in ${setup.name}` : 'Mods: differ from now';
+	}
+
 	function askRestore(archive: Backup) {
 		restoring = archive;
 		restoreOpen = true;
@@ -556,6 +564,19 @@
 												<Badge variant="destructive">Pending deletion</Badge>
 												<span class="text-xs text-muted-foreground">removed at the next prune</span>
 											{/if}
+											{#if archive.kept_for_setup}
+												<Badge variant="outline">Kept for setup</Badge>
+												<span class="text-xs text-muted-foreground"
+													>{archive.linked_setups?.length
+														? archive.linked_setups.map((s) => s.name).join(', ')
+														: 'linked to a saved setup'}</span
+												>
+											{/if}
+											{#if modsLine(archive)}
+												<span class="text-xs text-muted-foreground" data-testid="backup-mods"
+													>{modsLine(archive)}</span
+												>
+											{/if}
 										</div>
 										<div class="grid gap-0.5">
 											<span class="text-xs text-muted-foreground md:hidden">Size</span>
@@ -632,15 +653,22 @@
 													<History />
 													<span>Restore</span>
 												</Button>
-												<Button
-													variant="ghost"
-													size="sm"
-													disabled={jobRunning}
-													onclick={() => askDelete(archive)}
+												<!-- The title sits on a wrapper: a disabled button takes no pointer events. -->
+												<span
+													title={archive.kept_for_setup
+														? 'A saved setup links this backup. Delete the setup first.'
+														: undefined}
 												>
-													<Trash2 />
-													<span>Delete</span>
-												</Button>
+													<Button
+														variant="ghost"
+														size="sm"
+														disabled={jobRunning || archive.kept_for_setup}
+														onclick={() => askDelete(archive)}
+													>
+														<Trash2 />
+														<span>Delete</span>
+													</Button>
+												</span>
 											{/if}
 										</div>
 									</li>
@@ -692,7 +720,8 @@
 							<p class="text-sm text-muted-foreground">
 								Older backups are deleted after the next backup or scheduled cleanup. Set a count to
 								0 to keep all backups of that type. Snapshots taken before a restore, import or
-								update are kept apart, up to the same number as consistent backups.
+								update are kept apart, up to the same number as consistent backups. A backup linked
+								to a saved setup is kept until the setup is deleted.
 							</p>
 						</div>
 						<div class="grid gap-3">
@@ -801,7 +830,30 @@
 		: ''}. Mods, configuration, server files and player lists are not touched. The panel first backs up what is there now, if anything, as a pre restore backup, and leaves this server stopped afterwards so you can check it before starting."
 	confirmLabel="Restore backup"
 	onconfirm={restore}
-/>
+>
+	{#if restoring?.mods_match_current === false}
+		{@const setup = restoring.matching_setups?.[0]}
+		<div
+			class={['grid justify-items-start gap-2 rounded-md border p-3 text-sm', warningBox]}
+			data-testid="restore-mods-warning"
+		>
+			<span
+				>This world was played with other mods than are installed now, so it would start with mods
+				it was not played with.</span
+			>
+			{#if setup}
+				<Button
+					variant="outline"
+					size="sm"
+					href="{resolve('/instances/[id]/setups', {
+						id: instance.id
+					})}?setup={encodeURIComponent(setup.id)}&world={encodeURIComponent(restoring.id)}"
+					>Roll back to {setup.name} with this world instead</Button
+				>
+			{/if}
+		</div>
+	{/if}
+</DestructiveConfirm>
 
 <!--
 	F5 again: deleting an archive is not recoverable, so it is named in full and something is

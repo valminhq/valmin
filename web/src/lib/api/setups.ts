@@ -1,6 +1,6 @@
 import { api, request } from './client';
 import type { Job } from './types';
-import type { ManifestConfig, ManifestLaunch } from './manifest';
+import type { ManifestLaunch } from './manifest';
 import type { InstalledMod } from './mods';
 
 export interface LinkedWorldBackup {
@@ -9,15 +9,64 @@ export interface LinkedWorldBackup {
 	created_at: string;
 	consistent: boolean;
 	available?: boolean;
+	size_bytes?: number;
+	/** Why the backup was taken: `manual`, `scheduled`, `pre_update`, ... */
+	trigger?: string;
+	/** In `world_backups`, marks the backup the setup links. */
+	linked?: boolean;
 }
 
 export interface SavedSetup {
 	id: string;
 	name: string;
 	created_at: string;
+	/** Who saved it, or whose change an automatic one comes before; null for the panel's own. */
+	created_by: string | null;
 	game_build_id: string;
 	world_name: string;
 	world_backup?: LinkedWorldBackup | null;
+	/** How many backups a rollback to the setup can restore: those taken with its mods, and the
+	 * linked one. */
+	world_backups_count?: number;
+	/** When the newest of them was taken; null when there is none. */
+	world_backups_newest_at?: string | null;
+	/** Those backups, newest first. The setup list leaves them out. */
+	world_backups?: LinkedWorldBackup[];
+	/** False for a setup saved before setups held the whole config tree: it restores only
+	 * the `.cfg` files directly in `BepInEx/config`. */
+	config_tree: boolean;
+	/** The config tree held files past the listing limits, which the setup left out. */
+	configs_truncated: boolean;
+	/** Saved by the panel before a restore or a mod change. */
+	automatic: boolean;
+	/** Keeps only the packages their registry archives cannot reproduce; the rest are
+	 * downloaded on restore. */
+	light: boolean;
+	/** Waiting to be linked to the world backup the next mod change takes, if its mods are
+	 * still the server's then. */
+	world_pending: boolean;
+	/** The setup's mods, listed with it so versions can be compared without loading each one. */
+	mods: SetupMod[];
+	/** A hash over the setup's config files, equal for two setups holding the same files. */
+	configs_digest: string;
+}
+
+/** How a setup is saved: which world backup to link, to take one now, or to wait for the one
+ * the next mod change takes, and whether to keep every package. */
+export interface SetupSaveOptions {
+	worldBackupId?: string;
+	backUpWorld?: boolean;
+	linkNextWorld?: boolean;
+	light?: boolean;
+}
+
+/** One config file of a setup or of the current server, by path under `BepInEx/config`.
+ * `content` is sent for a top-level `.cfg` file only. */
+export interface SetupConfig {
+	file: string;
+	content?: string;
+	sha256: string;
+	size_bytes: number;
 }
 
 export type SetupMod = Pick<
@@ -28,18 +77,20 @@ export type SetupMod = Pick<
 export interface SetupDetail extends SavedSetup {
 	instance: ManifestLaunch;
 	mods: SetupMod[];
-	configs: ManifestConfig[];
+	configs: SetupConfig[];
 }
 
 export interface SetupPreview {
 	etag: string;
 	ready: boolean;
+	/** The server is not stopped: a restore refuses it, and a rollback stops a running one. */
+	stop_required: boolean;
 	problems: string[];
 	current: {
 		build: string;
 		launch: ManifestLaunch;
 		mods: SetupMod[];
-		configs: ManifestConfig[];
+		configs: SetupConfig[];
 	};
 	setup: SetupDetail;
 }
@@ -49,21 +100,51 @@ const path = (instanceId: string, setupId?: string) =>
 
 export const setups = {
 	list: (instanceId: string) => api.get<{ items: SavedSetup[] }>(path(instanceId)),
-	save: (instanceId: string, name: string, worldBackupId?: string) =>
+	save: (instanceId: string, name: string, options: SetupSaveOptions = {}) =>
 		api.post<Job>(path(instanceId), {
 			name,
-			...(worldBackupId ? { world_backup_id: worldBackupId } : {})
+			...(options.worldBackupId ? { world_backup_id: options.worldBackupId } : {}),
+			...(options.backUpWorld ? { back_up_world: true } : {}),
+			...(options.linkNextWorld ? { link_next_world_backup: true } : {}),
+			...(options.light ? { light: true } : {})
 		}),
 	get: (instanceId: string, setupId: string) => api.get<SetupDetail>(path(instanceId, setupId)),
-	preview: (instanceId: string, setupId: string) =>
-		api.get<SetupPreview>(`${path(instanceId, setupId)}/preview`),
-	restore: (instanceId: string, setupId: string, etag: string) => {
-		if (!etag) throw new Error('Restoring a setup needs its preview fingerprint.');
-		return request<Job>(`${path(instanceId, setupId)}/restore`, {
+	/** The saved text of one config file of a setup. */
+	config: (instanceId: string, setupId: string, file: string) =>
+		api
+			.getText(`${path(instanceId, setupId)}/configs/${encodeURIComponent(file)}`)
+			.then((res) => res.text),
+	/** Compares the setup with the server and checks a restore of it; `modsOnly` checks one that
+	 * keeps the current launch and backup settings. */
+	preview: (instanceId: string, setupId: string, modsOnly = false) =>
+		api.get<SetupPreview>(
+			`${path(instanceId, setupId)}/preview${modsOnly ? '?mods_only=true' : ''}`
+		),
+	/** Puts the server back on the setup in one job: stops it if it runs, restores the setup and
+	 * optionally its linked world, and optionally starts it again. `modsOnly` keeps the current
+	 * launch and backup settings, which a caller who may not manage setups must ask for. The
+	 * fingerprint is sent only for a stopped server. */
+	rollback: (
+		instanceId: string,
+		setupId: string,
+		options: {
+			world?: boolean;
+			worldBackupId?: string;
+			start?: boolean;
+			modsOnly?: boolean;
+			etag?: string;
+		} = {}
+	) =>
+		request<Job>(`${path(instanceId, setupId)}/rollback`, {
 			method: 'POST',
-			headers: { 'If-Match': etag }
-		});
-	},
+			headers: options.etag ? { 'If-Match': options.etag } : {},
+			body: {
+				...(options.world ? { world: true } : {}),
+				...(options.worldBackupId ? { world_backup_id: options.worldBackupId } : {}),
+				...(options.start ? { start: true } : {}),
+				...(options.modsOnly ? { mods_only: true } : {})
+			}
+		}),
 	remove: (instanceId: string, setupId: string) =>
 		request<Job>(path(instanceId, setupId), { method: 'DELETE' })
 };

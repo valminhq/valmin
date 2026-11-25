@@ -1,5 +1,10 @@
 <script lang="ts">
-	import type { CreateWebhook, NotificationsApi, Webhook } from '#lib/api/notifications.js';
+	import type {
+		AlertRule,
+		CreateWebhook,
+		NotificationsApi,
+		Webhook
+	} from '#lib/api/notifications.js';
 	import { formatInstant } from '#lib/api/schedules.js';
 	import { Badge } from '#lib/components/ui/badge/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
@@ -15,15 +20,18 @@
 
 	/** The webhooks of one scope with their switches, and the form that adds one. `server` is the
 	 * server whose own webhooks these are, absent for the shared ones; on a server, shared rows
-	 * are listed read-only. `onchange` runs after every change. */
+	 * are listed read-only. `rules` are the rules that may post to them, so a row can say when
+	 * none does. `onchange` runs after every change. */
 	let {
 		api,
 		channels,
+		rules,
 		server,
 		onchange
 	}: {
 		api: NotificationsApi;
 		channels: Webhook[];
+		rules: AlertRule[];
 		server?: string;
 		onchange: () => void;
 	} = $props();
@@ -39,6 +47,7 @@
 
 	const ready = $derived(name.trim() !== '' && url.trim() !== '' && !saving);
 	const editable = (c: Webhook) => (c.instance_id ?? undefined) === server;
+	const unrouted = (c: Webhook) => !rules.some((r) => r.enabled && r.webhook_ids.includes(c.id));
 
 	async function act(call: () => Promise<unknown>) {
 		saving = true;
@@ -89,9 +98,13 @@
 								{#if !c.enabled}<Badge variant="secondary">paused</Badge>{/if}
 							</div>
 							<p class="text-sm text-muted-foreground">
-								{editable(c)
-									? `added ${formatInstant(c.created_at)}`
-									: 'Every server can post here. Managed in Administration › Notifications.'}
+								{#if editable(c)}
+									added {formatInstant(c.created_at)}{#if unrouted(c)}<span>
+											· No rule posts here yet</span
+										>{/if}
+								{:else}
+									Every server can post here. Managed in Administration › Notifications.
+								{/if}
 							</p>
 						</div>
 						{#if editable(c)}
@@ -118,25 +131,6 @@
 							</Button>
 						{/if}
 					</div>
-					{#if editable(c)}
-						<div class="flex items-start gap-2">
-							<Switch
-								id="catch-all-{c.id}"
-								checked={c.catch_all}
-								disabled={saving}
-								onCheckedChange={(catch_all) => act(() => api.webhooks.update(c.id, { catch_all }))}
-							/>
-							<div class="grid gap-0.5">
-								<Label for="catch-all-{c.id}">Also post built-in alerts</Label>
-								<p class="text-xs text-muted-foreground">
-									{server
-										? 'This server stopping unexpectedly or failing a backup'
-										: 'Unexpected stops, failed backups and new game builds'}, unless a rule already
-									posts them here.
-								</p>
-							</div>
-						</div>
-					{/if}
 				</div>
 			{/each}
 		</div>

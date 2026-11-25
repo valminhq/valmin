@@ -24,7 +24,6 @@ function webhook(id: string, name: string, owner: string | null): Webhook {
 		kind: 'discord',
 		enabled: true,
 		instance_id: owner,
-		catch_all: true,
 		created_at: '2026-09-01T00:00:00Z',
 		updated_at: '2026-09-01T00:00:00Z'
 	};
@@ -151,6 +150,19 @@ describe("a server's notifications", () => {
 		expect(body.condition_kind).toBe('player_joined');
 		expect(body.webhook_ids).toEqual(['wh-own']);
 		expect(body, 'the route names the server').not.toHaveProperty('instance_id');
+	});
+
+	it('adds the starter rules for its own channels, without new game builds', async () => {
+		open();
+		daemon.on('POST', `${base}/alert-rules`, ({ body }) => Response.json(rule(body as AlertRule)));
+
+		await click(await screen.findByRole('button', { name: 'Add starter rules' }));
+		await vi.waitFor(() =>
+			expect(daemon.requests('POST', `${base}/alert-rules`).map((r) => r.body)).toEqual([
+				{ condition_kind: 'instance_down', webhook_ids: ['wh-own'] },
+				{ condition_kind: 'backup_failed', webhook_ids: ['wh-own'] }
+			])
+		);
 	});
 
 	it('asks for the plugin once a game event is set up without it', async () => {

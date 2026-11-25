@@ -47,6 +47,10 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | Find out when a backup holds a broken world     | [World check](operations.md#world-check)                                                   |
 | See what happened between two backups           | [Compare two backups](operations.md#compare-two-backups)                                   |
 | Undo a bad mod or config change                 | [Save and restore a setup](usage.md#save-and-restore-a-setup)                              |
+| Undo a setup restore                            | [Recover a saved setup](operations.md#recover-a-saved-setup)                               |
+| Roll back mods and the world in one step        | [Save and restore a setup](usage.md#save-and-restore-a-setup)                              |
+| Roll back a mod update                          | [Undo a mod update](usage.md#undo-a-mod-update)                                            |
+| Save a setup without copying mod packages       | [Recover a saved setup](operations.md#recover-a-saved-setup)                               |
 | Share a server's setup with another panel       | [Share a server as a template](usage.md#share-a-server-as-a-template)                      |
 | See how two servers differ                      | [Compare two servers](usage.md#compare-two-servers)                                        |
 | Ban, allow or make players admins               | [Player lists](usage.md#player-lists)                                                      |
@@ -71,6 +75,7 @@ For home WiFi, use the [LAN setup](installation.md#local-wifi-or-lan) and
 | Check the panel's health or report a bug        | [Check the diagnostics page](troubleshooting.md#check-the-diagnostics-page)                |
 | Back up the whole panel or upgrade it           | [Back up the whole installation](operations.md#back-up-the-whole-installation)             |
 | Move the panel to a new host                    | [Move to a new host](operations.md#move-to-a-new-host)                                     |
+| Free disk space taken by old builds and mods    | [Reclaim cache space](operations.md#reclaim-cache-space)                                   |
 | Set my time zone, theme or change my password   | [Your account](usage.md#your-account)                                                      |
 
 ## Integrate or contribute

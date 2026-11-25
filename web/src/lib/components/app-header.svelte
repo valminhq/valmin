@@ -32,6 +32,7 @@
 	import Bot from '@lucide/svelte/icons/bot';
 	import Zap from '@lucide/svelte/icons/zap';
 	import Users from '@lucide/svelte/icons/users';
+	import HardDrive from '@lucide/svelte/icons/hard-drive';
 	import { adminPageActions } from '#lib/admin-pages.js';
 
 	// Visibility comes from the granted actions, never from a role name (`09 §4`).
@@ -100,6 +101,13 @@
 				group: 'System',
 				icon: Stethoscope,
 				visible: granted.includes(adminPageActions.diagnostics)
+			},
+			{
+				href: resolve('admin/cache'),
+				label: 'Cache',
+				group: 'System',
+				icon: HardDrive,
+				visible: granted.includes(adminPageActions.cache)
 			},
 			{
 				href: resolve('admin/export'),

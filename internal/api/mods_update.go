@@ -10,6 +10,7 @@ import (
 	"github.com/valminhq/valmin/internal/authz"
 	"github.com/valminhq/valmin/internal/errcode"
 	"github.com/valminhq/valmin/internal/instance"
+	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/mods/installer"
 	"github.com/valminhq/valmin/internal/mods/manager"
 	"github.com/valminhq/valmin/internal/mods/source"
@@ -44,6 +45,8 @@ type updatePreview struct {
 	// Backup reports whether an archive will be taken first. False only for an instance with no
 	// world yet, which has nothing to lose.
 	Backup bool `json:"backup"`
+	// Setup reports whether the current setup is saved first as an automatic one.
+	Setup bool `json:"setup"`
 }
 
 type applyUpdatesRequest struct {
@@ -85,6 +88,7 @@ func (m *Mods) previewUpdates(w http.ResponseWriter, r *http.Request) {
 	}
 	preview := updatePreview{
 		Targets: targets, Nodes: []updateNode{}, Conflicts: []conflictView{}, Backup: hasWorlds(inst),
+		Setup: savesSetup(inst),
 	}
 	if len(targets) == 0 {
 		JSON(w, r, http.StatusOK, preview)
@@ -208,4 +212,9 @@ func (m *Mods) checkUpdateTargets(
 func hasWorlds(inst *store.Instance) bool {
 	_, err := os.Stat(instance.WorldsDir(inst.DataDir)) //nolint:gosec // data_dir is panel-generated
 	return err == nil
+}
+
+// savesSetup reports whether a mod change on inst saves its setup first.
+func savesSetup(inst *store.Instance) bool {
+	return inst.SetupBeforeUpdate != string(control.SetupBeforeUpdateOff)
 }
