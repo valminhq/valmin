@@ -491,4 +491,16 @@ describe('managing the server', () => {
 		await vi.waitFor(() => expect(screen.queryByText(/webhook, a token or a key/)).toBeNull());
 		expect(screen.getByText(/1 config file left out/)).toBeTruthy();
 	});
+
+	it('lists the changed config files templates leave out, with the reason', async () => {
+		daemon.on('GET', '/instances/inst-a/manifest/files', () =>
+			Response.json({
+				carried: [],
+				left_out: [{ file: 'Other.cfg', reason: 'changed outside the panel' }]
+			})
+		);
+		await open([actions.view, actions.settings, actions.modsList, actions.configRead]);
+		expect(await screen.findByText('1 changed config file is not included')).toBeTruthy();
+		expect(screen.getByText(/changed outside the panel/)).toBeTruthy();
+	});
 });

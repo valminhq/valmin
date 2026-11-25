@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -305,5 +306,98 @@ func TestAWaiterFollowsItsOwnContext(t *testing.T) {
 	defer cancel()
 	if _, err := c.Get(ctx, "ident", srv.URL, 0); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("waiting Get = %v, want its own deadline", err)
+	}
+}
+
+// writeFiles creates each named file under root with a little content.
+func writeFiles(t *testing.T, root string, names ...string) {
+	t.Helper()
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("bytes"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestPruneRemovesWhatItIsToldAndSparesDownloadsInFlight(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, "Old-Mod-1.0.0.zip", "Kept-Mod-2.0.0.zip", "Stale-Mod-1.0.0.zip.part",
+		"Live-Mod-1.0.0.zip.part", "notes.txt")
+	c := New(root)
+	c.byIdent["Live-Mod-1.0.0"] = &inflight{done: make(chan struct{})}
+
+	removed, err := c.Prune(func(e Entry) bool { return e.Ident != "Kept-Mod-2.0.0" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(removed))
+	for _, e := range removed {
+		got = append(got, e.Ident)
+	}
+	want := []string{"Old-Mod-1.0.0", "Stale-Mod-1.0.0"}
+	if !slices.Equal(got, want) {
+		t.Errorf("Prune removed %v, want %v", got, want)
+	}
+	left, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(left))
+	for _, d := range left {
+		names = append(names, d.Name())
+	}
+	wantLeft := []string{"Kept-Mod-2.0.0.zip", "Live-Mod-1.0.0.zip.part", "notes.txt"}
+	if !slices.Equal(names, wantLeft) {
+		t.Errorf("left after Prune = %v, want %v", names, wantLeft)
+	}
+}
+
+func TestEntriesReportNoFreedSpaceForAHardLinkedZip(t *testing.T) {
+	root := t.TempDir()
+	writeFiles(t, root, "Linked-Mod-1.0.0.zip", "Alone-Mod-1.0.0.zip")
+	if err := os.Link(filepath.Join(root, "Linked-Mod-1.0.0.zip"), filepath.Join(t.TempDir(), "blob")); err != nil {
+		t.Skipf("hard links unavailable: %v", err)
+	}
+	entries, err := New(root).Entries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	freed := map[string]int64{}
+	for _, e := range entries {
+		freed[e.Ident] = e.FreedBytes()
+	}
+	if freed["Linked-Mod-1.0.0"] != 0 {
+		t.Errorf("linked zip frees %d bytes, want 0", freed["Linked-Mod-1.0.0"])
+	}
+	if freed["Alone-Mod-1.0.0"] == 0 {
+		t.Error("unlinked zip frees 0 bytes, want its size")
+	}
+}
+
+func TestGetRefreshesTheTimesOfAZipNotUsedForHalfAnHour(t *testing.T) {
+	url, _ := countingServer(t, "zip bytes")
+	c := New(t.TempDir())
+	path, err := c.Get(t.Context(), "ident", url, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		age       time.Duration
+		refreshed bool
+	}{{10 * time.Minute, false}, {2 * time.Hour, true}} {
+		old := time.Now().Add(-tc.age)
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Get(t.Context(), "ident", url, 0); err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := time.Since(info.ModTime()) < time.Minute; got != tc.refreshed {
+			t.Errorf("hit on a zip used %s ago refreshed it = %v, want %v", tc.age, got, tc.refreshed)
+		}
 	}
 }

@@ -1,9 +1,12 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/valminhq/valmin/internal/mods/source"
 )
@@ -138,7 +141,13 @@ func TestSavedSetupRestoreStateIsExact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := TxApplySetupState(t.Context(), tx, "server", mods, &launch, backup); err != nil {
+	if err := TxApplySetupState(
+		t.Context(),
+		tx,
+		"server",
+		mods,
+		&SetupSettings{Launch: launch, Backup: backup},
+	); err != nil {
 		t.Fatalf("TxApplySetupState: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -179,9 +188,249 @@ func TestSavedSetupRestoreStateIsExact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = TxApplySetupState(t.Context(), tx, "server", nil, &launch, backup)
+	err = TxApplySetupState(t.Context(), tx, "server", nil, &SetupSettings{Launch: launch, Backup: backup})
 	_ = tx.Rollback()
 	if !errors.Is(err, ErrInstanceNotStopped) {
 		t.Errorf("running restore = %v, want ErrInstanceNotStopped", err)
+	}
+}
+
+// TestSavedSetupConfigsAndAutomaticRetention asserts a setup's config files round-trip, count
+// as referenced blobs, and that pruning keeps only the newest automatic setups and the spared
+// one.
+func TestSavedSetupConfigsAndAutomaticRetention(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	seedInstance(t, db, "server-a", 28000)
+	const digest = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	configs := []SetupConfigRef{{File: "EWD/a.yaml", SHA256: digest, SizeBytes: 3}}
+	for i, id := range []string{"auto-1", "auto-2", "auto-3", "manual"} {
+		s := &SavedSetup{
+			ID: id, InstanceID: "server-a", Name: id, SnapshotJSON: "{}",
+			Automatic: id != "manual", ConfigsTruncated: true, Configs: configs,
+			CreatedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
+		}
+		if err := db.SaveSetup(t.Context(), s, nil); err != nil {
+			t.Fatalf("SaveSetup(%s): %v", id, err)
+		}
+	}
+	one, _, err := db.SetupByID(t.Context(), "server-a", "auto-1")
+	if err != nil || one == nil || !one.Automatic || !one.ConfigsTruncated ||
+		!reflect.DeepEqual(one.Configs, configs) {
+		t.Fatalf("SetupByID = %+v, %v", one, err)
+	}
+	referenced, err := db.ReferencedSetupArtifacts(t.Context())
+	if err != nil || !referenced[digest] {
+		t.Fatalf("ReferencedSetupArtifacts = %v, %v, want the config digest", referenced, err)
+	}
+	if err := db.inTx(t.Context(), "prune", func(tx *sql.Tx) error {
+		return TxPruneAutomaticSetups(t.Context(), tx, "server-a", SetupRetention{Versions: 1, Worlds: 1}, "auto-1")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	list, err := db.ListSetups(t.Context(), "server-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(list))
+	for _, s := range list {
+		ids = append(ids, s.ID)
+	}
+	if want := []string{"manual", "auto-3", "auto-1"}; !reflect.DeepEqual(ids, want) {
+		t.Errorf("setups after pruning = %v, want %v", ids, want)
+	}
+}
+
+// TestPruneReleasesWorldBackupsPastTheWorldsKept asserts pruning keeps the world backup links of
+// only the newest linked automatic setups, leaves manual and spared setups linked, and with no
+// worlds kept releases every other link.
+func TestPruneReleasesWorldBackupsPastTheWorldsKept(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		worlds int
+		want   map[string]bool
+	}{
+		{worlds: 2, want: map[string]bool{"auto-1": true, "auto-3": true, "auto-4": true, "manual": true}},
+		{worlds: 0, want: map[string]bool{"auto-1": true, "manual": true}},
+	} {
+		db := open(t)
+		seedInstance(t, db, "server-a", 28000)
+		ids := []string{"auto-1", "auto-2", "unlinked", "auto-3", "auto-4", "manual"}
+		for i, id := range ids {
+			s := &SavedSetup{
+				ID: id, InstanceID: "server-a", Name: id, SnapshotJSON: "{}", Automatic: id != "manual",
+				CreatedAt: time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC),
+			}
+			if id != "unlinked" {
+				if err := db.CreateBackup(t.Context(), &Backup{
+					ID: "world-" + id, InstanceID: "server-a", Path: "/tmp/" + id, SHA256: "hash",
+					WorldName: "Worldserver-a", Trigger: TriggerPreUpdate, Consistent: true,
+				}); err != nil {
+					t.Fatal(err)
+				}
+				s.BackupID = "world-" + id
+			}
+			if err := db.SaveSetup(t.Context(), s, nil); err != nil {
+				t.Fatalf("SaveSetup(%s): %v", id, err)
+			}
+		}
+		if err := db.inTx(t.Context(), "prune", func(tx *sql.Tx) error {
+			return TxPruneAutomaticSetups(t.Context(), tx, "server-a",
+				SetupRetention{Versions: 10, Worlds: tc.worlds}, "auto-1")
+		}); err != nil {
+			t.Fatal(err)
+		}
+		list, err := db.ListSetups(t.Context(), "server-a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]bool{}
+		for _, s := range list {
+			if s.BackupID != "" {
+				got[s.ID] = true
+			}
+		}
+		if len(list) != len(ids) || !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("worlds %d: %d setups, linked %v, want %d setups, linked %v",
+				tc.worlds, len(list), got, len(ids), tc.want)
+		}
+	}
+}
+
+// TestAModChangeEndsTheWaitForAWorldBackup asserts a setup stops waiting for a world backup once
+// one of the instance's mods is added, removed, or changes registry, version or enabled state,
+// and keeps waiting through changes to its side or lock.
+func TestAModChangeEndsTheWaitForAWorldBackup(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, change string
+		ends         bool
+	}{
+		{"side", `UPDATE instance_mods SET side = 'client_required' WHERE full_name = 'Ns-A'`, false},
+		{"lock", `UPDATE instance_mods SET locked = TRUE WHERE full_name = 'Ns-A'`, false},
+		{"same version", `UPDATE instance_mods SET version = '1.0.0' WHERE full_name = 'Ns-A'`, false},
+		{"version", `UPDATE instance_mods SET version = '2.0.0' WHERE full_name = 'Ns-A'`, true},
+		{"registry", `UPDATE instance_mods SET source = 'hexium' WHERE full_name = 'Ns-A'`, true},
+		{"enabled", `UPDATE instance_mods SET enabled = FALSE WHERE full_name = 'Ns-A'`, true},
+		{"removed", `DELETE FROM instance_mods WHERE full_name = 'Ns-A'`, true},
+		{"added", `INSERT INTO instance_mods (instance_id, full_name, version, installed_as, file_manifest,
+			installed_at) VALUES ('server-a', 'Ns-B', '1.0.0', 'explicit', '[]', '2026-01-01T00:00:00Z')`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			db := open(t)
+			seedInstance(t, db, "server-a", 28000)
+			exec(t, db.Writer, `INSERT INTO instance_mods (instance_id, full_name, version, installed_as,
+				file_manifest, installed_at) VALUES ('server-a', 'Ns-A', '1.0.0', 'explicit', '[]', ?)`, Now())
+			if err := db.SaveSetup(t.Context(), &SavedSetup{
+				ID: "waiting", InstanceID: "server-a", Name: "waiting", SnapshotJSON: "{}", WorldPending: true,
+			}, nil); err != nil {
+				t.Fatal(err)
+			}
+			exec(t, db.Writer, tc.change)
+			row, _, err := db.SetupByID(t.Context(), "server-a", "waiting")
+			if err != nil || row == nil {
+				t.Fatalf("SetupByID = %+v, %v", row, err)
+			}
+			if row.WorldPending == tc.ends {
+				t.Errorf("after a %s change, waiting = %v, want %v", tc.name, row.WorldPending, !tc.ends)
+			}
+		})
+	}
+}
+
+// TestARestoreWithoutSettingsKeepsThem asserts a setup restore given no settings replaces the mod
+// rows and marks the restart while every launch and backup setting stays as it was.
+func TestARestoreWithoutSettingsKeepsThem(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	seedInstance(t, db, "server", 28000)
+	exec(t, db.Writer, `UPDATE instances SET server_name = 'Kept', mem_limit_mb = 6144, extra_args = '-x',
+		backup_keep_cold = 9 WHERE id = 'server'`)
+	mods := []InstanceMod{{
+		InstanceID: "server", FullName: "Ns-One", Source: source.Thunderstore, Version: "1.0.0",
+		InstalledAs: InstalledExplicit, Side: SideUnknown, Enabled: true, FileManifest: "[]",
+	}}
+	tx, err := db.Writer.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := TxApplySetupState(t.Context(), tx, "server", mods, nil); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("TxApplySetupState: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := db.InstanceByID(t.Context(), "server")
+	if err != nil || inst == nil {
+		t.Fatalf("InstanceByID = %+v, %v", inst, err)
+	}
+	if inst.ServerName != "Kept" || inst.MemLimitMB != 6144 || inst.ExtraArgs == nil || *inst.ExtraArgs != "-x" ||
+		inst.BackupKeepCold != 9 || !inst.PendingRestart {
+		t.Errorf("instance after a restore without settings = %+v", inst)
+	}
+	if got, err := db.InstanceMods(t.Context(), "server"); err != nil || len(got) != 1 {
+		t.Errorf("InstanceMods = %+v, %v, want the restored one", got, err)
+	}
+}
+
+// TestSetupWorldBackupsFitTheSetupsMods asserts a setup's world backups are its instance's
+// backups taken under the same mods, consistent or not, plus the one it links, newest first; and
+// that the setup list counts them and the backup list names the setup.
+func TestSetupWorldBackupsFitTheSetupsMods(t *testing.T) {
+	t.Parallel()
+	db := open(t)
+	seedInstance(t, db, "server-a", 28000)
+	seedInstance(t, db, "server-b", 28010)
+	for i, b := range []Backup{
+		{ID: "linked", InstanceID: "server-a", ModsFingerprint: "other", Consistent: true},
+		{ID: "same-cold", InstanceID: "server-a", ModsFingerprint: "mods"},
+		{ID: "same-hot", InstanceID: "server-a", ModsFingerprint: "mods"},
+		{ID: "different", InstanceID: "server-a", ModsFingerprint: "other"},
+		{ID: "unrecorded", InstanceID: "server-a"},
+		{ID: "foreign", InstanceID: "server-b", ModsFingerprint: "mods"},
+	} {
+		b.Path, b.SHA256, b.WorldName, b.Trigger = "/tmp/"+b.ID, "hash", "World", TriggerManual
+		b.Consistent = b.Consistent || b.ID == "same-cold"
+		if err := db.CreateBackup(t.Context(), &b); err != nil {
+			t.Fatalf("CreateBackup(%s): %v", b.ID, err)
+		}
+		exec(t, db.Writer, `UPDATE backups SET created_at = ? WHERE id = ?`,
+			FormatTime(time.Date(2026, 1, 1, i, 0, 0, 0, time.UTC)), b.ID)
+	}
+	setup := &SavedSetup{
+		ID: "setup", InstanceID: "server-a", Name: "setup", SnapshotJSON: "{}",
+		BackupID: "linked", ModsFingerprint: "mods",
+	}
+	if err := db.SaveSetup(t.Context(), setup, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := db.SetupWorldBackups(t.Context(), setup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(got))
+	for _, b := range got {
+		ids = append(ids, b.ID)
+	}
+	if want := []string{"same-hot", "same-cold", "linked"}; !reflect.DeepEqual(ids, want) {
+		t.Errorf("SetupWorldBackups = %v, want %v", ids, want)
+	}
+	list, err := db.ListSetups(t.Context(), "server-a")
+	if err != nil || len(list) != 1 {
+		t.Fatalf("ListSetups = %+v, %v", list, err)
+	}
+	if list[0].WorldBackups != 3 || !list[0].WorldBackupsNewest.Equal(got[0].CreatedAt) {
+		t.Errorf("listed world backups = %d, newest %v, want 3, newest %v",
+			list[0].WorldBackups, list[0].WorldBackupsNewest, got[0].CreatedAt)
+	}
+	matches, err := db.BackupSetupMatches(t.Context(), "server-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 2 || len(matches["same-cold"]) != 1 || matches["same-cold"][0].ID != "setup" {
+		t.Errorf("BackupSetupMatches = %+v, want the setup for same-cold and same-hot only", matches)
 	}
 }

@@ -59,6 +59,10 @@ func MessageFields(k Kind) []string {
 		return []string{FieldBuild, FieldMods, FieldTime}
 	case KindUpdateTestFinished:
 		return []string{FieldStatus, FieldBuild, FieldMods, FieldFailedMods, FieldTime}
+	case KindBackupFailed:
+		return []string{FieldReason}
+	case KindNewGameBuild:
+		return []string{FieldBuild}
 	}
 	return nil
 }

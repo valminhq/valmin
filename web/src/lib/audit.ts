@@ -26,6 +26,7 @@ const LABELS: Record<string, string> = {
 	'instances.backups.delete': 'Backup deleted',
 	'instances.setups.save': 'Setup saved',
 	'instances.setups.restore': 'Setup restored',
+	'instances.setups.rollback': 'Rolled back to a setup',
 	'instances.setups.delete': 'Setup deleted',
 	'instances.worlds.import': 'World imported',
 	'instances.worlds.restore': 'World restored',
@@ -186,6 +187,12 @@ const clip = (raw: string, max = 120) => (raw.length > max ? `${raw.slice(0, max
  */
 type Phrase = (d: Detail, server: string, on: string) => string;
 
+/** The panel operations audited under panel.settings that read as a sentence. */
+const PANEL_OPERATIONS: Record<string, string> = {
+	deep_checks: 'ran the deep checks',
+	cache_prune: 'pruned the unused cache'
+};
+
 const PHRASES: Record<string, Phrase> = {
 	'orphans.remove': (d) =>
 		`removed the unrecoverable container ${text(d.container_name) || ''}`.trim(),
@@ -213,6 +220,8 @@ const PHRASES: Record<string, Phrase> = {
 	'instances.backups.delete': (_, __, on) => `deleted a backup${on}`,
 	'instances.setups.save': (d, _, on) => `saved setup ${text(d.name) || '(unnamed)'}${on}`,
 	'instances.setups.restore': (d, _, on) => `restored setup ${text(d.name) || '(unnamed)'}${on}`,
+	'instances.setups.rollback': (d, _, on) =>
+		`rolled back to setup ${text(d.name) || '(unnamed)'}${d.world ? ' and its world' : ''}${on}`,
 	'instances.setups.delete': (d, _, on) => `deleted setup ${text(d.name) || '(unnamed)'}${on}`,
 	'instances.worlds.import': (d, _, on) => `imported world ${text(d.world) || '(unnamed)'}${on}`,
 	'instances.worlds.restore': (d, _, on) => `restored world ${text(d.world) || '(unnamed)'}${on}`,
@@ -300,7 +309,7 @@ const PHRASES: Record<string, Phrase> = {
 	'auth.login.blocked': (d) =>
 		`blocked sign-ins to ${text(d.username) || 'an account'} after repeated failures`,
 	// Only operations with a sentence; the rest keep their raw detail, which names them.
-	'panel.settings': (d) => (d.operation === 'deep_checks' ? 'ran the deep checks' : '')
+	'panel.settings': (d) => PANEL_OPERATIONS[text(d.operation)] ?? ''
 };
 
 /**

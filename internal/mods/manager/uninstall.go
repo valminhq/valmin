@@ -31,10 +31,13 @@ type removedPackage struct {
 	manifest []installer.ManifestEntry
 }
 
-// runUninstall is the mod_uninstall Runner: save every file packageGroups gives it, remove
-// them, and delete the rows last, in the job's own Finish transaction. That order is what makes a
-// crash benign: the rows still describe the missing files and the backups can restore them.
-func runUninstall(db *store.DB, inst *store.Instance, payload UninstallPayload) jobs.Runner {
+// runUninstall is the mod_uninstall Runner for requestedBy: save the setup as a version, save
+// every file packageGroups gives it, remove them, and delete the rows last, in the job's own
+// Finish transaction. That order is what makes a crash benign: the rows still describe the
+// missing files and the backups can restore them.
+func runUninstall(
+	db *store.DB, version Version, inst *store.Instance, payload UninstallPayload, requestedBy string,
+) jobs.Runner {
 	return func(ctx context.Context, h *jobs.Handle) jobs.Outcome {
 		defer func() { _ = os.RemoveAll(payload.StagingDir) }()
 
@@ -42,6 +45,8 @@ func runUninstall(db *store.DB, inst *store.Instance, payload UninstallPayload) 
 		if err != nil {
 			return jobs.Failed(errcode.Internal, err)
 		}
+		saved := versionBefore(ctx, h, inst, version, 10, beforeName("removing", payload.FullNames),
+			requestedBy, payload.StagingDir)
 		backupDir := stagingBackupDir(payload.StagingDir)
 		configs := configPaths(payload.Configs)
 
@@ -73,7 +78,7 @@ func runUninstall(db *store.DB, inst *store.Instance, payload UninstallPayload) 
 		}
 
 		h.Progress(ctx, 100, "Removed "+packageCount(len(pkgs)))
-		return jobs.Outcome{
+		out := jobs.Outcome{
 			Status:   jobs.StatusSucceeded,
 			OnFinish: finishUninstall(inst.ID, payload.FullNames),
 			// A disabled package's parking directory holds nothing its row names once the row is
@@ -84,6 +89,7 @@ func runUninstall(db *store.DB, inst *store.Instance, payload UninstallPayload) 
 				}
 			},
 		}
+		return out.PrependFinish(saved)
 	}
 }
 

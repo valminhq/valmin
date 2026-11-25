@@ -220,9 +220,10 @@ var requires = map[jobs.Kind][]State{
 	jobs.KindRestore: {StateStopped},
 	// game_update requires `stopped` and never stops a server itself: it replaces server/,
 	// and a running container is holding those files open (12 §3.1, ADR-137).
-	jobs.KindGameUpdate:   {StateStopped},
-	jobs.KindClone:        {StateStopped},
-	jobs.KindSetupSave:    {StateStopped},
+	jobs.KindGameUpdate: {StateStopped},
+	jobs.KindClone:      {StateStopped},
+	// setup_save also reads a running server, whose mods change only while it is stopped.
+	jobs.KindSetupSave:    {StateStopped, StateRunning},
 	jobs.KindSetupRestore: {StateStopped},
 	jobs.KindWorldTool:    {StateStopped},
 	// chain starts from either settled state and steers the instance through its steps itself.
@@ -230,6 +231,8 @@ var requires = map[jobs.Kind][]State{
 	// update_test and update_apply steer the server through their steps like a chain does.
 	jobs.KindUpdateTest:  {StateStopped, StateRunning},
 	jobs.KindUpdateApply: {StateStopped, StateRunning},
+	// setup_rollback stops a running server before it restores anything.
+	jobs.KindSetupRollback: {StateStopped, StateRunning},
 }
 
 // AllowedFrom returns, sorted, the states kind may be claimed from — the `allowed_states`

@@ -131,6 +131,12 @@ export interface Instance {
 	auto_stop_minutes: number;
 	/** What happens to a running server whose log has gone quiet: nothing, an alert, or a restart. */
 	watchdog: WatchdogMode;
+	/** What a mod install, removal or update saves of the setup before it changes anything. */
+	setup_before_update: SetupBeforeUpdate;
+	/** How many automatic setups the server keeps. */
+	setup_versions_kept: number;
+	/** How many of those, newest first, keep their world backup. */
+	setup_worlds_kept: number;
 	remote_backup_enabled?: boolean;
 	remote_keep_cold?: number;
 	remote_keep_hot?: number;
@@ -296,6 +302,13 @@ export interface PatchInstance {
 	auto_stop_minutes?: number;
 	/** `restart` needs the right to restart the server as well as to change its settings. */
 	watchdog?: WatchdogMode;
+	/** Needs the right to manage saved setups. */
+	setup_before_update?: SetupBeforeUpdate;
+	/** `SETUP_KEPT_MIN` to `SETUP_KEPT_MAX`; needs the right to manage saved setups. Lowering it
+	 * removes the oldest automatic setups at once. */
+	setup_versions_kept?: number;
+	/** 0 to `SETUP_KEPT_MAX`; needs the right to manage saved setups. */
+	setup_worlds_kept?: number;
 	/** The branch the next game update installs. Sent with the password for a password branch;
 	 * a branch sent without one clears the stored password. */
 	game_branch?: string;
@@ -308,6 +321,14 @@ export const GAME_BACKUPS_MAX = 50;
 
 /** What the daemon does about a running server whose log has gone quiet. */
 export type WatchdogMode = 'off' | 'alert' | 'restart';
+
+/** What a mod change saves of the setup first: a full setup, a light one, or nothing beyond the
+ * world backup an update takes. */
+export type SetupBeforeUpdate = 'full' | 'light' | 'off';
+
+/** The range of automatic setups a server may keep. */
+export const SETUP_KEPT_MIN = 1;
+export const SETUP_KEPT_MAX = 100;
 
 /** The range of idle minutes auto-stop accepts when it is on. */
 export const AUTO_STOP_MIN = 5;

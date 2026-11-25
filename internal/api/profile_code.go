@@ -8,6 +8,7 @@ import (
 
 	apierr "github.com/valminhq/valmin/internal/api/errors"
 	"github.com/valminhq/valmin/internal/errcode"
+	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/instance/control"
 	"github.com/valminhq/valmin/internal/mods/profile"
 	modresolver "github.com/valminhq/valmin/internal/mods/resolver"
@@ -39,7 +40,7 @@ func (h *Instances) profileManifest(ctx context.Context, key string) (*instanceM
 	}
 	p, err := profile.Read(archive, profile.Limits{
 		ManifestBytes: maxProfileManifestBytes, Configs: maxManifestConfigs,
-		ConfigBytes: control.MaxConfigSize, TotalBytes: maxManifestBytes,
+		ConfigBytes: instance.MaxConfigSize, TotalBytes: maxManifestBytes,
 	})
 	if err != nil {
 		return nil, 0, codeInvalid("This profile could not be read: " + err.Error() + ".")

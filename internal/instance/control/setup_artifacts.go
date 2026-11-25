@@ -26,8 +26,28 @@ import (
 	"github.com/valminhq/valmin/internal/store"
 )
 
-// setupArtifacts captures and stages the package bytes referenced by saved setups.
-type setupArtifacts struct{ DataRoot string }
+// PackageArchives fetches registry archives for the packages a light setup does not keep.
+type PackageArchives interface {
+	// Archive returns the path of one package version's archive, cached or downloaded.
+	Archive(ctx context.Context, fullName, version string, src source.Source) (string, error)
+	// ArchiveAvailable reports whether Archive can return that archive.
+	ArchiveAvailable(ctx context.Context, fullName, version string, src source.Source) (bool, error)
+}
+
+// setupArtifacts captures and stages the package bytes referenced by saved setups. Archives is
+// nil where registry downloads are unavailable. Earlier holds the packages of the server's
+// newest setup by name, which a capture reuses for any package whose files have not changed.
+type setupArtifacts struct {
+	DataRoot string
+	Archives PackageArchives
+	Earlier  map[string]keptPackage
+}
+
+// keptPackage is a package an earlier setup kept: the state it was captured in and its payload.
+type keptPackage struct {
+	mod SetupMod
+	ref *store.SetupArtifactRef
+}
 
 // setupManifest decodes mod's file manifest and checks its name and every path in it.
 func setupManifest(mod *SetupMod) ([]installer.ManifestEntry, error) {
@@ -123,35 +143,45 @@ func (a *setupArtifacts) Save(
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("save setup interrupted: %w", err)
 		}
-		ref, err := a.retainSetupModArtifact(ctx, blobs, inst, &snap.Mods[i], staging, i)
+		ref, kept, err := a.retainSetupModArtifact(ctx, blobs, inst, &snap.Mods[i], staging, i, snap.Light)
 		if err != nil {
 			return nil, err
 		}
-		refs = append(refs, ref)
+		if kept {
+			refs = append(refs, ref)
+		}
 	}
 	return refs, nil
 }
 
+// retainSetupModArtifact stores the bytes of one installed package: the earlier setup's payload
+// when the files are unchanged since, else its cached registry archive when that replays to
+// exactly the installed files, else an archive of the installed files. For a light setup a
+// package its registry archive reproduces is not stored, and kept is false.
 func (a *setupArtifacts) retainSetupModArtifact(
 	ctx context.Context, blobs *setupblob.Store, inst *store.Instance, mod *SetupMod, staging string, index int,
-) (store.SetupArtifactRef, error) {
+	light bool,
+) (ref store.SetupArtifactRef, kept bool, err error) {
 	entries, err := setupManifest(mod)
 	if err != nil {
-		return store.SetupArtifactRef{}, err
+		return store.SetupArtifactRef{}, false, err
 	}
 	payload := setupPayloadEntries(entries)
 	if len(payload) > extract.MaxEntries {
-		return store.SetupArtifactRef{}, extract.ErrLimit
+		return store.SetupArtifactRef{}, false, extract.ErrLimit
 	}
 	cacheMatches, err := captureSetupModEntries(inst, mod, entries)
 	if err != nil {
-		return store.SetupArtifactRef{}, err
+		return store.SetupArtifactRef{}, false, err
 	}
 	raw, err := json.Marshal(entries)
 	if err != nil {
-		return store.SetupArtifactRef{}, fmt.Errorf("encode %s file manifest: %w", mod.FullName, err)
+		return store.SetupArtifactRef{}, false, fmt.Errorf("encode %s file manifest: %w", mod.FullName, err)
 	}
 	mod.FileManifest = string(raw)
+	if ref, ok := a.reusable(mod, light); ok {
+		return ref, true, nil
+	}
 	archive := ""
 	kind := "files"
 	if cacheMatches {
@@ -163,23 +193,40 @@ func (a *setupArtifacts) retainSetupModArtifact(
 			kind = "zip"
 		}
 	}
+	if kind == "zip" && light && a.canFetch(ctx, mod) {
+		return store.SetupArtifactRef{}, false, nil
+	}
 	if archive == "" {
 		archive, err = makeSetupFilesArchive(ctx, inst, mod.FullName, payload, staging, index)
 		if err != nil {
-			return store.SetupArtifactRef{}, err
+			return store.SetupArtifactRef{}, false, err
 		}
 	}
-	digest, err := blobs.PutFileContext(ctx, archive)
+	digest, err := blobs.PutLink(ctx, archive)
 	if err != nil {
-		return store.SetupArtifactRef{}, fmt.Errorf("retain package %s: %w", mod.FullName, err)
+		return store.SetupArtifactRef{}, false, fmt.Errorf("retain package %s: %w", mod.FullName, err)
 	}
 	if _, err := blobs.Verify(digest); err != nil {
-		return store.SetupArtifactRef{}, fmt.Errorf("verify package %s: %w", mod.FullName, err)
+		return store.SetupArtifactRef{}, false, fmt.Errorf("verify package %s: %w", mod.FullName, err)
 	}
 	return store.SetupArtifactRef{
 		FullName: mod.FullName, Source: mod.Source, Version: mod.Version,
 		Kind: kind, SHA256: digest,
-	}, nil
+	}, true, nil
+}
+
+// reusable returns the payload the earlier setup kept of mod when mod's freshly hashed files
+// match those it captured and that payload still verifies. A light capture never reuses one.
+func (a *setupArtifacts) reusable(mod *SetupMod, light bool) (store.SetupArtifactRef, bool) {
+	prev, found := a.Earlier[mod.FullName]
+	if light || !found || prev.ref == nil || prev.mod.Source != mod.Source ||
+		prev.mod.Version != mod.Version || prev.mod.FileManifest != mod.FileManifest {
+		return store.SetupArtifactRef{}, false
+	}
+	if _, err := setupblob.New(a.DataRoot).Verify(prev.ref.SHA256); err != nil {
+		return store.SetupArtifactRef{}, false
+	}
+	return *prev.ref, true
 }
 
 func captureSetupModEntries(inst *store.Instance, mod *SetupMod, entries []installer.ManifestEntry) (bool, error) {
@@ -305,10 +352,9 @@ func makeSetupFilesArchive(
 	return filepath.Join(staging, name), nil
 }
 
-func ValidateSetupRefs(mods []SetupMod, refs []store.SetupArtifactRef) error {
-	if len(mods) != len(refs) {
-		return errors.New("a package payload is missing")
-	}
+// ValidateSetupRefs checks refs hold one matching payload per package of snap, and none for a
+// package snap does not hold. A light setup may leave out the payload of any package.
+func ValidateSetupRefs(snap *SetupSnapshot, refs []store.SetupArtifactRef) error {
 	byName := make(map[string]store.SetupArtifactRef, len(refs))
 	for _, ref := range refs {
 		if _, exists := byName[ref.FullName]; exists {
@@ -316,12 +362,22 @@ func ValidateSetupRefs(mods []SetupMod, refs []store.SetupArtifactRef) error {
 		}
 		byName[ref.FullName] = ref
 	}
-	for _, mod := range mods {
+	matched := 0
+	for _, mod := range snap.Mods {
 		ref, ok := byName[mod.FullName]
-		if !ok || ref.Source != mod.Source || ref.Version != mod.Version ||
-			(ref.Kind != "zip" && ref.Kind != "files") {
+		if !ok && snap.Light {
+			continue
+		}
+		if !ok {
+			return errors.New("a package payload is missing")
+		}
+		if ref.Source != mod.Source || ref.Version != mod.Version || (ref.Kind != "zip" && ref.Kind != "files") {
 			return fmt.Errorf("payload metadata mismatch for %s", mod.FullName)
 		}
+		matched++
+	}
+	if matched != len(refs) {
+		return errors.New("a package payload names a package the setup does not hold")
 	}
 	return nil
 }
@@ -329,7 +385,7 @@ func ValidateSetupRefs(mods []SetupMod, refs []store.SetupArtifactRef) error {
 func (a *setupArtifacts) stage(
 	ctx context.Context, snap *SetupSnapshot, refs []store.SetupArtifactRef, staging string,
 ) error {
-	if err := ValidateSetupRefs(snap.Mods, refs); err != nil {
+	if err := ValidateSetupRefs(snap, refs); err != nil {
 		return err
 	}
 	byName := make(map[string]store.SetupArtifactRef, len(refs))
@@ -342,22 +398,30 @@ func (a *setupArtifacts) stage(
 			return fmt.Errorf("stage setup interrupted: %w", err)
 		}
 		mod := &snap.Mods[i]
-		ref := byName[mod.FullName]
-		if err := a.stageSetupMod(mod, &ref, staging, owned); err != nil {
+		var refp *store.SetupArtifactRef
+		if ref, ok := byName[mod.FullName]; ok {
+			refp = &ref
+		}
+		if err := a.stageSetupMod(ctx, mod, refp, staging, owned); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+// stageSetupMod replays one package's files into staging's target tree from its saved payload,
+// or, with ref nil, from its registry archive.
 func (a *setupArtifacts) stageSetupMod(
-	mod *SetupMod, ref *store.SetupArtifactRef, staging string, owned map[string]string,
+	ctx context.Context, mod *SetupMod, ref *store.SetupArtifactRef, staging string, owned map[string]string,
 ) error {
-	archive, err := setupblob.New(a.DataRoot).Verify(ref.SHA256)
-	if err != nil {
-		return fmt.Errorf("verify %s payload: %w", mod.FullName, err)
-	}
 	entries, err := setupManifest(mod)
+	if err != nil {
+		return err
+	}
+	if ref == nil && len(setupPayloadEntries(entries)) == 0 {
+		return nil
+	}
+	archive, err := a.archive(ctx, mod, ref)
 	if err != nil {
 		return err
 	}
@@ -384,6 +448,38 @@ func (a *setupArtifacts) stageSetupMod(
 		}
 	}
 	return nil
+}
+
+// canFetch reports whether a restore can fetch mod's registry archive through Archives. A light
+// setup keeps any package it cannot, so it is never harder to restore than a full one.
+func (a *setupArtifacts) canFetch(ctx context.Context, mod *SetupMod) bool {
+	src, ok := source.ByName(mod.Source)
+	if !ok || a.Archives == nil {
+		return false
+	}
+	available, err := a.Archives.ArchiveAvailable(ctx, mod.FullName, mod.Version, src)
+	return err == nil && available
+}
+
+// archive returns the path of one package's archive: its verified saved payload, or with ref
+// nil its registry archive.
+func (a *setupArtifacts) archive(ctx context.Context, mod *SetupMod, ref *store.SetupArtifactRef) (string, error) {
+	if ref != nil {
+		path, err := setupblob.New(a.DataRoot).Verify(ref.SHA256)
+		if err != nil {
+			return "", fmt.Errorf("verify %s payload: %w", mod.FullName, err)
+		}
+		return path, nil
+	}
+	src, ok := source.ByName(mod.Source)
+	if !ok || a.Archives == nil {
+		return "", fmt.Errorf("%s %s cannot be downloaded from its registry", mod.FullName, mod.Version)
+	}
+	path, err := a.Archives.Archive(ctx, mod.FullName, mod.Version, src)
+	if err != nil {
+		return "", fmt.Errorf("fetch %s %s: %w", mod.FullName, mod.Version, err)
+	}
+	return path, nil
 }
 
 func partitionSetupEntries(

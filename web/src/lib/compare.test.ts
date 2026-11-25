@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { ManifestLaunch } from '#lib/api/manifest.js';
 import {
+	changeSummary,
 	compareConfigs,
 	compareMods,
 	compareSettings,
+	compareSetupConfigs,
 	modChanges,
 	pair,
 	type ModState,
@@ -309,5 +311,48 @@ describe('modChanges', () => {
 
 	it.each(cases)('$name', ({ row, want }) => {
 		expect(modChanges(row, 'Live', 'Test')).toEqual(want);
+	});
+});
+
+describe('compareSetupConfigs', () => {
+	it('compares files by hash and keeps files only one side has', () => {
+		const file = (name: string, sha256: string) => ({ file: name, sha256, size_bytes: 1 });
+		const rows = compareSetupConfigs(
+			[file('EWD/a.yaml', '1'), file('same.cfg', '2'), file('EWD/new.yaml', '3')],
+			[file('EWD/a.yaml', '9'), file('same.cfg', '2'), file('old.json', '4')]
+		);
+		expect(Object.fromEntries(rows.map((row) => [row.key, row.change]))).toEqual({
+			'EWD/a.yaml': 'changed',
+			'EWD/new.yaml': 'only-a',
+			'old.json': 'only-b',
+			'same.cfg': 'same'
+		});
+	});
+});
+
+describe('changeSummary', () => {
+	it('names version moves, added, removed, disabled and enabled packages', () => {
+		expect(
+			changeSummary(
+				[mod('A-One', '1.0.0'), mod('B-Two'), mod('C-Off', '1.0.0', true)],
+				[mod('A-One', '1.1.0'), mod('C-Off', '1.0.0', false)]
+			)
+		).toBe('A-One 1.0.0 → 1.1.0, removed B-Two, disabled C-Off');
+		expect(changeSummary([], [mod('D-New')])).toBe('added D-New');
+		expect(changeSummary([mod('E')], [mod('E', '1.0.0', true, 'hexium')])).toBe(
+			'E from another registry'
+		);
+	});
+
+	it('counts the packages past the first three and adds changed config files', () => {
+		const before = [mod('A'), mod('B'), mod('C'), mod('D')];
+		const after = before.map((m) => ({ ...m, version: '2.0.0' }));
+		expect(changeSummary(before, after, true)).toBe(
+			'A 1.0.0 → 2.0.0, B 1.0.0 → 2.0.0, C 1.0.0 → 2.0.0, 1 more, config files changed'
+		);
+	});
+
+	it('is empty when nothing changed', () => {
+		expect(changeSummary([mod('A')], [mod('A')])).toBe('');
 	});
 });

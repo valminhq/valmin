@@ -83,7 +83,7 @@ func (s *Supervisor) Recover(ctx context.Context) error {
 	}
 	if referenced, err := s.DB.ReferencedSetupArtifacts(ctx); err != nil {
 		slog.WarnContext(ctx, "list setup artifacts for cleanup", slog.Any("error", err))
-	} else if err := setupblob.New(s.DataRoot).GC(referenced); err != nil {
+	} else if _, err := setupblob.New(s.DataRoot).GC(referenced, time.Now()); err != nil {
 		slog.WarnContext(ctx, "clean up unused setup artifacts", slog.Any("error", err))
 	}
 	if err := s.Reconcile(ctx); err != nil {
@@ -243,7 +243,7 @@ func (s *Supervisor) sweepStaging(ctx context.Context, j *store.Job) {
 	case jobs.KindBackup.String():
 		recovery.sweepBackupPart(ctx, j)
 	case jobs.KindStop.String(), jobs.KindRestart.String():
-		recovery.sweepStopArchive(ctx, j)
+		recovery.sweepPlannedArchive(ctx, j)
 	case jobs.KindRestore.String():
 		recovery.sweepRestoreSwap(ctx, j)
 	case jobs.KindGameUpdate.String():

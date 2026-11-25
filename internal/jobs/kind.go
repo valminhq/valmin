@@ -113,9 +113,16 @@ var (
 	// restarts the server if it was running and deletes the copy. It holds a chain lock and is
 	// never resumed.
 	KindUpdateApply = Kind{"update_apply"}
+	// KindSetupRollback puts a server back on a saved setup: it stops the server if it runs,
+	// restores the setup and, if asked, its linked world, and starts the server again if asked,
+	// each as its own job. It holds a chain lock, is never cancellable and never resumed.
+	KindSetupRollback = Kind{"setup_rollback"}
 	// KindExport writes an installation export. It is global, holds every instance's lock so
 	// no instance job changes the data it copies, and is never resumed.
 	KindExport = Kind{"export"}
+	// KindCachePrune removes the cached mod archives, game builds and setup files no server or
+	// saved setup uses. It is global, holds every instance's lock, and is never resumed.
+	KindCachePrune = Kind{"cache_prune"}
 )
 
 // resumeIntentHonoured is ADR-032 / 12 §9.3: a resume intent is honoured only for kinds whose
@@ -135,7 +142,7 @@ var needsDiskRoom = map[Kind]bool{
 	KindProvision: true, KindWorldImport: true, KindModInstall: true, KindBackup: true,
 	KindRestore: true, KindGameUpdate: true, KindClone: true, KindSetupSave: true,
 	KindSetupRestore: true, KindWorldTool: true, KindUpdateTest: true, KindUpdateApply: true,
-	KindExport: true,
+	KindExport: true, KindSetupRollback: true,
 
 	KindStart: false, KindStop: false, KindRestart: false, KindDelete: false,
 	KindThunderstoreSync: false, KindModUninstall: false, KindModToggle: false,
@@ -143,6 +150,7 @@ var needsDiskRoom = map[Kind]bool{
 	KindWorldDelete: false, KindSetupDelete: false, KindKeyRotate: false,
 	KindWebhookDeliver: false, KindAlertScan: false, KindDiagnose: false, KindChain: false,
 	KindRemoteCopy: false, KindRemoteTest: false, KindRemotePrune: false, KindRemoteCreate: false,
+	KindCachePrune: false,
 }
 
 // NeedsDiskRoom reports whether a job of this kind is refused below the free-space floor.
@@ -157,7 +165,7 @@ var allKinds = []Kind{
 	KindWorldDelete, KindSetupSave, KindSetupRestore, KindSetupDelete,
 	KindKeyRotate, KindWebhookDeliver, KindAlertScan, KindDiagnose,
 	KindRemoteCopy, KindRemoteTest, KindRemotePrune, KindRemoteCreate, KindWorldTool, KindChain,
-	KindUpdateTest, KindUpdateApply, KindExport,
+	KindUpdateTest, KindUpdateApply, KindExport, KindSetupRollback, KindCachePrune,
 }
 
 // Kinds returns every kind this build knows, for tables that need a row per kind.

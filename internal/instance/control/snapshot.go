@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -21,12 +22,26 @@ import (
 type Worlds struct {
 	DataRoot string
 	Runtime  runtime.Runtime
+	// DB reads the installed mods each archive records.
+	DB *store.DB
 }
 
 // Snapshot archives an instance's worlds/ under trigger and returns the OnFinish that
 // records it, so the catalogue row lands in the job's own Finish transaction from data already
 // in memory (12 §6) — and never before the archive file itself exists. A nil callback means
-// there was nothing to archive.
+// there was nothing to archive. snapshotRow says what it guarantees.
+func (h *Worlds) Snapshot(
+	ctx context.Context, inst *store.Instance, trigger string,
+) (func(context.Context, *sql.Tx) error, error) {
+	row, err := h.snapshotRow(ctx, inst, trigger)
+	if err != nil || row == nil {
+		return nil, err
+	}
+	return recordSnapshot(row), nil
+}
+
+// snapshotRow archives an instance's worlds/ under trigger and returns the catalogue row to
+// record, nil when there was nothing to archive.
 //
 // It returns without error only once Docker has shown the server down, after the copy when
 // there was one, so a caller that writes worlds/ straight after it writes under a stopped
@@ -36,9 +51,7 @@ type Worlds struct {
 // ones about to be replaced, and a world worth restoring away from is often one that would
 // fail verification. The archive is still recorded consistent, which is 02 §4.4's claim about
 // a stopped server rather than about the bytes.
-func (h *Worlds) Snapshot(
-	ctx context.Context, inst *store.Instance, trigger string,
-) (func(context.Context, *sql.Tx) error, error) {
+func (h *Worlds) snapshotRow(ctx context.Context, inst *store.Instance, trigger string) (*store.Backup, error) {
 	empty, err := holdsNoFiles(instance.WorldsDir(inst.DataDir))
 	if err != nil {
 		return nil, fmt.Errorf("inspect the worlds of %s: %w", inst.ID, err)
@@ -55,20 +68,42 @@ func (h *Worlds) Snapshot(
 	if err != nil {
 		return nil, err
 	}
-
-	row := &store.Backup{
+	return &store.Backup{
 		ID: backupID, InstanceID: inst.ID, Path: res.Path,
 		SizeBytes: res.SizeBytes, SHA256: res.SHA256, WorldName: inst.WorldName,
 		Trigger: trigger,
 		// ArchiveStoppedWorlds saw the server down on both sides of the copy.
-		Consistent: true,
+		Consistent:      true,
+		ModsFingerprint: modsFingerprintOf(ctx, h.DB, inst),
+	}, nil
+}
+
+// modsFingerprintOf is the fingerprint an archive of inst's world records: the mods the world was
+// last played with, or the installed mods when that is unknown. It is empty when neither can be
+// read: an archive is never refused for it.
+func modsFingerprintOf(ctx context.Context, db *store.DB, inst *store.Instance) string {
+	fingerprint, err := db.WorldModsFingerprint(ctx, inst.ID)
+	if err == nil && fingerprint == "" {
+		fingerprint, err = (&SetupState{DB: db}).ModsFingerprint(ctx, inst.ID)
 	}
+	if err != nil {
+		slog.WarnContext(ctx, "the archive records no mods: could not read them",
+			slog.String("instance_id", inst.ID), slog.Any("error", err))
+		return ""
+	}
+	return fingerprint
+}
+
+// recordSnapshot is the finish step that catalogues a snapshot row. The row's mods become those
+// the world was last played with when those are unknown, so archives taken after the change that
+// follows the snapshot still record the mods the world was played with.
+func recordSnapshot(row *store.Backup) func(context.Context, *sql.Tx) error {
 	return func(ctx context.Context, tx *sql.Tx) error {
 		if err := store.TxCreateBackup(ctx, tx, row); err != nil {
-			return fmt.Errorf("record the %s backup: %w", trigger, err)
+			return fmt.Errorf("record the %s backup: %w", row.Trigger, err)
 		}
-		return nil
-	}, nil
+		return store.TxSetUnknownWorldMods(ctx, tx, row.InstanceID, row.ModsFingerprint)
+	}
 }
 
 // holdsNoFiles reports whether dir is missing or has no file anywhere below it, which an

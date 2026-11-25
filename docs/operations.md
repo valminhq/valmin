@@ -16,9 +16,13 @@ Open **Backups** on a server. Two buttons make a backup now:
 Each archive in the history shows when it was made, the world, whether it is
 **Consistent** or **Best-effort**, why it was made (manual, scheduled, pre update,
 pre restore or pre import), and its size. An archive that retention will remove at the next
-prune is marked **Pending deletion**. Below the archive size is the size of the world inside
-it, and an archive whose world needs a look carries an **Attention required** box (see
-[World check](#world-check)). **Download** saves an archive to your computer,
+prune is marked **Pending deletion**, and one a saved setup links is marked **Kept for setup**,
+with the setup's name for those who may manage setups; it cannot be deleted until that setup
+is. A line under the reason says which mods the archive's world was played with: **Mods: same
+as now**, **Mods: as in** a saved setup holding them (for those who may see setups), or **Mods:
+differ from now**; an archive from before Valmin recorded mods has none.
+Below the archive size is the size of the world inside it, and an archive whose world needs
+a look carries an **Attention required** box (see [World check](#world-check)). **Download** saves an archive to your computer,
 and **Delete** removes it after you type the server's name. With
 [off-host copies](remote-backups.md) configured, **Upload now** sends an existing
 archive to the remote destination. Downloading needs operator access; deleting needs
@@ -39,7 +43,9 @@ reach the rest of what retention has kept.
 many **best-effort** backups to keep. The two counts are separate, so a run of
 best-effort copies never pushes out your consistent ones. A count of `0` keeps all
 backups of that type. Snapshots taken before a restore, import, or update have their own
-limit, equal to the consistent count. Older backups are deleted after the next backup or
+limit, equal to the consistent count. A snapshot an automatic setup links (see
+[Recover a saved setup](#recover-a-saved-setup)) is kept outside these counts until the setup
+is removed. Older backups are deleted after the next backup or
 scheduled cleanup; the backup's progress line says how many retention removed, and its log
 names them. Before you take a backup by hand, the page says what retention would then
 remove, and **Stop and back up** repeats it in its confirmation. A restore, import or reset
@@ -132,6 +138,12 @@ To restore, stop the server, select an archive, and confirm the world name. Rest
 replaces the server's entire `worlds_local` directory and leaves the server stopped.
 Start it after checking the job result.
 
+When the archive's world was played with other mods than are installed, the confirmation warns
+that the world would start with mods it was not played with. If a saved setup holds the archive's
+mods and you may see setups, **Roll back to** that setup **with this world instead** opens it on
+**Saved setups** with the archive chosen under **World**, so the mods and the world go back
+together.
+
 To put a world from one server's backup on another server, or from a deleted server's
 leftover archive, use [import a world](usage.md#import-a-world) on the target instead.
 A restore always replaces the same server's `worlds_local`; an import installs one world
@@ -156,33 +168,108 @@ overview shows **This server needs a check** until you choose **Check this serve
 
 ## Recover a saved setup
 
-On **Saved setups**, stop the server and save a named setup before changing its mods
-or settings. Valmin stores the installed package files along with mod versions,
-registries, locks, enabled states, client tags, launch and backup settings, and
-the `.cfg` files directly in `BepInEx/config`. Config files in subfolders and YAML,
-JSON and text files are not saved and a restore leaves them as they are; the save card
-lists them. Each config file the restore replaces or removes is kept in its history first.
-Restoring a setup with an older version of a mod leaves the YAML or JSON files a later update
-of that mod wrote; load the older version from the file's history if the mod needs it. A setup
-saved before mods recorded the config files they ship lets the next update of those mods keep
-such files as they are; later updates follow the mod again. The saved package files
-support recovery when a registry or download cache is unavailable. If a required
-package cannot be captured, the save job fails without publishing the setup.
+On **Saved setups**, save a named setup before changing a server's mods or settings, while it
+runs or once it is stopped. Valmin stores the installed package files along with mod versions,
+registries, locks, enabled states, client tags, launch and backup settings, and every
+file the config editor lists in `BepInEx/config` and its subfolders, YAML, JSON and text
+files included, apart from the RCON plugin's file, which holds the console password. A
+file the editor leaves out for its limits is not saved, a restore leaves it as it is, and
+the setup says so. Each config file is stored once however many setups hold the same
+bytes. The saved package files support recovery when a registry or download cache is
+unavailable. If a required package cannot be captured, the save job fails without
+publishing the setup.
 
-You can link a consistent backup from the same server. Linked backups do not count
-toward retention and cannot be deleted until all setups that link to them are
-deleted. A linked backup is a reference to an existing world archive, not a second
-copy of it.
+A package kept from the download cache shares the cached file's disk space rather than
+copying it, while both are on the same file system, and every setup holding the same
+package version shares one copy. Turn off **Keep package files** to save a **Light** setup
+instead: it keeps only mods whose installed files differ from their registry download, or
+whose registry is turned off, and fetches the rest on restore, from the download cache or else from the registry. A light
+setup takes almost no space, but restoring it fails once the cache has lost a version and
+the registry no longer lists it; the restore preview reports such a mod. Keep package
+files for a setup you must be able to restore offline.
 
-Before restoring, compare the setup with the current server and review the preview.
-Stop the server, then start the restore. The preview expires when the server state
-changes; reload it before retrying. Valmin verifies the saved packages before
-changing files and rolls back the setup if installation fails. The server remains
-stopped. Check the job result before starting it.
+A restore makes the config files match the setup: it writes the saved ones and removes
+those the setup does not hold. Each file it replaces or removes is kept in that file's
+history first. A setup saved before setups held every config file is marked
+**Top-level .cfg only**; restoring it changes only the `.cfg` files directly in
+`BepInEx/config` and leaves the rest alone, so load an older version of a YAML or JSON file
+from its history if an older mod needs it. A setup saved before mods recorded the config
+files they ship lets the next update of those mods keep such files as they are; later
+updates follow the mod again.
 
-The restore does not change the game build, selected world, server password, or
-world files. To recover a world, restore the linked archive separately on **Backups**.
-World restoration follows the [world restore procedure](#back-up-or-restore-a-world).
+Before it changes anything, a restore saves the server's current setup as an
+**Automatic** one named **Before restoring** and the setup's name, linked to the pre-update
+snapshot the restore takes of the world when it changes mods. Restore that setup to undo the
+restore.
+
+Every mod change saves one the same way, named after the change and the person who made it.
+An install or a removal saves the setup alone. An update first takes its pre-update snapshot of
+the world and links the setup to it (see [Undo a mod update](usage.md#undo-a-mod-update)). An
+update keeps both even when it fails. Disabling or enabling a mod saves nothing, and neither do
+the installs that create a server.
+**Before mod changes** on **Saved setups** turns this off, or saves light setups; the
+`setup_before_update` instance field holds the choice (`full`, `light` or `off`). Copies made
+to test an update never save one. No automatic setup is saved when the server's newest setup
+already holds the same game build, settings, mod files and configuration files, and is not light
+where the automatic one would be full, as long as the change takes no world snapshot or the
+newest setup is waiting for one and is linked to it. A capture reuses the package copy of the
+newest setup for every mod whose files are unchanged since, as long as that copy still verifies.
+
+Each server keeps its newest ten automatic setups, from restores and changes together, and the
+newest three of those that link a world snapshot keep it. Both numbers are set under **Before
+mod changes** (`setup_versions_kept`, 1 to 100, and `setup_worlds_kept`, 0 to 100). Lowering one
+applies when saved. Delete an automatic setup like any other setup. A pruned automatic setup, or
+one past the world count, releases its snapshot to normal retention. If the current setup cannot
+be saved, for example because an installed mod's files are missing, the restore or change goes
+ahead and its job log says so.
+
+Every backup records the managed mods its world was last played with: each mod's name, version
+and enabled state, as installed when the server last started, or as recorded by the backup a
+world restore brought back. After a world import, a restore of a backup that recorded no mods, or
+deleting the selected world, the installed mods count as the world's, as they do when Valmin
+starts for a server whose world's mods were never recorded. A clone takes its source's. A rollback to a setup can restore any backup on disk taken with exactly the
+setup's mods, so a server that ran for weeks on one mod set can go back to its newest world
+rather than the one kept with the setup. Only the kept backup is outside retention; the other
+matching backups are removed by retention like any other, so set retention to keep as far back
+as you may want to go. Backups taken before backups recorded their mods match only the setup that
+keeps them.
+
+A setup saved with **The backup the next mod update takes**, the default, waits for the
+pre-update snapshot the next mod update or setup restore takes, and is linked to it. That
+snapshot is the world just before the change, with exactly the setup's mods installed. A change
+to the installed mods that takes no snapshot first (installing a new mod, removing one, or
+disabling or enabling one, even back to the same set) ends the wait, and so does an update on a
+server with no world yet: the setup then keeps no backup. A restore that changes only config
+files leaves it waiting. The update's job log names each setup it links.
+
+You can also link a consistent backup from the same server, or, on a stopped server, choose
+**Back up the world now** to take one while the setup is saved and link it. That backup is consistent, since the server is
+stopped, and is checked like **Stop and back up**: its world size and any **Attention required**
+findings show on **Backups**. If the archive fails its check, or the data root is below its
+free-space floor, the save fails and keeps nothing; save again without the backup if you need
+the setup anyway. A server whose world was never saved gets no backup, and the save job's log
+says so. Linked backups do not count toward retention and cannot be
+deleted until all setups that link to them are deleted, so each one adds to disk use; the setup
+shows its size. A linked backup is a reference to a world archive, not a second copy of it.
+
+Before rolling back, compare the setup with the current server and review the preview. A
+rollback is one job, `setup_rollback`, that runs each of these as its own job: stop the server
+if it runs, restore the setup, restore the setup's linked world if asked, and start the server
+if asked. Each step runs only after the one before succeeded, and a stop that was done stays
+done, so a failed setup restore leaves the server stopped with its files as they were. A failed
+world restore leaves the setup restored and the server in `error`, showing **This server needs a
+check**. A step that finds another job holding a lock it needs, such as a setup being saved on
+another server, waits for it. A rollback on a stopped server checks the preview's fingerprint, which expires when the
+server state changes; reload it before retrying. Valmin verifies the saved packages before
+changing files and rolls back the setup if installation fails.
+
+A member who may manage mods can roll back too, restoring mods and config files only, and an
+administrator can do the same by turning off **Also restore launch and backup settings**. A
+setup restore does not change the game build, selected world, or server password. The world
+changes only if the rollback restores the linked archive, following the
+[world restore procedure](#back-up-or-restore-a-world). That archives the current world once
+more as its own pre-restore snapshot, in addition to the snapshot taken before the mods change,
+so a rollback with its world can add two archives.
 
 ## Schedule maintenance
 
@@ -347,8 +434,9 @@ server as running, and players cannot join. To be told, or to have Valmin restar
 **Maintenance** and choose under **Watchdog**:
 
 - **Do nothing**, the default.
-- **Alert me** sends one **Server stopped unexpectedly** notification when the server stops
-  responding, and leaves it running.
+- **Alert me** sends one **Server stopped unexpectedly** notification, to the channels of a
+  [Stopped unexpectedly rule](usage.md#add-a-rule), when the server stops responding, and
+  leaves it running.
 - **Alert me and restart the server** sends the same notification and restarts the server. It
   needs the right to restart the server as well as to change its settings, and Valmin restarts a
   server this way at most once an hour. A server that hangs again inside the hour is reported at
@@ -458,7 +546,7 @@ mods. With the default configuration, the data root contains:
 | `cache/steam/896660/`    | Downloaded game builds, one directory per build of any branch.   |
 | `cache/<registry>/`      | Downloaded mod packages, one directory per registry.             |
 | `cache/catalogue.db`     | The registries' mod catalogue. A cache; it needs no backup.      |
-| `setups/blobs/`          | Package files retained for saved setups.                         |
+| `setups/blobs/`          | Package and config files retained for saved setups.              |
 | `exports/`               | The latest [installation export](#move-to-a-new-host).           |
 
 To move to another host, an [installation export](#move-to-a-new-host) is smaller and
@@ -475,6 +563,39 @@ servers through the panel.
 Game containers run alongside Compose services. Stopping the Compose stack does
 not stop those game containers. On recovery, restore the data with UID/GID
 `10000:10000`, start the panel, and start the servers you want running.
+
+## Reclaim cache space
+
+Valmin never deletes a downloaded game build or mod archive on its own, so `cache/` grows
+with every game update and every mod version a server has ever installed. Open **Cache**
+in the header menu (it needs `panel.settings`) to see what is cached, what uses each item
+and how much a prune would free, then select **Prune cache**.
+
+A prune removes:
+
+- a mod archive no server has installed and no saved setup holds, light or not, in any version;
+- a game build no server runs, has recorded, or was installing when an update was
+  interrupted. A build that only saved setups name is removed, since restoring a setup never
+  reinstalls a build;
+- a saved setup file no saved setup holds any more, such as one left by a deleted setup;
+- an unfinished download.
+
+It keeps anything written or used in the last hour, so a server being created keeps the
+game build it is copying, and leaves `cache/catalogue.db` alone. The prune holds every
+server's lock and takes seconds; jobs on servers, sequences, saved-setup jobs and exports
+are refused while it runs, and it is refused while any of them runs, so it never cuts a
+sequence between two steps. While a game build is downloading, it leaves the game builds for
+the next prune.
+
+A saved setup that keeps package files shares the disk space of the cached mod archive, so
+removing one of the two frees nothing while the other remains; **Cache** counts such
+bytes once. On btrfs or XFS, a server's game files share blocks with the build they were
+copied from, so freeing a build can free less than its listed size.
+
+A pruned item is downloaded again when it is needed, which costs bandwidth and, for a game
+build, a few minutes. A mod version its registry no longer lists cannot be downloaded again
+once its archive is gone: save a setup that keeps package files for any server you may need
+to rebuild offline.
 
 ## Move to a new host
 
@@ -700,7 +821,8 @@ writes no entry.
 The panel, Caddy, Docker proxy, and managed game containers use `unless-stopped`.
 Docker restarts them after a reboot if they were left running. Deliberately stopped
 containers stay stopped. When a game server comes back this way, Valmin sends a
-"Server stopped unexpectedly" notification once it is running again. See [Docker restart policies](https://docs.docker.com/engine/containers/start-containers-automatically/).
+"Server stopped unexpectedly" notification once it is running again, to the channels of a
+[Stopped unexpectedly rule](usage.md#add-a-rule). See [Docker restart policies](https://docs.docker.com/engine/containers/start-containers-automatically/).
 
 Docker itself must start at boot. On a systemd host:
 

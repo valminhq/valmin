@@ -842,9 +842,9 @@
 									<p class="text-sm font-medium">Share as a template</p>
 									<p class="text-sm text-muted-foreground">
 										The template file holds the launch settings, the mods at their installed
-										versions and the plugin config files at the top of the config folder. It carries
-										no password and no world, but a mod's config can hold a key or a webhook — read
-										it before you share it.
+										versions and, whole, every config file changed in this panel. It carries no
+										password and no world, but a mod's config can hold a key or a webhook — read it
+										before you share it.
 									</p>
 								</div>
 								<Button variant="outline" size="sm" disabled={exporting} onclick={downloadManifest}>
@@ -856,7 +856,8 @@
 							<div class="grid gap-2">
 								<p class="text-sm text-muted-foreground">
 									A template code is a short text to paste under New from template on another panel.
-									It holds the enabled mods and the settings changed in this panel.
+									It holds the enabled mods and the settings changed in this panel in the .cfg files
+									at the top of the config folder. Other config files go only in the template file.
 								</p>
 								<Button
 									variant="outline"

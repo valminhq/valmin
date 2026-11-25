@@ -39,6 +39,23 @@ type backupView struct {
 	WorldBytes *int64 `json:"world_bytes"`
 	// WorldAttention is what the world check asks the operator to look at, empty when nothing.
 	WorldAttention []backup.Attention `json:"world_attention"`
+	// KeptForSetup is true while a saved setup links the archive, which keeps it out of
+	// retention and blocks deleting it.
+	KeptForSetup bool `json:"kept_for_setup"`
+	// LinkedSetups names those setups, for a caller who may manage setups; omitted otherwise.
+	LinkedSetups []setupLinkView `json:"linked_setups,omitempty"`
+	// ModsMatchCurrent reports whether the archive was taken under the mods installed now, null
+	// when it recorded no mods.
+	ModsMatchCurrent *bool `json:"mods_match_current"`
+	// MatchingSetups names the saved setups holding the mods the archive was taken under, newest
+	// first, for a caller who may see setups; omitted otherwise.
+	MatchingSetups []setupLinkView `json:"matching_setups,omitempty"`
+}
+
+// setupLinkView names one saved setup that links a backup.
+type setupLinkView struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // backupRemoval names one archive a coming backup would remove.
@@ -120,6 +137,10 @@ func (h *Instances) listBackups(w http.ResponseWriter, r *http.Request) {
 		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
 		return
 	}
+	if err := h.markSetupLinks(r.Context(), u, inst.ID, list.Items); err != nil {
+		apierr.Write(w, r, apierr.New(errcode.Internal).Wrap(err))
+		return
+	}
 	JSON(w, r, http.StatusOK, list)
 }
 
@@ -136,10 +157,18 @@ func (h *Instances) backupList(
 	for _, a := range retention.Now {
 		doomed[a.ID] = true
 	}
+	current, err := h.ctl.SetupState.ModsFingerprint(ctx, inst.ID)
+	if err != nil {
+		return nil, fmt.Errorf("mods of instance %s: %w", inst.ID, err)
+	}
 	views := make([]backupView, 0, len(rows))
 	for i := range rows {
 		v := toBackupView(&rows[i])
 		v.PrunesNext = doomed[v.ID]
+		if rows[i].ModsFingerprint != "" {
+			match := rows[i].ModsFingerprint == current
+			v.ModsMatchCurrent = &match
+		}
 		views = append(views, v)
 	}
 	consistent, err := h.removals(ctx, inst.ID, retention.AfterConsistent)
@@ -155,6 +184,42 @@ func (h *Instances) backupList(
 		RemovedByNextConsistent: consistent,
 		RemovedByNextBestEffort: bestEffort,
 	}, nil
+}
+
+// markSetupLinks marks each archive in views that a saved setup links and, for a caller who may
+// see setups, names those setups and the ones holding the mods it was taken under.
+func (h *Instances) markSetupLinks(ctx context.Context, u *store.User, instanceID string, views []backupView) error {
+	links, err := h.DB.BackupSetupLinks(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	for i := range views {
+		views[i].KeptForSetup = len(links[views[i].ID]) > 0
+	}
+	if !h.canSeeSetups(ctx, u, instanceID) {
+		return nil
+	}
+	matches, err := h.DB.BackupSetupMatches(ctx, instanceID)
+	if err != nil {
+		return err
+	}
+	for i := range views {
+		views[i].LinkedSetups = setupLinkViews(links[views[i].ID])
+		views[i].MatchingSetups = setupLinkViews(matches[views[i].ID])
+	}
+	return nil
+}
+
+// setupLinkViews renders setups as setupLinkViews, nil for none.
+func setupLinkViews(setups []store.SetupLink) []setupLinkView {
+	if len(setups) == 0 {
+		return nil
+	}
+	out := make([]setupLinkView, 0, len(setups))
+	for _, s := range setups {
+		out = append(out, setupLinkView{ID: s.ID, Name: s.Name})
+	}
+	return out
 }
 
 // removals names each archive retention would remove, with the time it was taken, newest

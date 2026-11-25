@@ -19,7 +19,34 @@ const (
 	restoreSwapped        = "swapped"
 )
 
-type Restorer struct{ Worlds *Worlds }
+// Restorer replaces an instance's world with a backup archive.
+type Restorer struct {
+	Worlds *Worlds
+	Engine *jobs.Engine
+}
+
+// Submit queues the restore of backup b over inst's world for requestedBy, claiming inst from
+// stopped into restoring. audit is the request's entry, nil for a restore another job runs.
+func (r *Restorer) Submit(
+	ctx context.Context, inst *store.Instance, b *store.Backup, requestedBy string, audit *store.AuditEntry,
+) (*store.Job, error) {
+	id := inst.ID
+	return r.Engine.Submit(ctx, &jobs.Spec{
+		Kind: jobs.KindRestore, LockKey: jobs.InstanceLockKey(id),
+		InstanceID: &id, InstanceName: inst.Name, RequestedBy: requestedBy,
+		Payload: RestorePayload{BackupID: b.ID}, Audit: audit,
+		OnClaim: func(ctx context.Context, tx *sql.Tx) error {
+			ok, err := instance.SetStateTx(ctx, tx, id, instance.StateStopped, instance.StateRestoring)
+			if err != nil {
+				return fmt.Errorf("claim restore for instance %s: %w", id, err)
+			}
+			if !ok {
+				return fmt.Errorf("instance %s is no longer stopped", id)
+			}
+			return nil
+		},
+	}, r.Run(inst, b))
+}
 
 // Run is the restore job: prove the archive, snapshot what is there, stage the archive
 // beside the world, swap it in.
@@ -106,7 +133,7 @@ func (r *Restorer) Run(inst *store.Instance, b *store.Backup) jobs.Runner {
 		jh.Progress(ctx, 100, "world restored")
 		return jobs.Outcome{
 			Status:   jobs.StatusSucceeded,
-			OnFinish: chainFinish(snapshot, finishRestore(inst.ID)),
+			OnFinish: chainFinish(snapshot, finishRestore(inst.ID, r.restoredWorldMods(ctx, inst, b))),
 		}
 	}
 }
@@ -136,10 +163,24 @@ func stageRestore(b *store.Backup, staged string) error {
 	return nil
 }
 
-// finishRestore is the successful exit: `restoring` back to `stopped`. The server is not
-// started, on this path or any other — the operator restarts it once they have looked at the
+// restoredWorldMods is the fingerprint of the mods b's world was played with, or of inst's
+// installed mods, which it will be played with, when b recorded none.
+func (r *Restorer) restoredWorldMods(ctx context.Context, inst *store.Instance, b *store.Backup) string {
+	if b.ModsFingerprint != "" {
+		return b.ModsFingerprint
+	}
+	fingerprint, err := (&SetupState{DB: r.Worlds.DB}).ModsFingerprint(ctx, inst.ID)
+	if err != nil {
+		return ""
+	}
+	return fingerprint
+}
+
+// finishRestore is the successful exit: `restoring` back to `stopped`, recording worldMods, the
+// restored archive's mods fingerprint, as the mods the world was last played with. The server is
+// not started, on this path or any other — the operator restarts it once they have looked at the
 // world that came back (12 §9.3).
-func finishRestore(instanceID string) func(context.Context, *sql.Tx) error {
+func finishRestore(instanceID, worldMods string) func(context.Context, *sql.Tx) error {
 	return func(ctx context.Context, tx *sql.Tx) error {
 		ok, err := instance.SetStateTx(ctx, tx, instanceID, instance.StateRestoring, instance.StateStopped)
 		if err != nil {
@@ -148,7 +189,7 @@ func finishRestore(instanceID string) func(context.Context, *sql.Tx) error {
 		if !ok {
 			return fmt.Errorf("finish restore for instance %s: not in restoring state", instanceID)
 		}
-		return nil
+		return store.TxSetWorldMods(ctx, tx, instanceID, worldMods)
 	}
 }
 

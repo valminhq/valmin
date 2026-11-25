@@ -345,7 +345,7 @@ network timeout means the operation did not start.
 
 While the data root has less free space than `data.free_space_floor_bytes`, jobs that
 write a lot to it (provision, clone, world import, mod install, game update, backup,
-restore, world tool, setup save and restore, update test and its apply) return
+restore, world tool, setup save, restore and rollback, update test and its apply) return
 `409 insufficient_disk` with
 `free_bytes` and `floor_bytes`. Other jobs still run.
 
@@ -438,10 +438,12 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `POST`   | `/instances/{id}/backups/{bid}/restore`   | Restore into a stopped server; returns a job.                         |
 | `POST`   | `/instances/{id}/backups/{bid}/acknowledge` | Clear the archive's world check findings; needs `backups.restore`.  |
 | `GET`    | `/instances/{id}/setups`                  | Saved setups for the server.                                          |
-| `POST`   | `/instances/{id}/setups`                  | Save a setup from a stopped server; returns a job.                    |
+| `POST`   | `/instances/{id}/setups`                  | Save a setup from a stopped or running server; returns a job.         |
 | `GET`    | `/instances/{id}/setups/{sid}`            | One saved setup and its linked world backup.                          |
+| `GET`    | `/instances/{id}/setups/{sid}/configs/{file}` | The saved text of one config file of the setup.                   |
 | `GET`    | `/instances/{id}/setups/{sid}/preview`    | Compare and validate a restore; returns an `etag`.                    |
 | `POST`   | `/instances/{id}/setups/{sid}/restore`    | Restore a stopped server; requires `If-Match`, returns a job.         |
+| `POST`   | `/instances/{id}/setups/{sid}/rollback`   | Roll back a stopped or running server; returns a job.                 |
 | `DELETE` | `/instances/{id}/setups/{sid}`            | Delete a setup and release its links; returns a job.                  |
 | `GET`    | `/instances/{id}/worlds`                  | Worlds in the server's save directory.                                |
 | `POST`   | `/instances/{id}/worlds/import`           | Upload a world into a stopped server; returns a job.                  |
@@ -475,6 +477,7 @@ permissions as well as the server's current state. IDs in braces are path parame
 | `DELETE` | `/instances/{id}/mods/queue/{full_name}`  | Remove a queued install.                                              |
 | `GET`    | `/instances/{id}/manifest`                | Server definition: settings, pinned mods, and config files.           |
 | `GET`    | `/instances/{id}/manifest/code`           | The server as a template code.                                        |
+| `GET`    | `/instances/{id}/manifest/files`          | The config files templates carry, and the changed ones they leave out. |
 | `POST`   | `/instances/manifest/preview`             | Check a server definition before importing it.                        |
 | `POST`   | `/instances/import`                       | Create a server from a definition; returns a job.                     |
 | `GET`    | `/templates`                              | Shared templates from the Valmin presets repository.                  |
@@ -737,6 +740,9 @@ conflicts (`mod_conflict`), so resolve first and fix them. Only conflicts the ch
 causes are reported. The response's `backup` is `true` when the install would move or
 remove an installed package on a server that has a world. The install job then backs up
 the world first, as **Update all** does, and keeps the backup even if the install fails.
+`setup` is `true` when the install changes anything and the server's `setup_before_update` is
+not `off`: the job then also saves the current setup first, as an automatic setup linked to
+that backup when it takes one.
 
 An install that would overwrite files no installed mod owns, such as files placed by hand,
 writes nothing and fails with `mod_unowned_files`; its `error` names the files. Send the
@@ -808,11 +814,11 @@ closure includes a disabled mod are refused the same way.
 
 `POST /instances/{id}/mods/updates/resolve` takes no body and returns `targets` (each
 mod with a newer version in its own registry), `nodes` (every package that would
-change, with `from_version` empty for a new dependency), `conflicts`, and `backup`.
-Locked mods, modpacks, and members that follow their modpack are never targets; update
+change, with `from_version` empty for a new dependency), `conflicts`, `backup` and `setup`.
+`setup` is `true` unless the server's `setup_before_update` is `off`. Locked mods, modpacks, and members that follow their modpack are never targets; update
 a modpack by installing its new version. To apply, send `{"targets": [...]}` with the
 targets from the preview to `POST /instances/{id}/mods/updates`. The job backs up the
-world, then updates all targets together, rolling all of them back if one fails. It is
+world and, when `setup` is `true`, saves the current setup, then updates all targets together, rolling all of them back if one fails. It is
 refused while the preview has conflicts.
 
 `POST /instances/{id}/mods/code/preview` takes `{"code": "<profile code>", "select": [...]}`
@@ -820,7 +826,8 @@ and applies a r2modman or Gale profile code to this server as a dry run. It fetc
 as the import routes do. `select` names exactly the packages to apply; left out, installs and
 raised versions are chosen and lowered versions are not. The answer has `profile_name`,
 `registry` (the one that served the code), `matching` (packages already at the code's
-version), `rows`, `targets`, `nodes`, `conflicts`, `problems` and `backup`. Each row has
+version), `rows`, `targets`, `nodes`, `conflicts`, `problems`, `backup` and `setup`, which
+mean what they do for the update preview. Each row has
 `full_name`, `installed_version` (empty when not installed), `version`, `source`, `selected`,
 and either `change` (`install`, `upgrade` or `downgrade`) or `skip`, one of `locked`,
 `disabled`, `modpack`, `framework`, `other_registry`, `not_in_registry`, `registry_disabled`,
@@ -855,14 +862,33 @@ whichever registry carries the version. The import installs each modpack before 
 other mods, so the mods it bundles arrive as its members, and it never lowers a mod that
 an earlier mod in the definition already raised.
 
+A definition's `configs` are the config files the panel changed, each whole: files the panel
+saved or a setup restore wrote, apart from the RCON plugin's file, whose bytes differ from the
+version the panel first found or the newest mod install wrote. A file left as found is not
+carried, since the mods create it again. `schema` is `1` when every file is a `.cfg` directly in
+`BepInEx/config` and `2` when one has a path into a subfolder or is a YAML, JSON or text file;
+`file` is then that path under `BepInEx/config`. The preview and import read both; a panel from
+before schema 2 refuses a schema 2 file. A `.cfg` over 1 MiB is left out. The export answers
+`422 validation_failed` when the changed files would be more than an import accepts: over 200
+files, or a document over about 8 MiB. Importing a definition writes each file whole, creating
+the folders its path needs; a schema 2 file whose path runs through another of its files is
+refused.
+
+`GET /instances/{id}/manifest/files` needs the same actions and returns
+`{"carried": [{"file", "size_bytes"}], "left_out": [{"file", "reason"}]}`: the files a definition
+carries, and the changed files templates leave out, such as one changed only outside the panel
+or one over 1 MiB, with `reason` written for people.
+
 `GET /instances/{id}/manifest/code` needs the same actions as the definition export and
 returns `{"code", "mods", "settings", "secrets_left_out", "disabled_left_out", "configs"}`. The
 code starts with `valmin1:` and carries enabled mods and the config settings changed in the
-panel. Each entry of `configs` is a file with changed settings: `file`, `excluded`,
-`secrets_included`, and `settings` with `key`, `value`, `secret` (the name looks like a
-credential) and `suspicious` (the value does). Secret settings are left out of the code and
-counted in `secrets_left_out`; repeat `?include_secrets=<file>` to keep a file's. Repeat
-`?exclude=<file>` to leave whole config files out; they stay listed with `excluded` set.
+panel, in the `.cfg` files directly in `BepInEx/config`: its format holds plain `.cfg` names only,
+so other config files go only in a definition. Each entry of `configs` is a file with changed
+settings: `file`, `excluded`, `secrets_included`, and `settings` with `key`, `value`, `secret`
+(the name looks like a credential) and `suspicious` (the value does). Secret settings are left
+out of the code and counted in `secrets_left_out`; repeat `?include_secrets=<file>` to keep a
+file's. Repeat `?exclude=<file>` to leave whole config files out; they stay listed with
+`excluded` set.
 Send it as `{"code": "valmin1:..."}` in place of `manifest` to the preview and import routes.
 For a code, each preview entry in `configs` also lists `settings`, shaped like the export's.
 Whitespace in the code is ignored. Dependencies the code leaves out are derived from the
@@ -905,30 +931,119 @@ to the preview and import routes. Each problem has `source`, `path` and `detail`
 
 ### Saved setups
 
-Saved setup routes require an administrator. Send `{"name":"Working before update"}`
-to `POST /instances/{id}/setups` while the server is stopped. Add
-`"world_backup_id":"BACKUP_ID"` to link a consistent backup from the same server.
+Saving, deleting and the `restore` route need `setups.manage`, which only administrators hold.
+Listing, reading and previewing setups and `rollback` also accept a member with `mods.manage`.
+Reading a setup's config text needs `config.raw`, as a config file's history does, and the
+`content` of `.cfg` files in a setup or preview is left out without it. Send `{"name":"Working before update"}`
+to `POST /instances/{id}/setups` while the server is stopped or running; any other state is
+`409 invalid_state` with `allowed_states`. Add
+`"world_backup_id":"BACKUP_ID"` to link a consistent backup from the same server taken with the
+mods installed now (a backup taken with other mods is `422 validation_failed` naming
+`world_backup_id`; one that recorded no mods is accepted), and
+`"light":true` to keep only the packages whose installed files differ from their cached
+registry archive or whose registry is disabled. `"back_up_world":true` takes a consistent
+backup during the save, with trigger `manual`, verified and world-checked like any manual
+backup, and links it. A backup that fails its check, or a data root below its free-space floor,
+fails the save job and publishes nothing. It needs `backups.create` and cannot be combined with
+`world_backup_id`, which is `422 validation_failed`. A server whose selected world has no
+`.db` or `.fwl` yet gets no backup; a failed check carries the error code
+`backup_unverifiable`, as a manual backup's does. `back_up_world` on a running server is `422`.
+`"link_next_world_backup":true` saves the setup with `world_pending` set instead: the next
+`pre_update` backup a mod update or setup restore takes is linked to it. Any other change to the
+installed mods before then (a package added or removed, or its registry, version or enabled state
+changed, even back again) clears `world_pending`, and the setup keeps no backup. It cannot be combined with `world_backup_id` or
+`back_up_world` (`422`). A setup's `world_backup` includes the archive's `size_bytes`.
+A save of a running server fails if a mod or config file changes while it is read.
 The save job publishes the setup only after it captures every required package.
 Names can repeat; use the setup ID to identify one.
 
 A setup records launch and backup settings, exact versions and registries of
-Valmin-managed mods, their locks, enabled states and client tags, and supported
-configuration files. Configuration capture covers regular UTF-8 `.cfg` files
-directly in `BepInEx/config`, up to 1 MiB each; nested files and generated RCON
-configuration are excluded. It retains package payloads for offline restore.
-Game build and world name are comparison-only. The server password, selected
-world, and world files are not restored.
+Valmin-managed mods, their locks, enabled states and client tags, and every file
+`GET /instances/{id}/configs` lists under `BepInEx/config` except the RCON plugin's file.
+Config bytes are stored once per content and shared between setups. It retains package
+payloads for offline restore. Game build and world name are comparison-only. The server
+password, selected world, and world files are not restored.
+
+Each setup has `created_by`, `config_tree`, `configs_truncated`, `automatic`, `light`,
+`world_pending` and `configs_digest`. `configs_digest` is a hash over the setup's config file
+paths and bytes: two setups holding the same files have the same digest. The list carries each
+setup's `mods` and `configs_digest`, but not its `configs`.
+
+Every backup records the managed mods its world was last played with: those installed when the
+server last started, or, after a world restore, those the restored backup recorded. After a world
+import, a restore of a backup that recorded no mods, or deleting the selected world, the installed
+mods count as the world's; a clone takes its source's. It records each
+mod's name, version and enabled state, not its registry, client tag, lock or config files, and
+not the game build. A backup fits a setup when it was taken with exactly the mods the setup holds, or when the setup
+links it. Each setup has `world_backups_count`, how many backups fit it, and
+`world_backups_newest_at`, when the newest of them was taken (`null` for none). Reading a setup
+and its preview add `world_backups`, those backups newest first, each with `id`, `world_name`,
+`created_at`, `consistent`, `available` (the archive is on disk), `size_bytes`, `trigger` and
+`linked` (the backup the setup links). Best-effort backups are included. Backups taken before
+backups recorded their mods fit only the setup that links them.
+`created_by` is the username of whoever saved the setup or made the change an automatic one
+comes before, `null` for the panel's own change or a deleted account. `config_tree` is
+`false` for a setup saved before setups held the whole config tree: it holds only the `.cfg`
+files directly in `BepInEx/config`, and restoring it changes only those. `configs_truncated` is
+`true` when the listing limits left files out of the setup; a restore leaves such files alone.
+`automatic` marks a setup the panel saved from the server just before it changed anything:
+a restore's, named `Before restoring <name>`, or a mod change's, named
+`Before installing <mods>`, `Before removing <mods>`, `Before updating <mods>` or
+`Before changing mods` (see `setup_before_update`). It links the `pre_update` backup the job
+took first, when it took one: a restore that changes mods, an update, and an install that backs
+up the world first take one, while a plain install or a removal does not. The installs that
+create a server save none. Each server keeps its newest `setup_versions_kept` automatic setups, and the newest
+`setup_worlds_kept` of those that link a backup keep it. If that capture fails, the job goes
+ahead and its log says so. A `light`
+setup restores the packages it does not keep from the download cache or their registry; its
+preview lists, in `problems`, each such package that is not cached and that no enabled
+registry lists.
+
+Each entry of `configs`, in a setup and in a preview's `current`, has `file` (the path under
+`BepInEx/config`), `sha256` and `size_bytes`; `content` is included for a `.cfg` directly in
+`BepInEx/config` only. Read any other saved file from
+`GET /instances/{id}/setups/{sid}/configs/{file}`, with the path's slashes escaped as on the
+config routes, and the current one from `GET /instances/{id}/configs/{file}/raw`.
 
 `GET /instances/{id}/setups/{sid}/preview` compares the saved setup with the
-current server and checks whether its packages and settings can be applied. The
-response contains `etag`, `ready`, `problems`, `current`, and `setup`. Send that
-`etag` as `If-Match` to `POST /instances/{id}/setups/{sid}/restore` while the server
-is stopped. Missing or stale fingerprints return `412 stale_write`. A failed
-installation rolls back its changes, and the restore never starts the server.
+current server and checks whether its packages, config files and settings can be applied.
+For a setup whose `config_tree` is `false`, `current.configs` lists only the files that
+restore would change. The response contains `etag`, `ready`, `problems`, `current`, and
+`setup`, and `stop_required`, which is `true` while the server is not stopped: a restore
+refuses it, and a rollback stops a running one first. Send that `etag` as `If-Match` to
+`POST /instances/{id}/setups/{sid}/restore` while the server is stopped. Missing or stale
+fingerprints return `412 stale_write`. A restore
+removes config files the setup does not hold and keeps each file it replaces or removes in
+that file's history. A failed installation rolls back its changes, and the restore never
+starts the server.
+
+`POST /instances/{id}/setups/{sid}/rollback` does the whole undo as one job (`setup_rollback`,
+not cancellable): it stops the server if it runs, restores the setup, restores the world
+backup the setup links with `{"world":true}` or any of its `world_backups` with
+`{"world_backup_id":"BACKUP_ID"}`, and starts the server again with
+`{"start":true}`. `{"mods_only":true}` restores mods and config files and keeps the current
+launch and backup settings, which it then leaves as they are; a caller without
+`setups.manage` always gets it. `GET …/preview?mods_only=true` checks such a rollback, leaving
+the saved settings out of `problems`, as a preview for a caller without `setups.manage` always
+does. It needs `setups.manage` or `mods.manage`, plus
+`instance.stop` for a running server,
+`instance.start` for `start` and `backups.restore` for `world` or `world_backup_id`. A server that
+is neither stopped nor running returns `409 invalid_state`; `world` without an available linked
+backup is `422` naming `world`, and a `world_backup_id` that is not one of the setup's available
+`world_backups` is `422` naming `world_backup_id`. On a stopped server an optional `If-Match` is checked against the preview's
+`etag` (`412 stale_write` when it differs); on a running server it is ignored, and the job
+fingerprints the server once it is stopped. A step whose job meets another job holding a lock
+it needs waits for that job and tries again, up to three times. A step runs only after the one
+before succeeded, so a failed setup restore never restores the world or starts the server, and
+a stop that was done stays done. A failed world restore leaves the setup restored and the server
+in `error`. Each step is its own job, so with `world` the current
+world is archived by the setup restore when the mods change and once more as the world
+restore's own `pre_restore` snapshot.
 
 A linked backup stays outside retention. Deleting it returns `409 invalid_state`
-while any setup links to it. Deleting the setup releases the link. Restore the
-world backup through `POST /instances/{id}/backups/{bid}/restore` separately.
+while any setup links to it. Deleting the setup releases the link. Besides a rollback with
+`world`, the world backup can be restored on its own through
+`POST /instances/{id}/backups/{bid}/restore`.
 
 ### Send server commands
 
@@ -1014,6 +1129,18 @@ and the instance is started again unless Docker still shows the container runnin
 it is held in the `error` state. Any other value returns `422`. It takes effect immediately
 without setting `restart_required`.
 
+`setup_before_update` is `full` (the default), `light` or `off`: what a mod install, removal or
+update saves of the setup before it moves any file. `full` and `light` save an automatic setup,
+full or light, linked to an update's `pre_update` backup; `off` saves none, and an update still
+takes its backup. It needs `setups.manage`, takes effect immediately without setting
+`restart_required`, and any other value returns `422`. A copy made to test an update gets `off`.
+
+`setup_versions_kept` (1 to 100, default 10) is how many automatic setups the server keeps, and
+`setup_worlds_kept` (0 to 100, default 3) how many of those, newest first, keep the world backup
+they link. Lowering either removes the oldest automatic setups, or releases their backups to
+normal retention, in the same request. Both need `setups.manage`, take effect without setting
+`restart_required`, and a value out of range returns `422`.
+
 `join_host` is the host name or IP address players connect to, without a port: an IP address,
 or a DNS name of letters, digits and hyphens. Anything else, including a port, returns `422`.
 An empty string clears it. It takes effect immediately without setting `restart_required`. A
@@ -1093,9 +1220,11 @@ file that is not `.cfg` lists no settings.
 folders, symlinked folders, symlinks that do not lead to a regular file inside the directory,
 files with other extensions, files other than `.cfg` over 1 MiB and folders more than 8 deep,
 and returns at most 5,000 files; when a limit left a file out, `note` says so. Each
-item's `file` is its path, `dir` the directory it is relative to, and `portable` whether saved
-setups, server definitions and template codes carry it: only a `.cfg` directly in
-`BepInEx/config`, other than the RCON plugin's. `mod_replaced_edits` is
+item's `file` is its path, `dir` the directory it is relative to, and `portable` whether
+template codes carry its settings once the panel changes them: only a `.cfg` directly in
+`BepInEx/config`, other than the RCON plugin's. Server definitions carry the files the panel
+changed, as described under Server definitions, and saved setups hold every listed file except
+the RCON plugin's. `mod_replaced_edits` is
 `{"mod", "version", "created_at"}` while the file's newest version is one a mod install,
 update or downgrade wrote over bytes the mod had not shipped, and `null` otherwise.
 
@@ -1126,6 +1255,7 @@ is marked as pending a restart.
 | `auto_stop_minutes`                                                                     | `instance.settings` and `instance.stop` |
 | `watchdog` set to `off` or `alert`                                                      | `instance.settings`                     |
 | `watchdog` set to `restart`                                                             | `instance.settings` and `instance.restart` |
+| `setup_before_update`, `setup_versions_kept`, `setup_worlds_kept`                       | `setups.manage`                         |
 | `game_branch`, `game_branch_password`                                                   | `instance.update`                       |
 | `mem_limit_mb`, `cpu_limit`                                                             | `instance.limits`                       |
 | `extra_args`                                                                            | `instance.extra_args`                   |
@@ -1278,7 +1408,7 @@ one they can see without it. Paths are relative to `/api/v1`, and `{scope}` is `
 | -------- | ---------------------------------- | ---------------------------------------------------------- |
 | `GET`    | `{scope}/webhooks`                 | Destinations.                                              |
 | `POST`   | `{scope}/webhooks`                 | Add a destination; returns `201`.                          |
-| `PATCH`  | `{scope}/webhooks/{wid}`           | Change `name`, `url`, `enabled` or `catch_all`.            |
+| `PATCH`  | `{scope}/webhooks/{wid}`           | Change `name`, `url` or `enabled`.                         |
 | `DELETE` | `{scope}/webhooks/{wid}`           | Delete a destination and remove it from every rule; `204`. |
 | `POST`   | `{scope}/webhooks/{wid}/test`      | Send a test notification; returns a job. Rate-limited.     |
 | `GET`    | `{scope}/webhooks/deliveries`      | Delivery records, newest first.                            |
@@ -1296,9 +1426,10 @@ and a server's prefix lists the server's rules and the rules for every server bu
 only the server's own. A rule created there is about the server; naming another
 `instance_id` is `422`. Deliveries under a server's prefix are only those about that server.
 
-A destination has `name`, `kind` (`discord` or `generic`), `url`, `enabled`, `instance_id`
-(the server it belongs to, `null` when shared) and `catch_all` (whether the three built-in
-events below reach it, `true` by default). `kind` and `instance_id` never change. A name is
+A destination has `name`, `kind` (`discord` or `generic`), `url`, `enabled` and `instance_id`
+(the server it belongs to, `null` when shared), and receives only what the rules naming it
+send. A `catch_all` field in a request is accepted and ignored. `kind` and `instance_id` never
+change. A name is
 unique among the shared destinations and among each server's own; a taken one is `409
 name_taken`. The URL is write-only: no response contains it, because it is the whole credential for posting to
 that channel. A URL the panel refuses, such as a private address, is `422` on `url`.
@@ -1314,31 +1445,30 @@ ones; any other is `422` on `webhook_ids`, worded as if it did not exist. The co
 `job_failed`, `job_stuck`, `crash_loop`, `unclean_stop`, `instance_error`,
 `restart_required`, `update_available`, `stale_backup`, `backup_attention`, `mods_failed`,
 `mod_updates` and `low_disk`, plus the one-off events `server_started`, `server_stopped`,
-`instance_down`, `game_updated`, `update_test_finished`, `power_cut` and `sign_ins_blocked`, and the game
-events below.
+`instance_down`, `backup_failed`, `game_updated`, `new_game_build`, `update_test_finished`,
+`power_cut` and `sign_ins_blocked`, and the game events below.
 
 `sign_ins_blocked` is sent when an account's failed sign-ins from any address reach the
 limit and the panel starts refusing it. It is sent at most once an hour for each username, and
 only for a username an account has, with the `username` and the `address` of the first refused
-attempt. It is host-wide, like `low_disk` and `power_cut`.
+attempt. It is host-wide, like `low_disk`, `power_cut` and `new_game_build`.
 
-Three events are sent without any rule to every enabled destination with `catch_all` on that
-serves the event's server, which is every shared destination and the server's own:
-`instance_down` (a server stopped on its own, or restarted outside the panel; the `Status`
-detail then reads `Running again`), `update_available` (a new public game
-build; servers on another branch are left out; it concerns no one server, so it reaches
-shared destinations only), and `backup_failed`. Alert rules (`/api/v1/admin/alert-rules`) route a condition kind
-to chosen destinations and send `alert_opened` and `alert_resolved`.
+Alert rules (`/api/v1/admin/alert-rules`) route a condition kind to chosen destinations and
+send `alert_opened` and `alert_resolved`.
 
-Six `condition_kind` values are one-off events rather than conditions, sent only to the
+The one-off `condition_kind` values are events rather than conditions, sent only to the
 destinations of an enabled rule for them. `server_started` sends `server_started` when a
 start or restart leaves a server running, once its log says the world loaded and, on
 crossplay, once it has a join code; it is sent without them after 15 minutes.
 `server_stopped` sends `server_stopped` when the panel stops a server, by hand, by auto-stop or for a power cut, with a `Reason` detail; a
 server that stops on its own is `instance_down`. Rules of the old `auto_stopped` kind became
 `server_stopped` rules. `instance_down` sends `instance_down` when a server stops or restarts
-on its own, as the built-in event below does; a destination the rule names gets the rule's
-message instead of the built-in one. `game_updated` sends `game_updated` when a game update
+on its own; after a restart outside the panel the `Status` detail reads `Running again`.
+`backup_failed` sends `backup_failed` for every backup that fails, recorded with the job's
+outcome, with the reason and the job id; `job_failed` also covers backups but announces a
+failure once, until a later run of the job succeeds. `new_game_build` (host-wide) sends
+`update_available` once for each public build the panel observes for the first time, with
+`build`; the `update_available` condition is per server instead. `game_updated` sends `game_updated` when a game update
 installs a build other than the one the server ran, with `build`, never for a copy made to test
 updates, and when applying tested updates updates mods, with
 `mods`; an apply that also installs a build sends the build in a message of its own.
@@ -1397,7 +1527,9 @@ kept. The names each kind fills:
 | `server_started`   | `server_name`, `world`, `join_code`, `port`, `time`           |
 | `server_stopped`   | `reason`, `server_name`, `world`, `time`                      |
 | `instance_down`    | `status`, `reason`, `what_to_do`, `time`                      |
+| `backup_failed`    | `reason`, `what_to_do`, `job_id`                              |
 | `game_updated`     | `build`, `mods`, `time`                                       |
+| `new_game_build`   | `build`, `what_to_do`                                         |
 | `update_test_finished` | `status`, `build`, `mods`, `failed_mods`, `time`          |
 | `power_cut`        | `power_off`, `stop_at`, `servers`                             |
 | `sign_ins_blocked` | `username`, `address`                                         |
@@ -1443,15 +1575,18 @@ inside the archive (`null` when never measured) and `world_attention` is a list 
 `{code, message}` findings, empty when there are none. The codes are `world_shrunk`,
 `db_shorter_than_old`, `save_incomplete`, `version_mismatch`, `chunk_missing` and
 `db2_damaged`; `message` is written for people. A finding never refuses an archive.
+`kept_for_setup` is `true` while a saved setup links the archive, which keeps it out of
+retention and makes deleting it `409 invalid_state`; `linked_setups` lists those setups as
+`{id, name}` for a caller with `setups.manage` and is absent otherwise.
+`mods_match_current` is `true` when the archive's world was played with the mods installed now,
+`false` when with other mods, and `null` when it recorded none. `matching_setups` lists, newest first,
+the saved setups holding the mods the archive was taken with, as `{id, name}`, for a caller who
+may see setups (`setups.manage` or `mods.manage`) and is absent otherwise.
 
-When a rule covers the same incident as one of the first three events, the rule's destinations
-receive only the rule's alert. A failed backup is covered by a `job_failed` rule, a new
-build by an `update_available` rule, and an unexpected stop by a `crash_loop` or
-`instance_error` rule when this stop opens that condition. If the rule's condition is
-already open, the rule sends nothing new, so its destinations still receive the event. Only
-destinations of the rule's own scope count: a rule about one server never keeps these events
-from a shared destination. Catch-all destinations no such rule names still receive every
-event they serve.
+Each rule sends its own message: a destination named by rules of different kinds, such as
+`job_failed` and `backup_failed`, gets one from each. A destination named by several rules of
+one one-off kind gets that event once, rendered by a rule about the server when one names it,
+otherwise by a rule for every server.
 
 `{scope}/alert-rules/test` takes `condition_kind`, `params`, `webhook_id` and `fields`, the
 sample values to fill the template with (at most 16, each a lowercase name and a value of at
@@ -1768,6 +1903,57 @@ Every route needs `panel.settings`; an account without it gets `404`.
   `filename`, `mode`, `size_bytes` and `created_at`, or `null` when there is none.
 - `GET /api/v1/admin/export/download` returns that archive as `application/gzip`, with
   range requests supported, and `404` when there is none. Each download is written to the audit log.
+
+## Cache
+
+Both routes need `panel.settings`; an account without it gets `404`. What counts as in use
+is described in [Reclaim cache space](operations.md#reclaim-cache-space).
+
+- `GET /api/v1/admin/cache` lists the cached mod archives, game builds, saved setup files
+  and partial downloads in one page (`next_cursor` is always `null`), with a `summary` per
+  kind and `grace_seconds`, the time an unused entry is kept after it was last written or
+  used. Each item has `kind` (`mod_archive`, `game_build`, `setup_blob` or
+  `partial_download`), `name`, `registry` (set for mod archives and their partial
+  downloads), `size_bytes`, `reclaimable_bytes`, `in_use`, `prunable` (a prune now
+  removes it), `servers` (`id` and `name` of the servers using it), `setups` (the saved
+  setups holding it) and `prunable_at` (`null` while in use). `reclaimable_bytes` is what
+  a prune now would free: `0` for an entry in use or inside its grace period, and for a
+  file whose bytes another name still links, so a mod archive and the saved setup file
+  sharing its bytes count once.
+- `POST /api/v1/admin/cache/prune` returns a job that removes every unused entry past its
+  grace period. The job holds every server's instance and sequence locks, the saved-setup
+  lock and the export lock, so it answers `409` while any of those jobs runs, and they get
+  `409` while it runs. It is written to the audit log and cannot be cancelled; it takes
+  seconds. While a game build download is in progress it leaves the game builds for a
+  later prune and says so in its log.
+
+```json
+{
+  "items": [
+    {
+      "kind": "mod_archive",
+      "name": "denikson-BepInExPack_Valheim-5.4.2202",
+      "registry": "thunderstore",
+      "size_bytes": 798720,
+      "reclaimable_bytes": 798720,
+      "in_use": false,
+      "prunable": true,
+      "servers": [],
+      "setups": 0,
+      "prunable_at": "2026-11-24T10:00:00Z"
+    }
+  ],
+  "next_cursor": null,
+  "total": null,
+  "summary": [
+    { "kind": "mod_archive", "count": 1, "size_bytes": 798720, "reclaimable_bytes": 798720 },
+    { "kind": "game_build", "count": 0, "size_bytes": 0, "reclaimable_bytes": 0 },
+    { "kind": "setup_blob", "count": 0, "size_bytes": 0, "reclaimable_bytes": 0 },
+    { "kind": "partial_download", "count": 0, "size_bytes": 0, "reclaimable_bytes": 0 }
+  ],
+  "grace_seconds": 3600
+}
+```
 
 ## Change your password
 

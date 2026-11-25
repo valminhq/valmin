@@ -14,6 +14,7 @@
 	import * as Alert from '#lib/components/ui/alert/index.js';
 	import * as Dialog from '#lib/components/ui/dialog/index.js';
 	import Problem from '#lib/components/problem.svelte';
+	import { preUpdateNotice } from '#lib/pre-update.js';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 
 	let {
@@ -217,9 +218,8 @@
 				</Alert.Root>
 			{/if}
 			<p class="text-sm text-muted-foreground">
-				{preview.backup
-					? 'The world is backed up first. The backup is kept even if the change fails.'
-					: 'This server has no world yet, so there is nothing to back up.'}
+				{preUpdateNotice(preview, 'change') ??
+					'This server has no world yet, so there is nothing to back up.'}
 			</p>
 			{#if blocked}
 				<p class="text-sm text-muted-foreground" data-testid="code-blocked">{blocked}</p>

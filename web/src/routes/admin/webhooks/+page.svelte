@@ -5,6 +5,7 @@
 	import { resolve } from '$app/paths';
 	import { actions, instances, type Instance } from '#lib/api/instances.js';
 	import { notifications, type AlertRule, type Webhook } from '#lib/api/notifications.js';
+	import { starterKinds } from '#lib/notification-events.js';
 	import { session } from '#lib/state/session.svelte.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
@@ -79,6 +80,21 @@
 		}
 	}
 
+	/** Creates the starter rules, each posting to every shared channel. */
+	const addStarterRules = () =>
+		act(async () => {
+			const results = await Promise.allSettled(
+				starterKinds(true).map((kind) =>
+					api.rules.create({ condition_kind: kind, webhook_ids: shared.map((c) => c.id) })
+				)
+			);
+			const failed = results.find((r) => r.status === 'rejected');
+			if (!failed) return;
+			// Keeps what was created on screen, so the error stays and a retry adds no duplicate.
+			rules = [...rules, ...results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))];
+			throw failed.reason;
+		});
+
 	const removeRule = (rule: AlertRule) =>
 		act(async () => {
 			await api.rules.remove(rule.id);
@@ -120,7 +136,7 @@
 				</Card.Description>
 			</Card.Header>
 			<Card.Content>
-				<ChannelList {api} channels={shared} onchange={refresh} />
+				<ChannelList {api} channels={shared} {rules} onchange={refresh} />
 			</Card.Content>
 		</Card.Root>
 
@@ -135,12 +151,20 @@
 				</Card.Action>
 			</Card.Header>
 			<Card.Content>
-				{#if panelRules.length === 0}
+				{#if panelRules.length === 0 && shared.length === 0}
 					<p class="text-sm text-muted-foreground">
-						{shared.length === 0
-							? 'Add a shared channel first, then a rule to post to it.'
-							: 'No rules yet. Add one to choose what gets posted.'}
+						Add a shared channel first, then a rule to post to it.
 					</p>
+				{:else if panelRules.length === 0}
+					<div class="flex flex-wrap items-center gap-3">
+						<p class="flex-1 text-sm text-muted-foreground">
+							No rules yet. Add one to choose what gets posted, or start with unexpected stops,
+							failed backups and new game builds.
+						</p>
+						<Button variant="outline" size="sm" disabled={busy} onclick={addStarterRules}>
+							Add starter rules
+						</Button>
+					</div>
 				{:else}
 					<RuleList
 						rules={panelRules}

@@ -360,8 +360,8 @@ func TestDeliveriesKeepTheirFiltersAcrossTheCursor(t *testing.T) {
 }
 
 // TestAlertDeliveriesRecordTheRuleThatSentThem asserts that two rules announcing one condition
-// to one destination each own exactly their own delivery, and that an event no rule sent
-// carries no rule.
+// to one destination each own exactly their own delivery, and that a destination no rule names
+// is owed nothing.
 func TestAlertDeliveriesRecordTheRuleThatSentThem(t *testing.T) {
 	t.Parallel()
 	rt, db, admin, _ := provisionWorld(t)
@@ -381,13 +381,7 @@ func TestAlertDeliveriesRecordTheRuleThatSentThem(t *testing.T) {
 			t.Errorf("rule %s deliveries = %+v, want its one alert to %s", rule, items, ruled)
 		}
 	}
-	unruled := deliveryPage(t, rt, admin, "webhook_id="+everyone).Items
-	if len(unruled) == 0 {
-		t.Fatal("the destination no rule names was owed nothing")
-	}
-	for _, d := range unruled {
-		if d.RuleID != nil {
-			t.Errorf("%s delivery carries rule %s, want none", d.EventKind, *d.RuleID)
-		}
+	if unruled := deliveryPage(t, rt, admin, "webhook_id="+everyone).Items; len(unruled) != 0 {
+		t.Errorf("the destination no rule names was owed %+v, want nothing", unruled)
 	}
 }

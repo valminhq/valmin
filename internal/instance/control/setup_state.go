@@ -10,23 +10,22 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"slices"
 	"sort"
-	"unicode/utf8"
 
+	"github.com/valminhq/valmin/internal/command"
 	"github.com/valminhq/valmin/internal/instance"
 	"github.com/valminhq/valmin/internal/mods/fsutil"
 	"github.com/valminhq/valmin/internal/mods/installer"
+	"github.com/valminhq/valmin/internal/setupblob"
 	"github.com/valminhq/valmin/internal/store"
 )
-
-// MaxConfigSize bounds one config file carried by a saved setup or a manifest.
-const MaxConfigSize = 1 << 20
 
 // SetupState captures and hashes the instance state stored in a saved setup.
 type SetupState struct{ DB *store.DB }
 
-// Current captures inst and returns the snapshot with its ETag, a hash over the snapshot and
-// every managed file it names.
+// Current captures inst and returns the snapshot with its ETag, a hash over the snapshot, its
+// config files and every managed file it names.
 func (s *SetupState) Current(ctx context.Context, inst *store.Instance) (SetupSnapshot, string, error) {
 	snap, err := s.Capture(ctx, inst)
 	if err != nil {
@@ -39,6 +38,9 @@ func (s *SetupState) Current(ctx context.Context, inst *store.Instance) (SetupSn
 	hash := sha256.New()
 	_, _ = hash.Write(raw)
 	_, _ = io.WriteString(hash, deref(inst.GameBuildID))
+	for _, c := range snap.ConfigFiles {
+		_, _ = io.WriteString(hash, c.File+"\x00"+c.SHA256+"\x00")
+	}
 	if err := hashSetupFiles(hash, inst, snap.Mods); err != nil {
 		return snap, "", err
 	}
@@ -69,6 +71,8 @@ func LaunchOf(inst *store.Instance) (ManifestLaunch, error) {
 	return launch, nil
 }
 
+// Capture reads inst's current setup: launch settings, installed mods, and the hash of every
+// config file in the config tree apart from the RCON file.
 func (s *SetupState) Capture(
 	ctx context.Context, inst *store.Instance,
 ) (SetupSnapshot, error) {
@@ -76,7 +80,7 @@ func (s *SetupState) Capture(
 	if err != nil {
 		return SetupSnapshot{}, fmt.Errorf("read installed mods: %w", err)
 	}
-	configs, err := readSetupConfigs(inst)
+	configs, truncated, err := captureSetupConfigs(inst)
 	if err != nil {
 		return SetupSnapshot{}, err
 	}
@@ -84,69 +88,174 @@ func (s *SetupState) Capture(
 	if err != nil {
 		return SetupSnapshot{}, err
 	}
-	snap := SetupSnapshot{
-		Instance: launch, Mods: make([]SetupMod, 0, len(rows)), Configs: configs,
+	return SetupSnapshot{
+		Instance: launch, Mods: setupMods(rows), Configs: []ManifestConfig{},
+		ConfigTree: true, ConfigFiles: configs, ConfigsTruncated: truncated,
+	}, nil
+}
+
+// ModsFingerprint hashes the installed managed mods of instance id as ModsFingerprint does.
+func (s *SetupState) ModsFingerprint(ctx context.Context, id string) (string, error) {
+	rows, err := s.DB.InstanceMods(ctx, id)
+	if err != nil {
+		return "", fmt.Errorf("read installed mods: %w", err)
 	}
+	return ModsFingerprint(setupMods(rows)), nil
+}
+
+// ModsFingerprint is a hash over each mod's name, version and enabled state, independent of
+// order. A world backup fits a setup when both were taken with the same fingerprint.
+func ModsFingerprint(mods []SetupMod) string {
+	lines := make([]string, 0, len(mods))
+	for _, m := range mods {
+		lines = append(lines, fmt.Sprintf("%s\x00%s\x00%t\n", m.FullName, m.Version, m.Enabled))
+	}
+	slices.Sort(lines)
+	hash := sha256.New()
+	for _, line := range lines {
+		_, _ = io.WriteString(hash, line)
+	}
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
+// BackfillSetupFingerprints records the mods fingerprint of each setup saved without one, from
+// the mods it holds. A setup that will not decode is left without one.
+func BackfillSetupFingerprints(ctx context.Context, db *store.DB) error {
+	rows, err := db.UnfingerprintedSetups(ctx)
+	if err != nil || len(rows) == 0 {
+		return err
+	}
+	fingerprints := make(map[string]string, len(rows))
+	for i := range rows {
+		snap, err := DecodeSetupSnapshot(&rows[i])
+		if err != nil {
+			continue
+		}
+		fingerprints[rows[i].ID] = ModsFingerprint(snap.Mods)
+	}
+	return db.SetSetupFingerprints(ctx, fingerprints)
+}
+
+// BackfillWorldMods records, for each instance whose world's mods are unknown, its installed mods
+// as those its world was played with: right for a server that last started with them, which is
+// every server unless its mods changed since.
+func BackfillWorldMods(ctx context.Context, db *store.DB) error {
+	ids, err := db.InstancesWithoutWorldMods(ctx)
+	if err != nil || len(ids) == 0 {
+		return err
+	}
+	state := &SetupState{DB: db}
+	fingerprints := make(map[string]string, len(ids))
+	for _, id := range ids {
+		if fingerprints[id], err = state.ModsFingerprint(ctx, id); err != nil {
+			return err
+		}
+	}
+	return db.SetUnknownWorldMods(ctx, fingerprints)
+}
+
+// setupMods maps installed mod rows to a setup's mods.
+func setupMods(rows []store.InstanceMod) []SetupMod {
+	mods := make([]SetupMod, 0, len(rows))
 	for i := range rows {
 		m := &rows[i]
-		snap.Mods = append(snap.Mods, SetupMod{
+		mods = append(mods, SetupMod{
 			FullName: m.FullName, Source: m.Source.String(), Version: m.Version,
 			InstalledAs: m.InstalledAs, Side: m.Side, Enabled: m.Enabled,
 			Locked: m.Locked, FileManifest: m.FileManifest,
 		})
 	}
-	return snap, nil
+	return mods
 }
 
-func readSetupConfigs(inst *store.Instance) ([]ManifestConfig, error) {
+// captureSetupConfigs hashes the files instance.ConfigTree lists in inst's config directory,
+// apart from the RCON file, sorted by path. A file gone since the walk is left out, and a server
+// that has never started has none.
+func captureSetupConfigs(inst *store.Instance) (configs []store.SetupConfigRef, truncated bool, err error) {
 	root, err := instance.OpenConfigDir(inst.DataDir)
-	if errors.Is(err, os.ErrNotExist) {
-		return []ManifestConfig{}, nil
+	if errors.Is(err, fs.ErrNotExist) {
+		return []store.SetupConfigRef{}, false, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer func() { _ = root.Close() }()
-	entries, err := fs.ReadDir(root.FS(), ".")
+	listing, err := instance.ConfigTree(root)
 	if err != nil {
-		return nil, fmt.Errorf("read configuration directory: %w", err)
+		return nil, false, err
 	}
-	out := []ManifestConfig{}
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !CarriedConfig(name) {
+	configs = make([]store.SetupConfigRef, 0, len(listing.Files))
+	for _, f := range listing.Files {
+		if f.Path == command.ConfigFile {
 			continue
 		}
-		f, _, err := fsutil.OpenRegularIn(root, name)
-		if errors.Is(err, fsutil.ErrNotRegular) {
+		raw, _, err := fsutil.ReadRegularIn(root, f.Path)
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fsutil.ErrNotRegular) {
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("open configuration: %w", err)
+			return nil, false, fmt.Errorf("read configuration %s: %w", f.Path, err)
 		}
-		raw, readErr := io.ReadAll(io.LimitReader(f, MaxConfigSize+1))
-		_ = f.Close()
-		if readErr != nil {
-			return nil, fmt.Errorf("read configuration %s: %w", name, readErr)
-		}
-		cfg, err := setupConfigText(name, raw)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, cfg)
+		sum := sha256.Sum256(raw)
+		configs = append(configs, store.SetupConfigRef{
+			File: f.Path, SHA256: hex.EncodeToString(sum[:]), SizeBytes: int64(len(raw)),
+		})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
-	return out, nil
+	sort.Slice(configs, func(i, j int) bool { return configs[i].File < configs[j].File })
+	return configs, listing.Truncated, nil
 }
 
-func setupConfigText(name string, raw []byte) (ManifestConfig, error) {
-	if len(raw) > MaxConfigSize {
-		return ManifestConfig{}, fmt.Errorf("configuration %s exceeds the supported size", name)
+// retainSetupConfigs stores the bytes of each captured config file of inst in the blob store,
+// failing when a file no longer matches the hash it was captured with.
+func retainSetupConfigs(
+	ctx context.Context, inst *store.Instance, blobs *setupblob.Store, configs []store.SetupConfigRef,
+) error {
+	if len(configs) == 0 {
+		return nil
 	}
-	if !utf8.Valid(raw) {
-		return ManifestConfig{}, fmt.Errorf("configuration %s is not valid UTF-8 text", name)
+	root, err := instance.OpenConfigDir(inst.DataDir)
+	if err != nil {
+		return err
 	}
-	return ManifestConfig{File: name, Content: string(raw)}, nil
+	defer func() { _ = root.Close() }()
+	for _, c := range configs {
+		raw, _, err := fsutil.ReadRegularIn(root, c.File)
+		if err != nil {
+			return fmt.Errorf("read configuration %s: %w", c.File, err)
+		}
+		digest, err := blobs.PutBytes(ctx, raw)
+		if err != nil {
+			return fmt.Errorf("retain configuration %s: %w", c.File, err)
+		}
+		if digest != c.SHA256 {
+			return fmt.Errorf("configuration %s changed while the setup was saved", c.File)
+		}
+	}
+	return nil
+}
+
+// ConfigPaths is the config files s holds, by path under the config directory.
+func (s *SetupSnapshot) ConfigPaths() []string {
+	paths := make([]string, 0, len(s.Configs)+len(s.ConfigFiles))
+	for _, c := range s.Configs {
+		paths = append(paths, c.File)
+	}
+	for _, c := range s.ConfigFiles {
+		paths = append(paths, c.File)
+	}
+	return paths
+}
+
+// ScopedTo returns s with only the config files a restore of target manages: all of them for a
+// target holding the config tree, the top-level .cfg files for one saved before.
+func (s *SetupSnapshot) ScopedTo(target *SetupSnapshot) SetupSnapshot {
+	scoped := *s
+	if !target.ConfigTree {
+		scoped.ConfigFiles = slices.DeleteFunc(slices.Clone(s.ConfigFiles), func(c store.SetupConfigRef) bool {
+			return !CarriedConfig(c.File)
+		})
+	}
+	return scoped
 }
 
 func hashSetupFiles(hash io.Writer, inst *store.Instance, mods []SetupMod) error {
